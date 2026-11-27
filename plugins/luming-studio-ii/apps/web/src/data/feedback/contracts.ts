@@ -54,6 +54,7 @@ export interface FeedbackAnchor {
 export interface FeedbackMessage {
   readonly id: string;
   readonly authorId: string;
+  readonly authorName?: string;
   readonly authoredByViewer: boolean;
   readonly text: string;
   readonly createdAt: number;

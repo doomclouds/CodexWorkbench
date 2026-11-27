@@ -17,6 +17,33 @@ type CapturedExport = BoardExportSnapshot | BoardExportRejection | BoardExportSt
 const maxExportObjects = 10000;
 const maxSnapshotObjects = 20000;
 
+function captureHtmlSelection(
+  reader: WhiteboardReader,
+  board: BoardExportSnapshot['board'],
+  objectIds: readonly string[],
+): CapturedExport {
+  const [objectId] = objectIds;
+  if (objectIds.length !== 1 || !objectId) {
+    return { kind: 'rejected', reason: 'invalidSelection' };
+  }
+
+  const [object] = reader.getObjects(board.boardId, [objectId]);
+  if (!object) {
+    return { kind: 'rejected', reason: 'invalidSelection' };
+  }
+  if (object.kind !== 'html' && object.kind !== 'diagram') {
+    return { kind: 'rejected', reason: 'unsupported' };
+  }
+
+  return {
+    board,
+    objects: [object],
+    geometry: new Map([[objectId, object]]),
+    payloads: reader.getPayloads(board.boardId, [objectId]),
+    assets: new Map(),
+  };
+}
+
 function captureSnapshot(
   reader: WhiteboardReader,
   command: ExportRenderCommand,
@@ -25,8 +52,8 @@ function captureSnapshot(
   if (board.revision !== command.expectedRevision) {
     return { kind: 'stale', revision: board.revision };
   }
-  if (command.format === 'html' && command.scope.kind !== 'whole') {
-    return { kind: 'rejected', reason: 'invalidSelection' };
+  if (command.format === 'html' && command.scope.kind === 'selection') {
+    return captureHtmlSelection(reader, board, command.scope.objectIds);
   }
 
   const objects = reader.listObjects(command.boardId, maxSnapshotObjects + 1);
@@ -72,7 +99,7 @@ export function executeBoardExport(
     return snapshot;
   }
 
-  const file = renderExportFile(snapshot, command.format);
+  const file = renderExportFile(snapshot, command);
   if (file.kind === 'file' || file.kind === 'browserPng') {
     repository.read((reader) => requireAccess(reader, actor, command.boardId));
   }

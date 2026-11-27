@@ -113,12 +113,13 @@ export function readGuestSession(
   boardId: string,
   actorId: string,
   scope: SharingScope,
-): GuestSession | undefined {
-  const guest = reader.getActiveGuest(boardId, actorId, services.now());
+  now = services.now(),
+): (GuestSession & { readonly lastSeenAtMillis?: number }) | undefined {
+  const guest = reader.getActiveGuest(boardId, actorId, now);
   if (guest && (scope === 'local' || guest.scope === 'lan')) {
-    const { role, name, version } = guest;
+    const { role, name, version, lastSeenAtMillis } = guest;
 
-    return { boardId, actorId, role, name, version, ...capabilities(role) };
+    return { boardId, actorId, role, name, version, lastSeenAtMillis, ...capabilities(role) };
   }
 }
 
@@ -158,6 +159,7 @@ export function sharingView(
           name: member.name,
           role: member.role,
           removed: member.removed,
+          lastSeenAtMillis: member.lastSeenAtMillis,
           active:
             settings.enabled &&
             memberCanEnter(

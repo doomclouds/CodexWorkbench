@@ -45,6 +45,7 @@ export interface SharingWriter extends SharingReader {
   saveSettings(boardId: string, settings: ShareSettings): void;
   saveInvitation(boardId: string, invitation: Invitation): void;
   saveMember(boardId: string, member: SharingMember): void;
+  touchMember(boardId: string, actorId: string, now: number): void;
   deleteMember(boardId: string, actorId: string): void;
   saveBrowserSession(tokenHash: string, session: BrowserSession): void;
   saveReceipt(actorId: string, stored: StoredSharingReceipt): void;

@@ -6,10 +6,10 @@ import {
 } from '@modelcontextprotocol/ext-apps';
 import { OpenAIExtensions } from '@openai/mcp-extensions/app';
 import { createMcpAssets } from './assets.js';
-import { createViewPublisher, type McpViewContext } from './context.js';
+import { createViewPublisher, readMcpBoardView, type McpViewContext } from './context.js';
 import { reportMcpWarning } from './diagnostics.js';
 import { createMcpNavigation } from './navigation.js';
-import { decodeSession, isIdentifier, record } from './protocol.js';
+import { decodeSession, isIdentifier, record, StudioMcpRequestError } from './protocol.js';
 import type { HostExchange } from './protocol.js';
 import { createMcpSessions } from './session.js';
 import { createMcpTransport } from './transport.js';
@@ -71,16 +71,20 @@ function createMcpPreferences() {
   };
 }
 
-function createContext(app: App) {
+function createContext(app: App, viewId: string) {
   const formats = app.getHostCapabilities()?.updateModelContext;
   if (formats?.structuredContent) {
-    return createViewPublisher(createMcpCommandId(), (structuredContent) =>
+    return createViewPublisher(viewId, (structuredContent) =>
       app.updateModelContext({ structuredContent }),
     );
   }
   if (formats?.text) {
-    return createViewPublisher(createMcpCommandId(), (summary) =>
-      app.updateModelContext({ content: [{ type: 'text', text: JSON.stringify(summary) }] }),
+    return createViewPublisher(viewId, (summary) =>
+      app.updateModelContext({
+        content: [
+          { type: 'text', text: JSON.stringify(summary), annotations: { audience: ['assistant'] } },
+        ],
+      }),
     );
   }
 }
@@ -225,10 +229,11 @@ export async function connectMcpApp(onClosed: () => void) {
     const value = record(result.structuredContent);
     const data = openingBoard(value?.data);
     const ignored = signal.aborted || result.isError === true || value?.ok !== true;
-    if (ignored || !data.valid || !route(data.boardId)) {
+    if (ignored || !data.valid) {
       return;
     }
 
+    route(data.boardId);
     const lease = decodeSession(result, data.boardId);
     if (lease) {
       sessions.accept(lease);
@@ -256,8 +261,13 @@ export async function connectMcpApp(onClosed: () => void) {
 
   preferences.receive(app.getHostContext());
   preferFullscreen(app);
-  publish = createContext(app);
-  publish?.update(null);
+  const restoredView = readMcpBoardView(extensions.modelContext?.getCurrent());
+  publish = createContext(app, restoredView?.viewId ?? createMcpCommandId());
+  if (restoredView) {
+    navigation.restore(restoredView);
+  } else {
+    publish?.update(null);
+  }
   ready = true;
 
   return {
@@ -267,6 +277,14 @@ export async function connectMcpApp(onClosed: () => void) {
     postProtobuf: transport.postProtobuf,
     postArchive: transport.postArchive,
     attachReviewSource: createReviewAttachment(app, extensions, navigation, signal),
+    handleBoardLoadFailure(boardId: string, error: unknown) {
+      const unavailable =
+        error instanceof StudioMcpRequestError && (error.status === 403 || error.status === 404);
+
+      if (unavailable && navigation.discardRestoredView(boardId)) {
+        publish?.update(null);
+      }
+    },
     updateViewContext: (context: McpViewContext | undefined) => {
       publish?.update(context ?? null);
     },

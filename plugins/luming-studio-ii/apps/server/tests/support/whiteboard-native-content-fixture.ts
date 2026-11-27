@@ -11,7 +11,11 @@ export const imageId = 'native-image';
 export const lockedImageId = 'native-locked-image';
 export const assetPath = '/studio-archive-assets/' + mainBoardId + '/crop-asset';
 
-export function seedNativeObjects(path: string, tableLocked: boolean) {
+export function seedNativeObjects(
+  path: string,
+  tableLocked: boolean,
+  embedKind: 'html' | 'diagram' = 'html',
+) {
   const database = openSqliteDatabase(path);
   try {
     database.write((connection) => {
@@ -21,7 +25,7 @@ export function seedNativeObjects(path: string, tableLocked: boolean) {
       `);
       const objects = [
         [tableId, 'table', 'Tasks', 3, tableLocked ? 1 : 0, null],
-        [embedId, 'html', 'Demo', 4, 0, null],
+        [embedId, embedKind, 'Demo', 4, 0, null],
         [chartId, 'chart', 'Chart', 5, 0, null],
         [stickerId, 'sticker', '爱心', 6, 0, null],
         [imageId, 'image', 'Sample', 7, 0, null],

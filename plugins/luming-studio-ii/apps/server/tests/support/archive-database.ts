@@ -2,6 +2,30 @@ import { openSqliteDatabase } from '../../src/infrastructure/platform/index.js';
 
 export const archiveReceiptWriteFailure = 'Injected archive receipt write failure';
 
+export function replaceArchiveAssetBytes(
+  path: string,
+  boardId: string,
+  assetId: string,
+  byteLength: number,
+): void {
+  const database = openSqliteDatabase(path);
+  try {
+    database.write((connection) => {
+      const update = connection
+        .prepare(
+          'UPDATE board_archive_assets SET bytes = zeroblob(?) WHERE board_id = ? AND asset_id = ?',
+        )
+        .run(byteLength, boardId, assetId);
+
+      if (update.changes !== 1) {
+        throw new Error('Expected an existing archive asset.');
+      }
+    });
+  } finally {
+    database.close();
+  }
+}
+
 export function rejectArchiveReceiptInserts(path: string): void {
   const database = openSqliteDatabase(path);
   try {

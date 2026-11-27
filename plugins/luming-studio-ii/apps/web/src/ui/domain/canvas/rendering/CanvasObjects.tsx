@@ -1,4 +1,4 @@
-import { memo, useMemo } from 'react';
+import { memo, useMemo, useRef } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 
 import { builtInFrame, CanvasObjectContent } from '../adapters/index.js';
@@ -16,6 +16,7 @@ import type {
 } from '../contracts.js';
 import type { ProjectedCanvasObject } from '../scene/index.js';
 import { CanvasRegisteredBody } from './CanvasRegisteredBody.js';
+import { useContentTracking } from './native-content-locations.js';
 import './CanvasObjects.css';
 
 interface CanvasDraftView {
@@ -49,6 +50,7 @@ interface CanvasObjectsProps {
   nativeSourceRequest?: CanvasProps['nativeSourceRequest'];
   annotationActive?: CanvasProps['annotationActive'];
   onAnnotateContent?: CanvasProps['onAnnotateContent'];
+  contentTracking?: CanvasProps['contentTracking'];
   isLocked?: (id: string) => boolean;
   canWriteObject?: CanvasProps['canWriteObject'];
   onObjectIntent?: CanvasProps['onObjectIntent'];
@@ -85,6 +87,7 @@ interface CanvasRenderedObjectProps {
   nativeSourceRequest?: CanvasObjectsProps['nativeSourceRequest'];
   annotationActive?: CanvasObjectsProps['annotationActive'];
   onAnnotateContent?: CanvasObjectsProps['onAnnotateContent'];
+  contentTracking?: CanvasObjectViewProps['contentTracking'];
   onObjectIntent?: CanvasObjectsProps['onObjectIntent'];
   onOpenPresentation?: CanvasObjectsProps['onOpenPresentation'];
   onClosePresentation?: CanvasObjectsProps['onClosePresentation'];
@@ -92,6 +95,8 @@ interface CanvasRenderedObjectProps {
   onObjectRetentionChange?: CanvasObjectsProps['onObjectRetentionChange'];
   zoom: number;
 }
+
+const emptyContentTracking: NonNullable<CanvasProps['contentTracking']> = new Map();
 
 interface CanvasObjectStyle extends CSSProperties {
   '--studio-ui-canvas-object-fill'?: string;
@@ -214,6 +219,7 @@ const CanvasObjectView = memo(
     nativeSourceRequest,
     annotationActive,
     onAnnotateContent,
+    contentTracking,
     onObjectIntent,
     onOpenPresentation,
     onClosePresentation,
@@ -225,7 +231,15 @@ const CanvasObjectView = memo(
     const transparent = object.kind === 'section' && object.transparent;
     const mode = extension?.capabilities.content ?? 'passive';
     const View = extension?.View;
-    const bodySelected = [singleSelected, focusedReading, expanded].some(Boolean);
+    const root = useRef<HTMLDivElement>(null);
+    const { embedded, revealing } = useContentTracking(root, {
+      contentTracking,
+      mode,
+      geometry,
+      zoom,
+      focusedReading,
+    });
+    const bodySelected = [singleSelected, focusedReading, expanded, revealing].some(Boolean);
     const nativeActive = !View || nativeBodyActive(object.kind, geometry, zoom, bodySelected);
     const { interactive, blockedEmbed, inert } = bodyInteraction(
       mode,
@@ -262,6 +276,7 @@ const CanvasObjectView = memo(
         nativeSourceRequest={nativeSourceRequest}
         annotationActive={annotationActive}
         onAnnotateContent={onAnnotateContent}
+        contentTracking={embedded}
         onOpenPresentation={onOpenPresentation}
         onClosePresentation={onClosePresentation}
         onObjectIntent={blockedEmbed ? undefined : onObjectIntent}
@@ -274,6 +289,7 @@ const CanvasObjectView = memo(
 
     return (
       <div
+        ref={root}
         className={'studio-ui-canvas-object studio-ui-canvas-object--' + object.kind}
         data-canvas-object={id}
         data-canvas-draft={draft ? '' : undefined}
@@ -348,6 +364,7 @@ export function CanvasObjects({
   nativeSourceRequest,
   annotationActive,
   onAnnotateContent,
+  contentTracking = emptyContentTracking,
   isLocked,
   canWriteObject = () => true,
   onObjectIntent,
@@ -402,6 +419,7 @@ export function CanvasObjects({
         nativeSourceRequest={nativeSource}
         annotationActive={annotationActive}
         onAnnotateContent={viewing && !focused ? undefined : onAnnotateContent}
+        contentTracking={contentTracking.get(id)}
         onObjectIntent={canWriteObject(kind) ? onObjectIntent : undefined}
         onOpenPresentation={onOpenPresentation}
         onClosePresentation={expanded || focused ? onClosePresentation : undefined}

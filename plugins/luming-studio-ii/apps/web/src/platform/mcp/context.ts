@@ -1,16 +1,82 @@
+import type { OpenAIModelContextHostState } from '@openai/mcp-extensions/app';
 import { reportMcpWarning } from './diagnostics.js';
-import { isIdentifier } from './protocol.js';
+import { isIdentifier, record } from './protocol.js';
+
+interface McpViewport {
+  readonly x: number;
+  readonly y: number;
+  readonly zoom: number;
+}
 
 export interface McpViewContext {
   readonly boardId: string;
   readonly selectedIds: readonly string[];
-  readonly viewport: { readonly x: number; readonly y: number; readonly zoom: number };
+  readonly viewport: McpViewport;
+  readonly focusedObjectId?: string;
+  readonly returnViewport?: McpViewport;
+}
+
+export interface McpRestoredView extends Omit<McpViewContext, 'viewport'> {
+  readonly viewId: string;
+  readonly viewport?: McpViewport;
 }
 
 type McpViewSummary = Readonly<Record<string, unknown>>;
 
-const maximumSelectedIds = 64;
+const appId = 'luming-studio-ii';
+const maximumSelectedIds = 40;
+const maximumTextLength = 6 * 1024;
+const maximumCoordinate = 1_000_000_000;
 const contextInterval = 150;
+
+function contextValue(host: OpenAIModelContextHostState | undefined) {
+  if (host?.structuredContent) {
+    return host.structuredContent;
+  }
+
+  const block = host?.content?.find(({ type }) => type === 'text');
+  if (block?.type !== 'text' || block.text.length > maximumTextLength) {
+    return;
+  }
+
+  try {
+    return record(JSON.parse(block.text));
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) {
+      throw error;
+    }
+
+    reportMcpWarning('宿主上次保存的白板视图无法读取。', error);
+  }
+}
+
+export function readMcpBoardView(
+  host: OpenAIModelContextHostState | undefined,
+): McpRestoredView | undefined {
+  const context = contextValue(host);
+  if (context?.appId !== appId || context.panelOpen !== true) {
+    return;
+  }
+
+  const { boardId, viewId, focusedObjectId, selectedIds } = context;
+  if (!isIdentifier(boardId) || !isIdentifier(viewId)) {
+    return;
+  }
+
+  const selected = Array.isArray(selectedIds)
+    ? [...new Set(selectedIds.slice(0, maximumSelectedIds).filter(isIdentifier))]
+    : [];
+  const focus = isIdentifier(focusedObjectId) ? focusedObjectId : undefined;
+
+  return {
+    boardId,
+    viewId,
+    selectedIds: selected,
+    viewport: readViewport(context.viewport),
+    focusedObjectId: focus,
+    returnViewport: focus ? readViewport(context.returnViewport) : undefined,
+  };
+}
 
 export function createViewPublisher(
   viewId: string,
@@ -73,14 +139,18 @@ export function createViewPublisher(
     const ids =
       boardId && context ? Array.from(new Set(context.selectedIds.filter(isIdentifier))) : [];
     const viewport = boardId && context ? readViewport(context.viewport) : undefined;
+    const focus =
+      boardId && isIdentifier(context?.focusedObjectId) ? context.focusedObjectId : undefined;
     const next = {
-      appId: 'luming-studio-ii',
+      appId,
       panelOpen: true,
       boardId,
       viewId,
       selectedIds: ids.slice(0, maximumSelectedIds),
       selectedCount: ids.length,
       viewport,
+      focusedObjectId: focus,
+      returnViewport: focus ? readViewport(context?.returnViewport) : undefined,
     };
     const key = JSON.stringify(next);
     if (key !== latestKey) {
@@ -93,8 +163,19 @@ export function createViewPublisher(
   return { update, close };
 }
 
-function readViewport({ x, y, zoom }: McpViewContext['viewport']) {
-  if ([x, y, zoom].every(Number.isFinite) && zoom > 0) {
+function isCoordinate(value: unknown): value is number {
+  return typeof value === 'number' && Math.abs(value) <= maximumCoordinate;
+}
+
+function readViewport(value: unknown): McpViewport | undefined {
+  const candidate = record(value);
+  if (!candidate) {
+    return;
+  }
+
+  const { x, y, zoom } = candidate;
+  const validZoom = typeof zoom === 'number' && zoom >= 0.05 && zoom <= 8;
+  if (isCoordinate(x) && isCoordinate(y) && validZoom) {
     return { x, y, zoom };
   }
 }

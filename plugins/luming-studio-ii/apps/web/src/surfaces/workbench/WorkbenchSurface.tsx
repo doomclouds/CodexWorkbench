@@ -12,6 +12,7 @@ import {
   createCatalogDirectory,
   type BoardCatalogService,
   type CatalogBoardSummary,
+  type CatalogDirectory,
   type CatalogDirectorySnapshot,
   type CatalogManagementService,
 } from '../../data/catalog/index.js';
@@ -38,6 +39,7 @@ interface WorkbenchArchiveImport {
 
 export interface WorkbenchSurfaceProps {
   readonly catalog: BoardCatalogService;
+  readonly directory?: CatalogDirectory;
   readonly createCommandId: () => string;
   readonly onOpenBoard: (boardId: string) => void;
   readonly preferences: WorkbenchPreferences;
@@ -50,7 +52,6 @@ export interface WorkbenchSurfaceProps {
   readonly readRouteGeneration?: () => number;
 }
 
-type CatalogDirectory = ReturnType<typeof createCatalogDirectory>;
 type BoardCreation = ReturnType<typeof useBoardCreation>;
 
 interface CatalogResultsProps {
@@ -319,6 +320,7 @@ function WorkbenchTitle({
 
 export function WorkbenchSurface({
   catalog,
+  directory: providedDirectory,
   createCommandId,
   onOpenBoard,
   preferences,
@@ -330,7 +332,10 @@ export function WorkbenchSurface({
   renderThumbnail,
   readRouteGeneration,
 }: WorkbenchSurfaceProps) {
-  const directory = useMemo(() => createCatalogDirectory(catalog), [catalog]);
+  const directory = useMemo(
+    () => providedDirectory ?? createCatalogDirectory(catalog),
+    [catalog, providedDirectory],
+  );
   const snapshot = useSyncExternalStore(directory.subscribe, directory.getSnapshot);
   const creation = useBoardCreation({
     service: catalog,

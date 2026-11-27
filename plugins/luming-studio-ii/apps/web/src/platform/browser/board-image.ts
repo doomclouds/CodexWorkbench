@@ -1,5 +1,4 @@
-const maximumFileBytes = 8 * 1024 * 1024;
-const maximumSvgBytes = 1024 * 1024;
+export const maximumImageBytes = 20 * 1024 * 1024;
 const maximumEdge = 16_384;
 const maximumPixels = 32 * 1024 * 1024;
 const pngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
@@ -155,8 +154,13 @@ function gifDimensions(view: DataView): ImageDimensions | undefined {
 }
 
 function svgDimensions(buffer: ArrayBuffer): ImageDimensions | undefined {
+  const beginning = new TextDecoder().decode(buffer.slice(0, 4096)).trimStart();
+  if (beginning && !beginning.startsWith('<')) {
+    return undefined;
+  }
+
   const header = new TextDecoder()
-    .decode(buffer.slice(0, 4096))
+    .decode(buffer)
     .replace(/^\s*<\?xml\b[^?]*\?>/u, '')
     .replace(/<!--[\s\S]*?-->/gu, '');
   const attributes = /^\s*<svg\b([^>]*)>/u.exec(header)?.[1];
@@ -246,8 +250,8 @@ export async function prepareBoardImage(
   file: File,
   signal?: AbortSignal,
 ): Promise<PreparedBoardImage> {
-  if (file.size > maximumFileBytes) {
-    throw new Error('图片大小不能超过 8 MiB。');
+  if (file.size > maximumImageBytes) {
+    throw new Error('图片大小不能超过 20 MiB。');
   }
 
   signal?.throwIfAborted();
@@ -256,10 +260,6 @@ export async function prepareBoardImage(
 
   const svg = svgDimensions(buffer);
   if (svg) {
-    if (buffer.byteLength > maximumSvgBytes) {
-      throw new Error('SVG 图片大小不能超过 1 MiB。');
-    }
-
     verifyDimensions(svg);
 
     return {

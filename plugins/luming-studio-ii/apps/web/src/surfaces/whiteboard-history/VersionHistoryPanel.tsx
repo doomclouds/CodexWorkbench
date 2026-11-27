@@ -36,7 +36,7 @@ interface VersionHistoryPanelProps {
   readonly canRestore: boolean;
   readonly busy: boolean;
   readonly onClose: () => void;
-  readonly onPreview: (scene: WhiteboardScene) => void;
+  readonly onPreview: (scene: WhiteboardScene, trigger: HTMLButtonElement) => void;
   readonly onReturnToCurrent: () => void;
   readonly onRequestRestore: (
     revision: bigint,
@@ -67,6 +67,34 @@ const noVersions: readonly BoardHistoryVersion[] = [];
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
+}
+
+async function refreshVersions(
+  service: BoardHistoryService,
+  boardId: string,
+  before: bigint | undefined,
+  oldestLoaded: bigint | undefined,
+  signal: AbortSignal,
+): Promise<BoardHistoryPage> {
+  const first = await service.listVersions(boardId, before, signal);
+  if (before !== undefined || oldestLoaded === undefined) {
+    return first;
+  }
+
+  const versions = [...first.versions];
+  let cursor = first.nextBeforeRevision;
+  while (cursor !== undefined && cursor > oldestLoaded) {
+    signal.throwIfAborted();
+    const next = await service.listVersions(boardId, cursor, signal);
+    if (next.nextBeforeRevision !== undefined && next.nextBeforeRevision >= cursor) {
+      throw new Error('版本历史未能继续加载。');
+    }
+
+    versions.push(...next.versions);
+    cursor = next.nextBeforeRevision;
+  }
+
+  return { ...first, versions, nextBeforeRevision: cursor };
 }
 
 async function retainedChanges(
@@ -275,11 +303,12 @@ export function VersionHistoryPanel({
     pendingList.current = controller;
     setLoading(true);
     setError(undefined);
+    const oldestLoaded = page?.versions.at(-1)?.revision;
 
     Promise.resolve()
       .then(() => {
         signal.throwIfAborted();
-        return service.listVersions(boardId, before, signal);
+        return refreshVersions(service, boardId, before, oldestLoaded, signal);
       })
       .then((result) => {
         signal.throwIfAborted();
@@ -335,7 +364,7 @@ export function VersionHistoryPanel({
     }
   }
 
-  function handlePreview(revisionToOpen: bigint) {
+  function handlePreview(revisionToOpen: bigint, trigger: HTMLButtonElement) {
     pendingSelection.current?.abort();
     const controller = new AbortController();
     const { signal } = controller;
@@ -354,7 +383,7 @@ export function VersionHistoryPanel({
           throw new Error('所选版本已无法预览，请刷新版本历史。');
         }
 
-        onPreview(scene);
+        onPreview(scene, trigger);
       })
       .catch((cause: unknown) => {
         if (!signal.aborted) {
@@ -374,6 +403,13 @@ export function VersionHistoryPanel({
     pendingList.current?.abort();
     pendingChanges.current?.abort();
     onClose();
+  }
+
+  function handleReturnToCurrent() {
+    pendingSelection.current?.abort();
+    pendingSelection.current = undefined;
+    setLoadingRevision(undefined);
+    onReturnToCurrent();
   }
 
   function handleReturnFromInspection() {
@@ -445,7 +481,7 @@ export function VersionHistoryPanel({
                   type="button"
                   className="whiteboard-history__link"
                   disabled={previewed || busy || loadingRevision === entry.revision}
-                  onClick={() => handlePreview(entry.revision)}
+                  onClick={(event) => handlePreview(entry.revision, event.currentTarget)}
                 >
                   {previewed ? '正在预览' : '预览版本'}
                 </button>
@@ -481,7 +517,13 @@ export function VersionHistoryPanel({
       align="end"
       initialFocus={() => closeButton.current?.focus({ preventScroll: true })}
       restoreFocus={() => anchor.focus({ preventScroll: true })}
-      onRequestClose={handleClose}
+      onRequestClose={(reason) => {
+        if (reason === 'escape' && previewRevision !== undefined) {
+          handleReturnToCurrent();
+        } else {
+          handleClose();
+        }
+      }}
     >
       <section className="whiteboard-history" ref={panel}>
         {inspection ? (
@@ -516,7 +558,7 @@ export function VersionHistoryPanel({
               previewing={previewRevision !== undefined}
               onClose={handleClose}
               onRefresh={() => loadPage()}
-              onReturnToCurrent={onReturnToCurrent}
+              onReturnToCurrent={handleReturnToCurrent}
             />
             {recovery}
             {error && <StatusText message={error} tone="error" announcement="polite" />}

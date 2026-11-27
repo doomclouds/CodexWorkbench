@@ -6,6 +6,8 @@ import "luming/studio/v1/whiteboard_scene.proto";
 
 service BoardRoomService {
   rpc GetBoardRoom(GetBoardRoomRequest) returns (GetBoardRoomResponse);
+  rpc WaitBoardRoomEvents(WaitBoardRoomEventsRequest) returns (WaitBoardRoomEventsResponse);
+  rpc StreamBoardRoomEvents(StreamBoardRoomEventsRequest) returns (stream StreamBoardRoomEventsResponse);
   rpc UpdateBoardPresence(UpdateBoardPresenceRequest) returns (UpdateBoardPresenceResponse);
   rpc LeaveBoardPresence(LeaveBoardPresenceRequest) returns (LeaveBoardPresenceResponse);
   rpc ChangeBoardTimer(ChangeBoardTimerRequest) returns (ChangeBoardTimerResponse);
@@ -18,6 +20,33 @@ message GetBoardRoomRequest {
 }
 
 message GetBoardRoomResponse {
+  BoardRoomEvent event = 1;
+}
+
+message BoardRoomCursor {
+  string room_instance_id = 1;
+  optional uint64 sequence = 2;
+}
+
+message WaitBoardRoomEventsRequest {
+  string board_id = 1;
+  string view_id = 2;
+  BoardRoomCursor after = 3;
+}
+
+message WaitBoardRoomEventsResponse {
+  // The first response or an expired cursor returns a snapshot. An idle wait returns no events.
+  repeated BoardRoomEvent events = 1;
+}
+
+message StreamBoardRoomEventsRequest {
+  string board_id = 1;
+  string view_id = 2;
+  // An omitted or expired cursor starts the stream with a snapshot.
+  BoardRoomCursor after = 3;
+}
+
+message StreamBoardRoomEventsResponse {
   BoardRoomEvent event = 1;
 }
 
@@ -63,6 +92,7 @@ message BoardRoomParticipant {
   bool following = 8;
   BoardRoomGesturePreview gesture = 9;
   optional uint64 gesture_expires_at_unix_ms = 10;
+  optional uint64 activity_at_unix_ms = 11;
 }
 
 message UpdateBoardPresenceRequest {
@@ -97,6 +127,8 @@ message BoardRoomSnapshot {
   BoardRoomTimer timer = 5;
   repeated RoomAgentWorkspace agent_workspaces = 6;
   bool can_release_agent_activity = 7;
+  optional uint64 feedback_version = 8;
+  optional uint64 suggestions_version = 9;
 }
 
 message BoardRoomParticipants {
@@ -114,6 +146,10 @@ message BoardRoomContentChanged {
 
 message BoardRoomAccessLost {}
 
+message BoardRoomDiscussionChanged {
+  optional uint64 version = 1;
+}
+
 message BoardRoomEvent {
   string board_id = 1;
   string room_instance_id = 2;
@@ -126,6 +162,8 @@ message BoardRoomEvent {
     BoardRoomContentChanged content_changed = 8;
     BoardRoomAccessLost access_lost = 9;
     RoomAgentWorkspaceList agent_workspaces = 10;
+    BoardRoomDiscussionChanged feedback_changed = 11;
+    BoardRoomDiscussionChanged suggestions_changed = 12;
   }
 }
 

@@ -51,7 +51,7 @@ const type = 'application/protobuf';
 const timeout = 5_000;
 const { createBoard, listBoards, manageBoard } = BoardCatalogService.method;
 const { getBoardScene } = WhiteboardService.method;
-const { applyFeedback } = FeedbackService.method;
+const { applyFeedback, listThreads } = FeedbackService.method;
 const { attachBoardImage } = BoardEditService.method;
 const share = BoardSharingService.method;
 const { updateBoardPresence, leaveBoardPresence } = BoardRoomService.method;
@@ -312,11 +312,50 @@ test('scopes cookie sessions, access tiers and asset bytes to each whiteboard', 
       },
     },
   };
+  const roomBefore = await decodeGuest(
+    await sendGuest('lan', getBoardRoom, { boardId }, { cookie }),
+    getBoardRoom.output,
+  );
+  expect(roomBefore.event?.payload).toMatchObject({
+    case: 'snapshot',
+    value: { feedbackVersion: 0n },
+  });
+  expect(roomBefore.event?.payload.value).not.toHaveProperty('suggestionsVersion');
   expect((await sendGuest('lan', applyFeedback, feedback, { cookie })).status).toBe(403);
   const commented = await sendGuest('lan', applyFeedback, feedback, { cookie: commenterCookie });
   expect((await decodeGuest(commented, applyFeedback.output)).receipt?.outcome.case).toBe(
     'applied',
   );
+  const replay = await sendGuest('lan', applyFeedback, feedback, { cookie: commenterCookie });
+  expect((await decodeGuest(replay, applyFeedback.output)).receipt?.outcome.case).toBe('applied');
+  const roomAfter = await decodeGuest(
+    await sendGuest('lan', getBoardRoom, { boardId }, { cookie }),
+    getBoardRoom.output,
+  );
+  expect(roomAfter.event?.payload).toMatchObject({
+    case: 'snapshot',
+    value: { feedbackVersion: 1n },
+  });
+  expect(roomAfter.event?.payload.value).not.toHaveProperty('suggestionsVersion');
+  expect(roomAfter.event?.sequence).toBe((roomBefore.event?.sequence ?? 0n) + 1n);
+  const externalThreads = await sendGuest(
+    'lan',
+    listThreads,
+    { boardId, pageSize: 10 },
+    { cookie },
+  );
+  expect((await decodeGuest(externalThreads, listThreads.output)).threads).toMatchObject([
+    {
+      first: {
+        authorName: 'Commenter',
+        authoredByViewer: false,
+        text: feedback.operation.value.text,
+      },
+    },
+  ]);
+  const member = (await view(boardId)).members.find(({ name }) => name === 'Commenter');
+  expect(member?.online).toBe(false);
+  expect(member?.lastSeenAtMillis).toBeGreaterThan(0n);
 
   const stored = storedSharingCredentials(server.databasePath);
   expect(stored.browsers).toHaveLength(3);
@@ -458,6 +497,32 @@ test('keeps sharing membership and room presence distinct in the owner projectio
   );
   expect((await decodeGuest(joined, updateBoardPresence.output)).accepted).toBe(true);
   expect((await view(boardId)).members).toMatchObject([{ actorId: session.actorId, online: true }]);
+
+  const localView = { boardId, viewId: 'owner-tab', sequence: 1n };
+  expect((await callWhiteboard(server.owner, owner, updateBoardPresence, localView)).accepted).toBe(
+    true,
+  );
+  const ownerRoom = await callWhiteboard(server.owner, owner, getBoardRoom, { boardId });
+  const guestRoom = await decodeGuest(
+    await sendGuest('lan', getBoardRoom, { boardId }, { cookie }),
+    getBoardRoom.output,
+  );
+  const members = [
+    { key: { actorId: session.actorId, viewId }, role: 'viewer', displayName: 'Online guest' },
+    {
+      key: { actorId: owner, viewId: localView.viewId },
+      role: 'owner',
+      displayName: 'Studio Test Owner',
+    },
+  ];
+  expect(ownerRoom.event?.payload).toMatchObject({
+    case: 'snapshot',
+    value: { actorId: owner, participants: members },
+  });
+  expect(guestRoom.event?.payload).toMatchObject({
+    case: 'snapshot',
+    value: { actorId: session.actorId, participants: members },
+  });
 
   const guest = await sendGuest('lan', share.getBoardSharing, { boardId }, { cookie });
   const guestSharing = (await decodeGuest(guest, share.getBoardSharing.output)).sharing;

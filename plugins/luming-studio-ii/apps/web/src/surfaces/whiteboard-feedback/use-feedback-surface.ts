@@ -8,10 +8,11 @@ import type {
 } from '../../data/feedback/index.js';
 import type { FeedbackCanvasObject, WhiteboardFeedbackSurfaceProps } from './contracts.js';
 import type { CreateDraft } from './FeedbackPanelContent.js';
-import { locateAnchor, locateDraft, selectionTarget, targetAt } from './geometry.js';
+import { locateDraft, selectionTarget, targetAt } from './geometry.js';
 import { useFeedbackDrafts } from './thread-draft.js';
 import { useFeedbackAttachment } from './use-feedback-attachment.js';
 import { useFeedbackCommand } from './use-feedback-command.js';
+import { useFeedbackContentLocations } from './use-feedback-content-locations.js';
 import { useFeedbackQueries } from './use-feedback-queries.js';
 import { useFeedbackShortcut } from './use-feedback-shortcut.js';
 
@@ -38,20 +39,6 @@ function useFeedbackSelection(panelOpen: boolean, annotating: boolean) {
   }
 
   return { selection, setSelection };
-}
-
-function locateThread(
-  selection: SelectedThread | undefined,
-  thread: FeedbackThread | undefined,
-  objects: ReadonlyMap<string, FeedbackCanvasObject>,
-  contentPoints?: ReadonlyMap<string, FeedbackPoint>,
-) {
-  const anchor = thread?.anchor ?? selection?.anchor;
-  const contentPoint = selection && contentPoints?.get(selection.id);
-
-  return anchor
-    ? locateAnchor(anchor, objects, contentPoint)
-    : selection?.draftTarget && locateDraft(selection.draftTarget, objects);
 }
 
 function draftLabel(target: FeedbackTarget, objects: ReadonlyMap<string, FeedbackCanvasObject>) {
@@ -92,6 +79,7 @@ function useHostPoint({ request, hostPicking, annotating, canWrite, onPick }: Ho
 
 export function useFeedbackSurface({
   boardId,
+  updateKey,
   canEdit,
   viewing,
   objects,
@@ -112,6 +100,9 @@ export function useFeedbackSurface({
   focusedObjectId,
   contentAnnotationRequest,
   contentPoints,
+  contentLocations,
+  onContentLocationRequests,
+  focusContentObject,
   singleKeys = true,
 }: SurfaceStateOptions) {
   const [localAnnotation, setLocalAnnotation] = useState(false);
@@ -133,10 +124,24 @@ export function useFeedbackSurface({
     useFeedbackDrafts(activeThreadId);
   const queries = useFeedbackQueries({
     boardId,
+    updateKey,
     enabled: !viewing,
     panelOpen,
     service,
     threadId: activeThreadId,
+  });
+  const contentLocation = useFeedbackContentLocations({
+    viewing,
+    contentPoints,
+    contentLocations,
+    onContentLocationRequests,
+    focusWorldPoint,
+    focusContentObject,
+    focusedObjectId,
+    objects: objectsById,
+    pinnedThreads: queries.pinnedThreads,
+    selection,
+    detail: queries.detail.page,
   });
   const canWrite = canEdit && queries.canWrite;
   const attachment = useFeedbackAttachment({
@@ -200,6 +205,7 @@ export function useFeedbackSurface({
 
   function handleClosePanel() {
     if (selection?.placement === 'list' && !blocked) {
+      contentLocation.cancel();
       setSelection(undefined);
     }
 
@@ -211,6 +217,7 @@ export function useFeedbackSurface({
       return;
     }
 
+    contentLocation.cancel();
     setSelection(undefined);
     setDraftOpen(composing);
     changeAnnotation(true);
@@ -219,6 +226,7 @@ export function useFeedbackSurface({
 
   function stopPicking() {
     if (!blocked) {
+      contentLocation.cancel();
       changeAnnotation(false);
       setSelection(undefined);
     }
@@ -226,6 +234,7 @@ export function useFeedbackSurface({
 
   function handleCloseThread() {
     if (!blocked) {
+      contentLocation.cancel();
       setSelection(undefined);
     }
   }
@@ -273,6 +282,7 @@ export function useFeedbackSurface({
       });
     }
 
+    contentLocation.cancel();
     setSelection(undefined);
     setDraftOpen(true);
     changeAnnotation(true);
@@ -365,24 +375,12 @@ export function useFeedbackSurface({
     triggerPin.current = trigger;
     changeAnnotation(true);
     if (trigger) {
+      contentLocation.cancel();
       setSelection({ id: thread.id, placement: 'pin', anchor: thread.anchor });
       onPanelOpenChange(false);
     } else {
       setSelection({ id: thread.id, placement: 'list', anchor: thread.anchor });
-      focusWorldPoint?.(locateAnchor(thread.anchor, objectsById, contentPoints?.get(thread.id)));
-    }
-  }
-
-  const threadPoint = locateThread(
-    selection,
-    queries.detail.page?.thread,
-    objectsById,
-    contentPoints,
-  );
-
-  function handleLocateCurrentThread() {
-    if (threadPoint) {
-      focusWorldPoint?.(threadPoint);
+      contentLocation.focusThread(thread);
     }
   }
 
@@ -419,7 +417,7 @@ export function useFeedbackSurface({
     createDraft,
     threadDraft,
     draftThreadIds,
-    threadPoint,
+    threadPoint: contentLocation.threadPoint,
     blocked,
     picking,
     canWrite,
@@ -432,7 +430,7 @@ export function useFeedbackSurface({
     handleDraftOutside,
     handleSetThreadDraft,
     handleOpenThread,
-    handleLocateCurrentThread,
+    handleLocateCurrentThread: contentLocation.focusSelected,
     handlePickLocation,
     stopPicking,
     setCreateDraft,

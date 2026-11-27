@@ -59,11 +59,15 @@ export interface WhiteboardPageProps {
   readonly reviewSourceMode?: 'context' | 'copy';
   readonly sharingService?: BoardSharingService;
   readonly copyShareLink?: (url: string) => Promise<void>;
+  readonly theme?: ComponentProps<typeof BoardSharingSurface>['theme'];
+  readonly lanSharing?: boolean;
   readonly consumeShareEntry?: () => boolean;
   readonly commentAccess?: boolean;
   readonly room?: BoardRoomSession;
   readonly onRoomAccessLost?: () => void;
   readonly onViewContext?: WhiteboardEditorFeatures['onViewContext'];
+  readonly fitOnMount?: boolean;
+  readonly initialBoardView?: WhiteboardEditorFeatures['initialBoardView'];
   readonly prepareImage?: ComponentProps<typeof WhiteboardMediaSurface>['prepareImage'];
   readonly prepareVideo?: ComponentProps<typeof WhiteboardMediaSurface>['prepareVideo'];
   readonly renameBoard?: WhiteboardEditorSurfaceProps['renameBoard'];
@@ -95,6 +99,8 @@ function shareAndExport({
   createCommandId,
   exportBoard,
   downloadExport,
+  theme,
+  lanSharing,
 }: WhiteboardPageProps): WhiteboardEditorFeatures['renderExport'] {
   if (!sharingService || !copyShareLink) {
     return exportBoard && downloadExport
@@ -112,6 +118,8 @@ function shareAndExport({
       service={sharingService}
       createCommandId={createCommandId}
       copyLink={copyShareLink}
+      theme={theme}
+      onLanSharingChange={lanSharing === undefined ? frame.onLanSharingChange : undefined}
       onRequestClose={frame.onRequestClose}
       restoreFocus={frame.restoreFocus}
       exportContent={
@@ -177,6 +185,8 @@ function whiteboardFeatures(props: WhiteboardPageProps): WhiteboardEditorFeature
 
   return {
     ...roomFeatures(props),
+    fitOnMount: props.fitOnMount,
+    initialBoardView: props.initialBoardView,
     ...documentImages(props),
     Viewing: WhiteboardViewingSurface,
     editService,
@@ -185,6 +195,7 @@ function whiteboardFeatures(props: WhiteboardPageProps): WhiteboardEditorFeature
     clipboard,
     localDrafts,
     commentAccess,
+    lanSharing: props.lanSharing,
     consumeShareEntry: props.consumeShareEntry,
     renderExport: shareAndExport(props),
     renderHistory:
@@ -232,6 +243,7 @@ function whiteboardFeatures(props: WhiteboardPageProps): WhiteboardEditorFeature
             anchor={frame.anchor}
             inline={frame.inline}
             boardId={frame.boardId}
+            updateKey={frame.updateKey}
             revision={frame.revision}
             service={suggestions}
             createCommandId={createCommandId}

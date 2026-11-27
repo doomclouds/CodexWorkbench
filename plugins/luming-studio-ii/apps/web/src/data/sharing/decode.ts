@@ -148,17 +148,28 @@ function readLinks(
 function readMembers(members: readonly WireSharingMember[]): readonly SharingMember[] {
   const seen = new Set<string>();
 
-  return members.map(({ actorId, name, role: rawRole, removed, active, online }) => {
-    const role = roles.get(rawRole);
-    const hasIdentity = actorId.trim() !== '' && name.trim() !== '';
-    if (!role || !hasIdentity || seen.has(actorId)) {
-      throw new Error('分享服务返回了无效的成员身份。');
-    }
+  return members.map(
+    ({ actorId, name, role: rawRole, removed, active, online, lastSeenAtMillis }) => {
+      const role = roles.get(rawRole);
+      const hasIdentity = actorId.trim() !== '' && name.trim() !== '';
+      if (!role || !hasIdentity || seen.has(actorId)) {
+        throw new Error('分享服务返回了无效的成员身份。');
+      }
 
-    seen.add(actorId);
+      seen.add(actorId);
 
-    return { actorId, name, role, removed, active, online: online && active && !removed };
-  });
+      const visitTime = lastSeenAtMillis === undefined ? undefined : Number(lastSeenAtMillis);
+      return {
+        actorId,
+        name,
+        role,
+        removed,
+        active,
+        online: online && active && !removed,
+        lastSeenAtMillis: Number.isSafeInteger(visitTime) ? visitTime : undefined,
+      };
+    },
+  );
 }
 
 export function readBoardSharing(

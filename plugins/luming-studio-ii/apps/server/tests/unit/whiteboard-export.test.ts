@@ -120,6 +120,44 @@ describe('fixed revision board export', () => {
     expect(repository.payloadQueries).toEqual([]);
   });
 
+  it('exports the exact source of a grouped imported diagram without collecting assets', () => {
+    const diagram = object('diagram', { kind: 'diagram', label: '阶段 / 计划', groupId: 'group' });
+    const neighbor = object('neighbor', { groupId: 'group' });
+    const html = `<!doctype html>\r\n<img src="${coverSource}"><p>原始图解</p>\r\n`;
+    const repository = new AssetRepository(
+      [diagram, neighbor],
+      [{ objectId: diagram.objectId, payloadVersion: 0n, bodyKind: 'embed', data: { html } }],
+    );
+    const application = createWhiteboardApplication(repository);
+    const command = { ...allJson, format: 'html' } as const;
+    const result = application.exportBoard(viewer, {
+      ...command,
+      scope: { kind: 'selection', objectIds: [diagram.objectId] },
+    });
+
+    expect(result).toMatchObject({
+      kind: 'file',
+      filename: '阶段 - 计划.html',
+      mimeType: 'text/html',
+    });
+    expect(fileText(result)).toBe(html);
+    expect(repository.sceneReads).toBe(0);
+    expect(repository.payloadQueries).toEqual([['diagram']]);
+    expect(repository.assetQueries).toEqual([]);
+    expect(
+      application.exportBoard(viewer, {
+        ...command,
+        scope: { kind: 'selection', objectIds: [diagram.objectId, neighbor.objectId] },
+      }),
+    ).toEqual({ kind: 'rejected', reason: 'invalidSelection' });
+    expect(
+      application.exportBoard(viewer, {
+        ...command,
+        scope: { kind: 'selection', objectIds: [neighbor.objectId] },
+      }),
+    ).toEqual({ kind: 'rejected', reason: 'unsupported' });
+  });
+
   it('checks access before exposing a revision and rechecks access when delivering', () => {
     class ChangedAccessRepository extends TestWhiteboardRepository {
       override read<Value>(work: (reader: WhiteboardReader) => Value): Value {
@@ -219,6 +257,21 @@ describe('fixed revision board export', () => {
     const rich = createWhiteboardApplication(
       new TestWhiteboardRepository([object('html', { kind: 'html' })]),
     );
+    class ArchivedSvgRepository extends TestWhiteboardRepository {
+      getExportAsset(): ExportAssetRead {
+        const markup = '<svg xmlns="http://www.w3.org/2000/svg"><foreignObject/></svg>';
+
+        return {
+          kind: 'asset',
+          asset: {
+            mimeType: 'image/svg+xml',
+            byteLength: Buffer.byteLength(markup),
+            base64: Buffer.from(markup).toString('base64'),
+          },
+        };
+      }
+    }
+    const unsafeAsset = createWhiteboardApplication(new ArchivedSvgRepository([image], [payload]));
     const svg = { ...allJson, format: 'svg' as const };
 
     expect(absent.exportBoard(viewer, svg)).toEqual({
@@ -227,5 +280,9 @@ describe('fixed revision board export', () => {
     });
     expect(external.exportBoard(viewer, svg)).toEqual({ kind: 'rejected', reason: 'unsupported' });
     expect(rich.exportBoard(viewer, svg)).toEqual({ kind: 'rejected', reason: 'unsupported' });
+    expect(unsafeAsset.exportBoard(viewer, svg)).toEqual({
+      kind: 'rejected',
+      reason: 'unsupported',
+    });
   });
 });

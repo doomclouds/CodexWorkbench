@@ -66,6 +66,7 @@ function EmbedHtmlBody(props: EmbedObjectProps) {
     initialScroll,
     panMode = false,
     onSaveState,
+    annotationLocations,
   } = props;
   const frame = useRef<HTMLIFrameElement>(null);
   const session = useRef<FrameSession | null>(null);
@@ -141,6 +142,9 @@ function EmbedHtmlBody(props: EmbedObjectProps) {
   useEffect(() => {
     session.current?.postMode();
   }, [annotation, source, writable, preserveScroll, panMode]);
+  useEffect(() => {
+    session.current?.postAnnotationLocations();
+  }, [source, annotationLocations]);
   useEffect(() => {
     session.current?.postSavedState();
   }, [saved.state, saved.version, source]);

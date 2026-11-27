@@ -8,9 +8,11 @@ import type {
   FeedbackThreadPage,
 } from '../../data/feedback/index.js';
 import { useFeedbackPages } from './use-feedback-pages.js';
+import { feedbackAuthorName } from './feedback-author.js';
 
 interface FeedbackQueryOptions {
   readonly boardId: string;
+  readonly updateKey?: string;
   readonly enabled: boolean;
   readonly panelOpen: boolean;
   readonly service: BoardFeedbackService;
@@ -22,11 +24,10 @@ const pageSize = 30;
 function authorsOf(threads: readonly FeedbackThread[], current: string) {
   const authors = new Map<string, string>();
   for (const { first } of threads) {
-    const { authorId, authoredByViewer } = first;
-    authors.set(authorId, authoredByViewer ? '我' : authorId);
+    authors.set(first.authorId, feedbackAuthorName(first));
   }
   if (current && !authors.has(current)) {
-    authors.set(current, current);
+    authors.set(current, '协作者');
   }
 
   return Array.from(authors, ([id, label]) => ({ id, label }));
@@ -34,6 +35,7 @@ function authorsOf(threads: readonly FeedbackThread[], current: string) {
 
 export function useFeedbackQueries({
   boardId,
+  updateKey,
   enabled,
   panelOpen,
   service,
@@ -42,37 +44,37 @@ export function useFeedbackQueries({
   const [authorId, setAuthorId] = useState('');
   const [mine, setMine] = useState(false);
   const [showResolved, setShowResolved] = useState(false);
-  const [requestVersion, setRequestVersion] = useState(0);
+  const [localVersion, setLocalVersion] = useState(0);
+  const requestVersion = (updateKey ?? '') + '/' + localVersion;
   const status: FeedbackStatus | undefined = showResolved ? undefined : 'open';
   const baseQuery = useMemo(
     () => ({
-      requestVersion,
       load(cursor: string | undefined, signal: AbortSignal) {
         return service.listThreads({ boardId, pageSize, status, cursor }, signal);
       },
     }),
-    [boardId, requestVersion, service, status],
+    [boardId, service, status],
   );
   const baseList = useFeedbackPages<FeedbackThread, FeedbackPage<FeedbackThread>>(
     enabled ? baseQuery : undefined,
+    requestVersion,
   );
   const ownAuthor = baseList.items.find(({ first }) => first.authoredByViewer)?.first.authorId;
   const selectedAuthor = mine ? ownAuthor : authorId;
   const openQuery = useMemo(
     () => ({
-      requestVersion,
       load(cursor: string | undefined, signal: AbortSignal) {
         return service.listThreads({ boardId, cursor, pageSize: 1, status: 'open' }, signal);
       },
     }),
-    [boardId, requestVersion, service],
+    [boardId, service],
   );
   const openThreads = useFeedbackPages<FeedbackThread, FeedbackPage<FeedbackThread>>(
     enabled && showResolved ? openQuery : undefined,
+    requestVersion,
   );
   const authorQuery = useMemo(
     () => ({
-      requestVersion,
       load(cursor: string | undefined, signal: AbortSignal) {
         return service.listThreads(
           { boardId, pageSize, status, cursor, authorId: selectedAuthor },
@@ -80,7 +82,7 @@ export function useFeedbackQueries({
         );
       },
     }),
-    [selectedAuthor, boardId, requestVersion, service, status],
+    [selectedAuthor, boardId, service, status],
   );
   const detailQuery = useMemo(() => {
     if (!threadId) {
@@ -88,24 +90,25 @@ export function useFeedbackQueries({
     }
 
     return {
-      requestVersion,
       load(cursor: string | undefined, signal: AbortSignal) {
         return service.getThread({ boardId, threadId, pageSize, cursor }, signal);
       },
     };
-  }, [threadId, boardId, requestVersion, service]);
+  }, [threadId, boardId, service]);
 
   const panelEnabled = enabled && panelOpen;
   const filterEnabled = panelEnabled && Boolean(selectedAuthor);
   const filteredList = useFeedbackPages<FeedbackThread, FeedbackPage<FeedbackThread>>(
     filterEnabled ? authorQuery : undefined,
+    requestVersion,
   );
   const detail = useFeedbackPages<FeedbackMessage, FeedbackThreadPage>(
     enabled ? detailQuery : undefined,
+    requestVersion,
   );
 
   function refresh() {
-    setRequestVersion((previous) => previous + 1);
+    setLocalVersion((previous) => previous + 1);
   }
 
   const list = selectedAuthor ? filteredList : baseList;

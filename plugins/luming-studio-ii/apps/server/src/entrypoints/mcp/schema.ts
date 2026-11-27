@@ -2,10 +2,11 @@ import { z } from 'zod';
 
 export const bridgeChunkBytes = 128 * 1024;
 export const bridgeMaximumBytes = 128 * 1024 * 1024;
+export const bridgeMaximumResponseBytes = bridgeMaximumBytes + 32 * 1024;
 
 const id = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/u);
 const base64Chunk = z.string().max(Math.ceil(bridgeChunkBytes / 3) * 4);
-const offset = z.number().int().min(0).max(bridgeMaximumBytes);
+const offset = z.number().int().min(0);
 const version = z.literal(1);
 const sessionId = z.uuid();
 
@@ -40,7 +41,7 @@ export const bridgeSchema = z.discriminatedUnion('action', [
       action: z.literal('upload'),
       sessionId,
       transferId: z.uuid().optional(),
-      offset,
+      offset: offset.max(bridgeMaximumBytes),
       size: z.number().int().min(1).max(bridgeMaximumBytes),
       data: base64Chunk,
     })
@@ -51,7 +52,7 @@ export const bridgeSchema = z.discriminatedUnion('action', [
       action: z.literal('download'),
       sessionId,
       transferId: z.uuid(),
-      offset,
+      offset: offset.max(bridgeMaximumResponseBytes),
     })
     .strict(),
   z

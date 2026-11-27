@@ -1,3 +1,5 @@
+import type { McpRestoredView } from './context.js';
+
 export type McpStudioLocation =
   | { readonly kind: 'workbench' }
   | { readonly kind: 'whiteboard'; readonly boardId: string }
@@ -17,14 +19,42 @@ export function createMcpNavigation(readOpeningId: () => string | number | undef
   let location: McpStudioLocation = { kind: 'workbench' };
   let writtenLocally = false;
   let openingId: string | number | undefined;
+  let restoredView: McpRestoredView | undefined;
   const listeners = new Set<Listener>();
+
+  function setLocation(next: McpStudioLocation) {
+    if (!sameLocation(location, next)) {
+      location = next;
+      for (const listener of listeners) {
+        listener();
+      }
+    }
+  }
 
   return {
     read: () => location,
+    readBoardView: () => restoredView,
     write(next: McpStudioLocation) {
       openingId ??= readOpeningId();
       writtenLocally = true;
+      restoredView = undefined;
       location = next;
+    },
+    restore(view: McpRestoredView) {
+      openingId ??= readOpeningId();
+      writtenLocally = true;
+      restoredView = view;
+      setLocation({ kind: 'whiteboard', boardId: view.boardId });
+    },
+    discardRestoredView(boardId: string) {
+      if (restoredView?.boardId !== boardId) {
+        return false;
+      }
+
+      restoredView = undefined;
+      setLocation({ kind: 'workbench' });
+
+      return true;
     },
     subscribe(listener: Listener) {
       listeners.add(listener);
@@ -44,12 +74,8 @@ export function createMcpNavigation(readOpeningId: () => string | number | undef
         ? { kind: 'whiteboard', boardId }
         : { kind: 'workbench' };
       writtenLocally = false;
-      if (!sameLocation(location, next)) {
-        location = next;
-        for (const listener of listeners) {
-          listener();
-        }
-      }
+      restoredView = undefined;
+      setLocation(next);
 
       return true;
     },

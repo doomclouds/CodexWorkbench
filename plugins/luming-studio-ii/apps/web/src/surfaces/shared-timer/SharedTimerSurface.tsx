@@ -46,10 +46,12 @@ function isWholeMinuteDuration(seconds: number) {
 function TimerAdjusters({
   canIncrease,
   canDecrease,
+  blocked,
   onAdjust,
 }: {
   readonly canIncrease: boolean;
   readonly canDecrease: boolean;
+  readonly blocked: boolean;
   readonly onAdjust: (direction: number) => void;
 }) {
   return (
@@ -60,6 +62,7 @@ function TimerAdjusters({
         aria-label="增加一分钟"
         title="增加一分钟"
         disabled={!canIncrease}
+        aria-disabled={blocked || undefined}
         onClick={() => onAdjust(1)}
       >
         <Plus size={19} />
@@ -70,6 +73,7 @@ function TimerAdjusters({
         aria-label="减少一分钟"
         title="减少一分钟"
         disabled={!canDecrease}
+        aria-disabled={blocked || undefined}
         onClick={() => onAdjust(-1)}
       >
         <Minus size={19} />
@@ -136,7 +140,7 @@ function TimerPopover({
                 data-timer-action
                 className="whiteboard-shared-timer__play"
                 aria-label={actions[phase]}
-                disabled={blocked}
+                aria-disabled={blocked || undefined}
                 onClick={onPlay}
               >
                 {running ? (
@@ -148,9 +152,9 @@ function TimerPopover({
             )}
             <div className="whiteboard-shared-timer__face">
               {editable ? (
-                <TimerEntry entry={entry} disabled={blocked} />
+                <TimerEntry entry={entry} readOnly={blocked} />
               ) : (
-                <output aria-label="剩余时间">
+                <output className="whiteboard-shared-timer__display" aria-label="剩余时间">
                   <TimerDigits digits={digits} ended={phase === 'ended'} />
                 </output>
               )}
@@ -164,7 +168,7 @@ function TimerPopover({
                     className="whiteboard-shared-timer__reset"
                     aria-label="重置"
                     title={'重置为 ' + timerDigits(timer.durationMs / milliseconds).join(':')}
-                    disabled={blocked}
+                    aria-disabled={blocked || undefined}
                     onClick={onReset}
                   >
                     <RotateCcw size={21} />
@@ -173,6 +177,7 @@ function TimerPopover({
                   <TimerAdjusters
                     canIncrease={canAdjust(1)}
                     canDecrease={canAdjust(-1)}
+                    blocked={blocked}
                     onAdjust={onAdjust}
                   />
                 )}
@@ -181,7 +186,9 @@ function TimerPopover({
           </div>
         ) : null}
         {status !== 'online' && <StatusText message={connectionNotice} announcement="polite" />}
-        {commands.busy && <StatusText message="正在核对计时命令…" announcement="polite" busy />}
+        <span className="whiteboard-shared-timer__status" role="status">
+          {commands.busy ? '正在核对计时命令…' : ''}
+        </span>
         {commands.notice && (
           <StatusText message={commands.notice} announcement="polite" tone="error" />
         )}
@@ -225,7 +232,7 @@ function TimerControls({ session, state, createCommandId }: TimerControlsProps) 
   );
 
   function saveDuration(duration: number, startAfterSave: boolean) {
-    if (!timer) {
+    if (!timer || blocked) {
       return;
     }
 
@@ -265,7 +272,7 @@ function TimerControls({ session, state, createCommandId }: TimerControlsProps) 
   }
 
   function handlePlay() {
-    if (!timer) {
+    if (!timer || blocked) {
       return;
     }
 
@@ -283,13 +290,13 @@ function TimerControls({ session, state, createCommandId }: TimerControlsProps) 
   }
 
   function handleReset() {
-    if (timer) {
+    if (timer && !blocked) {
       commands.submit({ kind: 'reset' }, timer.version, { onApplied: entry.discard });
     }
   }
 
   function canAdjust(direction: number) {
-    if (blocked || !timer) {
+    if (!timer) {
       return false;
     }
     if (running) {

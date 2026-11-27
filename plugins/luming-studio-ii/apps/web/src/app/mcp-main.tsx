@@ -32,11 +32,7 @@ import {
   readHtmlSource,
   renderBrowserVectorExport,
 } from '../platform/browser/index.js';
-import {
-  connectMcpApp,
-  createMcpCommandId,
-  observeMcpRoomSnapshots,
-} from '../platform/mcp/index.js';
+import { connectMcpApp, createMcpCommandId, observeMcpRoomEvents } from '../platform/mcp/index.js';
 import { StudioApp } from './index.js';
 import type { StudioAppProps } from './index.js';
 
@@ -193,6 +189,16 @@ function services(bridge: Bridge) {
 
   const service: StudioAppProps['service'] = {
     ...scene,
+    async getScene(boardId, signal) {
+      try {
+        return await scene.getScene(boardId, signal);
+      } catch (error) {
+        if (!signal?.aborted) {
+          bridge.handleBoardLoadFailure(boardId, error);
+        }
+        throw error;
+      }
+    },
     async getPayloads(boardId, ids, signal) {
       return resolvePayloads(await scene.getPayloads(boardId, ids, signal), signal);
     },
@@ -276,7 +282,7 @@ function services(bridge: Bridge) {
 
 function mount(bridge: Bridge) {
   const { postProtobuf, navigation, preferences } = bridge;
-  const room = createBoardRoomService(postProtobuf, { observeSnapshots: observeMcpRoomSnapshots });
+  const room = createBoardRoomService(postProtobuf, { waitForEvents: observeMcpRoomEvents });
 
   function createRoomSession(boardId: string) {
     return createBoardRoomSession({

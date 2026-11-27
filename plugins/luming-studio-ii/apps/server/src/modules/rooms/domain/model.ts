@@ -57,6 +57,7 @@ export interface Participant {
   readonly role: RoomRole;
   readonly sequence: bigint;
   readonly expiresAtUnixMs: number;
+  readonly activityAtUnixMs?: number;
   readonly cursor?: RoomPoint;
   readonly viewport?: RoomViewport;
   readonly following: boolean;
@@ -128,6 +129,8 @@ export interface RoomSnapshot {
   readonly timer: RoomTimer;
   readonly agentWorkspaces: readonly AgentWorkspace[];
   readonly canReleaseAgentActivity: boolean;
+  readonly feedbackVersion?: bigint;
+  readonly suggestionsVersion?: bigint;
 }
 
 export interface RoomContentChange {
@@ -144,6 +147,7 @@ export type RoomEventPayload =
   | { readonly kind: 'participants'; readonly changes: ParticipantChanges }
   | { readonly kind: 'timer'; readonly timer: RoomTimer }
   | { readonly kind: 'contentChanged'; readonly change: RoomContentChange }
+  | { readonly kind: 'feedbackChanged' | 'suggestionsChanged'; readonly version: bigint }
   | { readonly kind: 'agentWorkspaces'; readonly workspaces: readonly AgentWorkspace[] }
   | { readonly kind: 'accessLost' };
 

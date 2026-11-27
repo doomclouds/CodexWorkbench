@@ -43,6 +43,10 @@ const sharingData = 'src/data/sharing/client.ts';
 const roomProtocol = '@codexworkbench/luming-studio-ii-contracts/rooms/service';
 const roomsData = 'src/data/rooms/client.ts';
 const roomMessage = 'src/data/rooms/room-message.ts';
+const roomStreamData = 'src/data/rooms/stream.ts';
+const roomStreamBrowser = 'src/platform/browser/room-stream.ts';
+const connect = '@connectrpc/connect';
+const connectWeb = '@connectrpc/connect-web';
 const roomPresence = 'src/surfaces/room-presence/RoomPresenceSurface.tsx';
 const sharedTimer = 'src/surfaces/shared-timer/SharedTimerSurface.tsx';
 const mcpMain = 'src/app/mcp-main.tsx';
@@ -104,6 +108,11 @@ const accepted = [
   [sharedTimer, "import type { RoomTimer } from '../../data/rooms/index.js';"],
   [roomsData, `import { BoardRoomService } from '${roomProtocol}';`],
   [roomsData, "import { fromJsonString } from '@bufbuild/protobuf';"],
+  [
+    roomStreamData,
+    `import { Code, ConnectError, createClient, type Transport } from '${connect}';`,
+  ],
+  [roomStreamBrowser, `import { createGrpcWebTransport } from '${connectWeb}';`],
   ['src/app/main.tsx', "import { createBoardRoomService } from '../data/rooms/index.js';"],
   ['src/platform/browser/room-events.ts', 'const source = new EventSource(path);'],
   ['tests/integration/board-room.test.tsx', `import { BoardRoomService } from '${roomProtocol}';`],
@@ -242,6 +251,46 @@ const accepted = [
 ];
 
 const rejected = [
+  [
+    'room data constructs a browser transport',
+    roomStreamData,
+    `import { createGrpcWebTransport } from '${connectWeb}';`,
+  ],
+  [
+    'the browser transport constructs a protocol client',
+    roomStreamBrowser,
+    `import { createClient } from '${connect}';`,
+  ],
+  [
+    'a different browser module imports the streaming SDK',
+    browserEntry,
+    `import { createGrpcWebTransport } from '${connectWeb}';`,
+  ],
+  [
+    'a different rooms module imports the client SDK',
+    roomsData,
+    `import type { Transport } from '${connect}';`,
+  ],
+  [
+    'a canvas overlay imports the transport SDK',
+    'src/ui/domain/canvas/overlays/CanvasOverlays.tsx',
+    `import type { Transport } from '${connect}';`,
+  ],
+  [
+    'the room client publishes a private SDK type',
+    roomStreamData,
+    `import type { Transport } from '${connect}';\nexport type { Transport };`,
+  ],
+  [
+    'the browser transport dynamically loads the SDK',
+    roomStreamBrowser,
+    `const sdk = await import('${connectWeb}');`,
+  ],
+  [
+    'the room client imports an unrelated SDK symbol',
+    roomStreamData,
+    `import type { Interceptor } from '${connect}';`,
+  ],
   [
     'video placement reads the uploaded file outside the platform port',
     media,

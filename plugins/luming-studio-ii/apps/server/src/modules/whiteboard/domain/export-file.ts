@@ -1,5 +1,5 @@
 import { exportConnector } from './export-geometry.js';
-import { renderExportHtml } from './export-html.js';
+import { renderExportHtml, renderExportHtmlSource } from './export-html.js';
 import { renderExportSvg } from './export-svg.js';
 import {
   maxExportFileBytes,
@@ -83,6 +83,7 @@ function encodeFile(
   data: string | ExportBoardResult,
   extension: string,
   mimeType: string,
+  title = snapshot.board.title,
 ): ExportBoardResult {
   if (typeof data !== 'string') {
     return data;
@@ -95,7 +96,7 @@ function encodeFile(
 
   return {
     kind: 'file',
-    filename: exportFilename(snapshot.board.title, extension),
+    filename: exportFilename(title, extension),
     mimeType,
     revision: snapshot.board.revision,
     content,
@@ -131,14 +132,21 @@ function renderVectorFile(snapshot: BoardExportSnapshot, format: 'svg' | 'png'):
 
 export function renderExportFile(
   snapshot: BoardExportSnapshot,
-  format: ExportRenderCommand['format'],
+  { format, scope }: Pick<ExportRenderCommand, 'format' | 'scope'>,
 ): ExportBoardResult {
   switch (format) {
     case 'svg':
     case 'png':
       return renderVectorFile(snapshot, format);
-    case 'html':
-      return encodeFile(snapshot, renderExportHtml(snapshot), 'html', 'text/html');
+    case 'html': {
+      const selected = scope.kind === 'selection';
+      const html = selected ? renderExportHtmlSource(snapshot) : renderExportHtml(snapshot);
+      const title = selected
+        ? snapshot.objects[0]?.label || snapshot.board.title
+        : snapshot.board.title;
+
+      return encodeFile(snapshot, html, 'html', 'text/html', title);
+    }
     case 'json':
       return encodeFile(snapshot, jsonExport(snapshot), 'json', 'application/json');
   }

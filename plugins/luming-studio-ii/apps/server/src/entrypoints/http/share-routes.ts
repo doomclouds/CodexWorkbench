@@ -140,6 +140,8 @@ function writeSharing(
     links: sharing.links.map((link) => ({ ...link, role: wireRoles[link.role] })),
     members: sharing.members.map((member) => ({
       ...member,
+      lastSeenAtMillis:
+        member.lastSeenAtMillis === undefined ? undefined : BigInt(member.lastSeenAtMillis),
       role: wireRoles[member.role],
       online: online && member.active && online.has(member.actorId),
     })),

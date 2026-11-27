@@ -68,6 +68,10 @@ function roomNotice(error: unknown): string | undefined {
   return error instanceof Error && error.message ? error.message : undefined;
 }
 
+function discussionUpdateKey(instanceId: string, version: bigint | undefined) {
+  return version === undefined ? undefined : instanceId + ':' + version;
+}
+
 export function createBoardRoomSession({
   boardId,
   viewId,
@@ -174,6 +178,8 @@ export function createBoardRoomSession({
       timer: event.timer,
       agentWorkspaces: event.agentWorkspaces,
       canReleaseAgentActivity: event.canReleaseAgentActivity,
+      feedbackUpdateKey: discussionUpdateKey(event.instanceId, event.feedbackVersion),
+      suggestionsUpdateKey: discussionUpdateKey(event.instanceId, event.suggestionsVersion),
     });
 
     if (priorRevision !== event.revision) {
@@ -219,6 +225,18 @@ export function createBoardRoomSession({
         break;
       case 'contentChanged':
         applyContent(connection, event.change);
+        break;
+      case 'feedbackChanged':
+        setState({
+          ...state,
+          feedbackUpdateKey: discussionUpdateKey(event.instanceId, event.version),
+        });
+        break;
+      case 'suggestionsChanged':
+        setState({
+          ...state,
+          suggestionsUpdateKey: discussionUpdateKey(event.instanceId, event.version),
+        });
         break;
       case 'agentWorkspaces':
         setState({ ...state, agentWorkspaces: event.workspaces });

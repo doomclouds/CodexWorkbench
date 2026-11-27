@@ -1,5 +1,9 @@
 import type { ReactNode } from 'react';
 import type {
+  CanvasContentLocation,
+  CanvasContentLocationRequest,
+} from '../../ui/domain/canvas/index.js';
+import type {
   BoardFeedbackService,
   FeedbackContentTarget,
   FeedbackPoint,
@@ -34,8 +38,11 @@ export interface FeedbackSuggestionsFrame {
   readonly onCardsVisibleChange: (visible: boolean) => void;
 }
 
+type ContentLocationRequests = ReadonlyMap<string, readonly CanvasContentLocationRequest[]>;
+
 export interface WhiteboardFeedbackSurfaceProps {
   readonly boardId: string;
+  readonly updateKey?: string;
   readonly canEdit: boolean;
   readonly viewing: boolean;
   readonly viewport: FeedbackViewport;
@@ -47,6 +54,9 @@ export interface WhiteboardFeedbackSurfaceProps {
   readonly onPanelOpenChange: (open: boolean) => void;
   readonly anchor?: HTMLElement | null;
   readonly focusWorldPoint?: (point: FeedbackPoint) => void;
+  readonly focusContentObject?: (id: string) => void;
+  readonly contentLocations?: ReadonlyMap<string, CanvasContentLocation>;
+  readonly onContentLocationRequests?: (requests: ContentLocationRequests | undefined) => void;
   readonly annotationActive?: boolean;
   readonly singleKeys?: boolean;
   readonly onAnnotationActiveChange?: (active: boolean) => void;

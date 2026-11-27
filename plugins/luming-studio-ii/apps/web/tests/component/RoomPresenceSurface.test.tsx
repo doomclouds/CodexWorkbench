@@ -290,6 +290,28 @@ test('groups all windows by actor and transfers the followed view when its first
   expect(fixture.host.textContent).toContain('正在跟随 作者 的视角');
 });
 
+test.each(['editor', 'commenter', 'viewer'])(
+  'uses the owner nickname and excludes the current %s guest from the participant control',
+  (role) => {
+    const room = mockRoom();
+    const visitor = { ...self, actorId: 'visitor-id', displayName: '访客昵称', role };
+    const owner = { ...peer, actorId: 'private-owner-id', displayName: '陆工', role: 'owner' };
+    room.update({
+      actorId: visitor.actorId,
+      participants: [visitor, owner, { ...visitor, viewId: 'another-guest-tab' }],
+    });
+    mount(room);
+    const trigger = button('此刻在这里');
+    expect(trigger.title).toBe(owner.displayName);
+    expect(trigger.textContent).toBe('陆');
+    click('此刻在这里');
+    const rows = fixture.host.querySelectorAll('.room-presence-row');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.querySelector('strong')?.textContent).toBe(owner.displayName);
+    expect(rows[0]?.textContent).toContain('所有者');
+  },
+);
+
 test('opens the anchored participant menu with focus and restores the trigger on Escape', () => {
   mount(mockRoom());
   const trigger = button('此刻在这里');
@@ -304,6 +326,20 @@ test('opens the anchored participant menu with focus and restores the trigger on
   });
   expect(trigger.getAttribute('aria-expanded')).toBe('false');
   expect(document.activeElement).toBe(trigger);
+});
+
+test('follows the most recently active window without waiting for the previous one to leave', () => {
+  const room = mockRoom();
+  const surface = mount(room);
+  startFollowing();
+  const other = {
+    ...peer,
+    viewId: 'author-current-window',
+    activityAtMillis: 200,
+    viewport: { centerX: 1200, centerY: 850, zoom: 0.5, width: 1600, height: 1200 },
+  };
+  room.update({ participants: [self, { ...peer, activityAtMillis: 100 }, other] });
+  expect(surface.onViewportRequest).toHaveBeenLastCalledWith({ x: 100, y: 87.5, zoom: 0.25 });
 });
 
 test('pauses following in preview, resumes the same view, and detaches on local navigation', () => {

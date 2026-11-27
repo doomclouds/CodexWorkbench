@@ -5,7 +5,7 @@ export const archiveMediaType = 'application/zip';
 
 const normalRequestBytes = 1024 * 1024;
 const activityRequestBytes = 32 * 1024;
-const imageRequestBytes = 8 * 1024 * 1024 + 32 * 1024;
+const imageRequestBytes = 20 * 1024 * 1024 + 32 * 1024;
 const videoRequestBytes = 20 * 1024 * 1024 + 32 * 1024;
 const largeEditRequests = new Map([
   ['AttachBoardImage', imageRequestBytes],
@@ -64,6 +64,7 @@ const boardMethods = [
     'BoardRoomService',
     [
       'GetBoardRoom',
+      'WaitBoardRoomEvents',
       'UpdateBoardPresence',
       'LeaveBoardPresence',
       'ChangeBoardTimer',

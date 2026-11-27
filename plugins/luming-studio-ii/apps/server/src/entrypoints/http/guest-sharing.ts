@@ -58,6 +58,7 @@ const paths = new Map<string, Access>([
   [path(FeedbackService.method.getFeedbackReceipt), 'comment'],
   [path(BoardSharingService.method.getBoardSharing), 'read'],
   [path(BoardRoomService.method.getBoardRoom), 'read'],
+  [path(BoardRoomService.method.streamBoardRoomEvents), 'read'],
   [path(BoardRoomService.method.updateBoardPresence), 'read'],
   [path(BoardRoomService.method.leaveBoardPresence), 'read'],
   [path(BoardRoomService.method.changeBoardTimer), 'edit'],

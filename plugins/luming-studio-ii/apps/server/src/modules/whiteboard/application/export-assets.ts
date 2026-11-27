@@ -1,13 +1,15 @@
-import type {
-  BoardExportAsset,
-  BoardExportRejection,
-  ExportRenderCommand,
-  JsonValue,
-  PayloadRecord,
+import {
+  readSafeSvgImage,
+  type BoardExportAsset,
+  type BoardExportRejection,
+  type ExportRenderCommand,
+  type JsonValue,
+  type PayloadRecord,
 } from '../domain/index.js';
 import type { WhiteboardReader } from '../ports/index.js';
 
 const maxAssetBytes = 20 * 1024 * 1024;
+const encodingChunkBytes = 24 * 1024;
 const assetPrefix = '/studio-archive-assets/';
 const assetSource = /^\/studio-archive-assets\/([A-Za-z0-9_-]{1,128})\/([A-Za-z0-9_-]{1,128})$/u;
 const embeddedSource =
@@ -82,6 +84,23 @@ function collectSources(payloads: readonly PayloadRecord[], format: ExportRender
 
 type ExportAssets = ReadonlyMap<string, BoardExportAsset>;
 
+function safeVectorAsset(asset: BoardExportAsset): BoardExportAsset | undefined {
+  const original = Uint8Array.from(atob(asset.base64), (character) => character.charCodeAt(0));
+  const svg = readSafeSvgImage(original);
+  if (!svg) {
+    return undefined;
+  }
+
+  const bytes = new TextEncoder().encode(svg.markup);
+  const encoded: string[] = [];
+  for (let offset = 0; offset < bytes.length; offset += encodingChunkBytes) {
+    const chunk = bytes.subarray(offset, offset + encodingChunkBytes);
+    encoded.push(btoa(String.fromCharCode(...chunk)));
+  }
+
+  return { mimeType: asset.mimeType, byteLength: bytes.length, base64: encoded.join('') };
+}
+
 export function captureExportAssets(
   reader: WhiteboardReader,
   boardId: string,
@@ -89,6 +108,7 @@ export function captureExportAssets(
   format: ExportRenderCommand['format'],
 ): ExportAssets | BoardExportRejection {
   const assets = new Map<string, BoardExportAsset>();
+  const vectorExport = format === 'svg' || format === 'png';
   let remaining = maxAssetBytes;
 
   for (const source of collectSources(payloads, format)) {
@@ -106,8 +126,16 @@ export function captureExportAssets(
       return { kind: 'rejected', reason: 'tooLarge' };
     }
 
-    remaining -= result.asset.byteLength;
-    assets.set(source, result.asset);
+    const { asset } = result;
+    remaining -= asset.byteLength;
+    const captured =
+      vectorExport && asset.mimeType === 'image/svg+xml' ? safeVectorAsset(asset) : asset;
+
+    if (!captured) {
+      return { kind: 'rejected', reason: 'unsupported' };
+    }
+
+    assets.set(source, captured);
   }
 
   return assets;

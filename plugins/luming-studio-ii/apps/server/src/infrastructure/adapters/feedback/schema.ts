@@ -44,6 +44,7 @@ export const feedbackSchema = `
     thread_id TEXT NOT NULL,
     message_id TEXT NOT NULL,
     author_actor_id TEXT NOT NULL,
+    author_name TEXT,
     text TEXT NOT NULL,
     created_at_millis INTEGER NOT NULL CHECK (created_at_millis >= 0),
     updated_at_millis INTEGER NOT NULL CHECK (updated_at_millis >= created_at_millis),

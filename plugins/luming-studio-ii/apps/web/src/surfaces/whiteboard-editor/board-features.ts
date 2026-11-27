@@ -11,6 +11,8 @@ import type {
   CanvasGesturePreview,
   CanvasPoint,
   CanvasContentAnnotationRequest,
+  CanvasContentLocation,
+  CanvasContentLocationRequest,
   CanvasProps,
   CanvasViewport,
   CanvasViewportSize,
@@ -23,13 +25,21 @@ export interface BoardViewContext {
   readonly boardId: string;
   readonly selectedIds: readonly string[];
   readonly viewport: CanvasViewport;
+  readonly focusedObjectId?: string;
+  readonly returnViewport?: CanvasViewport;
 }
+
+type InitialBoardView = Omit<BoardViewContext, 'viewport'> & {
+  readonly viewport?: CanvasViewport;
+};
 
 export interface BoardPresenceSlot {
   readonly participants: ReactNode;
   readonly notice: ReactNode;
   readonly overlay: ReactNode;
   readonly accessLost: boolean;
+  readonly feedbackUpdateKey?: string;
+  readonly suggestionsUpdateKey?: string;
   readonly onCursorChange: (point: CanvasPoint | undefined) => void;
   readonly onGesturePreviewChange: (preview: CanvasGesturePreview | undefined) => void;
   readonly remoteGesturePreviews?: readonly CanvasGesturePreview[];
@@ -62,11 +72,13 @@ export interface BoardExportContext {
   readonly title: string;
   readonly revision: bigint;
   readonly selectedIds: readonly string[];
+  readonly selectedHtmlId?: string;
 }
 
 export interface BoardExportFrame {
   readonly anchor: HTMLButtonElement | null;
   readonly context: BoardExportContext;
+  readonly onLanSharingChange: (active: boolean) => void;
   readonly onRequestClose: () => void;
   readonly restoreFocus: () => void;
 }
@@ -93,8 +105,11 @@ export interface BoardHistoryFrame {
   readonly renderPreview: (frame: BoardPreviewFrame) => ReactNode;
 }
 
+type ContentLocationRequests = ReadonlyMap<string, readonly CanvasContentLocationRequest[]>;
+
 export interface BoardFeedbackFrame {
   readonly boardId: string;
+  readonly updateKey?: string;
   readonly canEdit: boolean;
   readonly viewing: boolean;
   readonly viewport: CanvasViewport & { readonly zoomY?: number };
@@ -104,6 +119,9 @@ export interface BoardFeedbackFrame {
   readonly onPanelOpenChange: (open: boolean) => void;
   readonly anchor: HTMLButtonElement | null;
   readonly focusWorldPoint: (point: CanvasPoint) => void;
+  readonly focusContentObject?: (id: string) => void;
+  readonly contentLocations?: ReadonlyMap<string, CanvasContentLocation>;
+  readonly onContentLocationRequests?: (requests: ContentLocationRequests | undefined) => void;
   readonly annotationActive?: boolean;
   readonly onAnnotationActiveChange?: (active: boolean) => void;
   readonly onUnresolvedChange?: (unresolved: boolean) => void;
@@ -149,6 +167,7 @@ export type BoardSuggestionPreviewChanges = Pick<
 export interface BoardSuggestionFrame {
   readonly anchor: HTMLButtonElement | null;
   readonly boardId: string;
+  readonly updateKey?: string;
   readonly revision: bigint;
   readonly selection: readonly string[];
   readonly feedbackThreadId?: string;
@@ -182,6 +201,8 @@ interface BoardMediaFrame {
 }
 
 export interface WhiteboardEditorFeatures {
+  readonly fitOnMount?: boolean;
+  readonly initialBoardView?: InitialBoardView;
   readonly Viewing: ComponentType<BoardViewingFrame>;
   readonly editService?: WhiteboardEditService;
   readonly readHtmlSource?: (file: File) => Promise<string>;
@@ -191,6 +212,7 @@ export interface WhiteboardEditorFeatures {
   readonly clipboard?: BoardClipboardAccess;
   readonly localDrafts?: LocalBoardDraftConfig;
   readonly commentAccess?: boolean;
+  readonly lanSharing?: boolean;
   readonly consumeShareEntry?: () => boolean;
   readonly renderPresence?: (frame: BoardPresenceFrame) => ReactNode;
   readonly renderSharedTimer?: () => ReactNode;

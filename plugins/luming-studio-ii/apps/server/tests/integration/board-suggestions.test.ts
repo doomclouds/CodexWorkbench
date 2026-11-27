@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import type { MessageInitShape } from '@bufbuild/protobuf';
 import { BoardCatalogService } from '@codexworkbench/luming-studio-ii-contracts/catalog/service';
+import { BoardRoomService } from '@codexworkbench/luming-studio-ii-contracts/rooms/service';
 import {
   BoardEditRejectionReason,
   BoardEditService,
@@ -312,6 +313,12 @@ test('requires trusted actor separation and a same-board source without leaking 
   );
   assert.equal(crossBoard.status, 403);
 
+  const getRoom = () =>
+    callWhiteboard(server.address, owner, BoardRoomService.method.getBoardRoom, { boardId });
+  const before = (await getRoom()).event;
+  assert.ok(before?.payload.case === 'snapshot');
+  assert.equal(before.payload.value.suggestionsVersion, 0n);
+
   const { suggestion } = await callWhiteboard(
     server.address,
     agentCredential,
@@ -319,6 +326,18 @@ test('requires trusted actor separation and a same-board source without leaking 
     request,
   );
   assert.ok(suggestion);
+  const after = (await getRoom()).event;
+  assert.ok(after?.payload.case === 'snapshot');
+  assert.equal(after.payload.value.suggestionsVersion, 1n);
+  assert.equal(after.sequence, (before.sequence ?? 0n) + 1n);
+  const replay = await callWhiteboard(
+    server.address,
+    agentCredential,
+    submitBoardSuggestion,
+    request,
+  );
+  assert.equal(replay.suggestion?.proposalId, suggestion.proposalId);
+  assert.equal((await getRoom()).event?.sequence, after.sequence);
   const actorChoice = chooseWidth(boardId, suggestion.proposalId);
   const agentAccept = await sendWhiteboardRequest(
     server.address,

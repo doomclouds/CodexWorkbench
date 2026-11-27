@@ -17,6 +17,7 @@ import {
   writePublication,
   type ArchivePublication,
 } from './publication.js';
+import type { ValidateNativeObject } from './restore-scene.js';
 import { ArchiveObjectError } from './scene.js';
 import { archiveSchema } from './schema.js';
 
@@ -118,6 +119,7 @@ function publishArchive(
   connection: SqliteConnection,
   command: ArchiveImportCommand,
   archive: StagedCurrentArchive,
+  validate: ValidateNativeObject,
 ): ArchiveImportReceipt {
   const { actorId, boardId, commandId } = command;
   const { signature, title } = archive;
@@ -128,7 +130,7 @@ function publishArchive(
 
   let publication: ArchivePublication;
   try {
-    publication = preparePublication(archive, boardId);
+    publication = preparePublication(archive, command, validate);
   } catch (error) {
     if (!(error instanceof ArchiveObjectError)) {
       throw error;
@@ -165,6 +167,7 @@ function recordReadRejection(
 async function importCurrent(
   database: SqliteDatabase,
   command: ArchiveImportCommand,
+  validate: ValidateNativeObject,
 ): Promise<ArchiveImportReceipt> {
   let archive: StagedCurrentArchive;
   try {
@@ -178,17 +181,20 @@ async function importCurrent(
   }
 
   try {
-    return database.write((connection) => publishArchive(connection, command, archive));
+    return database.write((connection) => publishArchive(connection, command, archive, validate));
   } finally {
     await archive.dispose();
   }
 }
 
-export function createArchiveImportRepository(database: SqliteDatabase): ArchiveImportPort {
+export function createArchiveImportRepository(
+  database: SqliteDatabase,
+  validate: ValidateNativeObject,
+): ArchiveImportPort {
   database.write((connection) => connection.exec(archiveSchema));
 
   return {
-    importCurrent: (command) => importCurrent(database, command),
+    importCurrent: (command) => importCurrent(database, command, validate),
     getReceipt: (actorId, commandId) =>
       database.read((connection) => readReceipt(connection, actorId, commandId)?.receipt),
     getAsset: (actorId, boardId, assetId) =>

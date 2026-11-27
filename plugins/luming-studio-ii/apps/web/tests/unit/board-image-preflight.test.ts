@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 
-import { prepareBoardImage } from '../../src/platform/browser/index.js';
+import { prepareBoardImage, readDocumentImageFile } from '../../src/platform/browser/index.js';
 
 function pngHeader(width: number, height: number, chunk: number): File {
   const bytes = new Uint8Array(45);
@@ -16,10 +16,23 @@ function pngHeader(width: number, height: number, chunk: number): File {
 }
 
 it('rejects an oversized selected file before reading its image data', async () => {
-  const content = new Uint8Array(8 * 1024 * 1024 + 1);
+  const content = new Uint8Array(20 * 1024 * 1024 + 1);
   const file = new File([content], 'large.png', { type: 'image/png' });
 
-  await expect(prepareBoardImage(file)).rejects.toThrow('8 MiB');
+  await expect(prepareBoardImage(file)).rejects.toThrow('20 MiB');
+  await expect(readDocumentImageFile(file)).rejects.toThrow('20 MiB');
+});
+
+it('prepares a vector at the full 20 MiB image limit', async () => {
+  const start = '<svg xmlns="http://www.w3.org/2000/svg" width="34" height="21"><desc>';
+  const end = '</desc></svg>';
+  const size = 20 * 1024 * 1024;
+  const file = new File([start, 'x'.repeat(size - start.length - end.length), end], 'large.svg');
+
+  const image = await prepareBoardImage(file);
+  expect(image).toMatchObject({ width: 34, height: 21, displayName: 'large.svg' });
+  expect(image.content.byteLength).toBe(size);
+  expect((await readDocumentImageFile(file)).byteLength).toBe(size);
 });
 
 it('prepares the SVG bytes without a browser preview regardless of the supplied MIME', async () => {

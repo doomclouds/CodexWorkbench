@@ -38,7 +38,7 @@ var __toESM = (mod, isNodeMode, target2) => (target2 = mod != null ? __create(__
 // ../../../../node_modules/.pnpm/graceful-fs@4.2.11/node_modules/graceful-fs/polyfills.js
 var require_polyfills = __commonJS({
   "../../../../node_modules/.pnpm/graceful-fs@4.2.11/node_modules/graceful-fs/polyfills.js"(exports, module) {
-    var constants = __require("constants");
+    var constants2 = __require("constants");
     var origCwd = process.cwd;
     var cwd = null;
     var platform = process.env.GRACEFUL_FS_PLATFORM || process.platform;
@@ -62,7 +62,7 @@ var require_polyfills = __commonJS({
     var chdir;
     module.exports = patch;
     function patch(fs) {
-      if (constants.hasOwnProperty("O_SYMLINK") && process.version.match(/^v0\.6\.[0-2]|^v0\.5\./)) {
+      if (constants2.hasOwnProperty("O_SYMLINK") && process.version.match(/^v0\.6\.[0-2]|^v0\.5\./)) {
         patchLchmod(fs);
       }
       if (!fs.lutimes) {
@@ -87,14 +87,14 @@ var require_polyfills = __commonJS({
       fs.fstatSync = statFixSync(fs.fstatSync);
       fs.lstatSync = statFixSync(fs.lstatSync);
       if (fs.chmod && !fs.lchmod) {
-        fs.lchmod = function(path2, mode, cb) {
+        fs.lchmod = function(path3, mode, cb) {
           if (cb) process.nextTick(cb);
         };
         fs.lchmodSync = function() {
         };
       }
       if (fs.chown && !fs.lchown) {
-        fs.lchown = function(path2, uid, gid, cb) {
+        fs.lchown = function(path3, uid, gid, cb) {
           if (cb) process.nextTick(cb);
         };
         fs.lchownSync = function() {
@@ -161,10 +161,10 @@ var require_polyfills = __commonJS({
         };
       })(fs.readSync);
       function patchLchmod(fs2) {
-        fs2.lchmod = function(path2, mode, callback) {
+        fs2.lchmod = function(path3, mode, callback) {
           fs2.open(
-            path2,
-            constants.O_WRONLY | constants.O_SYMLINK,
+            path3,
+            constants2.O_WRONLY | constants2.O_SYMLINK,
             mode,
             function(err, fd) {
               if (err) {
@@ -179,8 +179,8 @@ var require_polyfills = __commonJS({
             }
           );
         };
-        fs2.lchmodSync = function(path2, mode) {
-          var fd = fs2.openSync(path2, constants.O_WRONLY | constants.O_SYMLINK, mode);
+        fs2.lchmodSync = function(path3, mode) {
+          var fd = fs2.openSync(path3, constants2.O_WRONLY | constants2.O_SYMLINK, mode);
           var threw = true;
           var ret;
           try {
@@ -200,9 +200,9 @@ var require_polyfills = __commonJS({
         };
       }
       function patchLutimes(fs2) {
-        if (constants.hasOwnProperty("O_SYMLINK") && fs2.futimes) {
-          fs2.lutimes = function(path2, at, mt, cb) {
-            fs2.open(path2, constants.O_SYMLINK, function(er, fd) {
+        if (constants2.hasOwnProperty("O_SYMLINK") && fs2.futimes) {
+          fs2.lutimes = function(path3, at, mt, cb) {
+            fs2.open(path3, constants2.O_SYMLINK, function(er, fd) {
               if (er) {
                 if (cb) cb(er);
                 return;
@@ -214,8 +214,8 @@ var require_polyfills = __commonJS({
               });
             });
           };
-          fs2.lutimesSync = function(path2, at, mt) {
-            var fd = fs2.openSync(path2, constants.O_SYMLINK);
+          fs2.lutimesSync = function(path3, at, mt) {
+            var fd = fs2.openSync(path3, constants2.O_SYMLINK);
             var ret;
             var threw = true;
             try {
@@ -333,11 +333,11 @@ var require_legacy_streams = __commonJS({
         ReadStream,
         WriteStream
       };
-      function ReadStream(path2, options) {
-        if (!(this instanceof ReadStream)) return new ReadStream(path2, options);
+      function ReadStream(path3, options) {
+        if (!(this instanceof ReadStream)) return new ReadStream(path3, options);
         Stream.call(this);
         var self = this;
-        this.path = path2;
+        this.path = path3;
         this.fd = null;
         this.readable = true;
         this.paused = false;
@@ -382,10 +382,10 @@ var require_legacy_streams = __commonJS({
           self._read();
         });
       }
-      function WriteStream(path2, options) {
-        if (!(this instanceof WriteStream)) return new WriteStream(path2, options);
+      function WriteStream(path3, options) {
+        if (!(this instanceof WriteStream)) return new WriteStream(path3, options);
         Stream.call(this);
-        this.path = path2;
+        this.path = path3;
         this.fd = null;
         this.writable = true;
         this.flags = "w";
@@ -528,14 +528,14 @@ var require_graceful_fs = __commonJS({
       fs2.createWriteStream = createWriteStream2;
       var fs$readFile = fs2.readFile;
       fs2.readFile = readFile4;
-      function readFile4(path2, options, cb) {
+      function readFile4(path3, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
-        return go$readFile(path2, options, cb);
-        function go$readFile(path3, options2, cb2, startTime) {
-          return fs$readFile(path3, options2, function(err) {
+        return go$readFile(path3, options, cb);
+        function go$readFile(path4, options2, cb2, startTime) {
+          return fs$readFile(path4, options2, function(err) {
             if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
-              enqueue([go$readFile, [path3, options2, cb2], err, startTime || Date.now(), Date.now()]);
+              enqueue([go$readFile, [path4, options2, cb2], err, startTime || Date.now(), Date.now()]);
             else {
               if (typeof cb2 === "function")
                 cb2.apply(this, arguments);
@@ -545,14 +545,14 @@ var require_graceful_fs = __commonJS({
       }
       var fs$writeFile = fs2.writeFile;
       fs2.writeFile = writeFile2;
-      function writeFile2(path2, data, options, cb) {
+      function writeFile2(path3, data, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
-        return go$writeFile(path2, data, options, cb);
-        function go$writeFile(path3, data2, options2, cb2, startTime) {
-          return fs$writeFile(path3, data2, options2, function(err) {
+        return go$writeFile(path3, data, options, cb);
+        function go$writeFile(path4, data2, options2, cb2, startTime) {
+          return fs$writeFile(path4, data2, options2, function(err) {
             if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
-              enqueue([go$writeFile, [path3, data2, options2, cb2], err, startTime || Date.now(), Date.now()]);
+              enqueue([go$writeFile, [path4, data2, options2, cb2], err, startTime || Date.now(), Date.now()]);
             else {
               if (typeof cb2 === "function")
                 cb2.apply(this, arguments);
@@ -563,14 +563,14 @@ var require_graceful_fs = __commonJS({
       var fs$appendFile = fs2.appendFile;
       if (fs$appendFile)
         fs2.appendFile = appendFile;
-      function appendFile(path2, data, options, cb) {
+      function appendFile(path3, data, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
-        return go$appendFile(path2, data, options, cb);
-        function go$appendFile(path3, data2, options2, cb2, startTime) {
-          return fs$appendFile(path3, data2, options2, function(err) {
+        return go$appendFile(path3, data, options, cb);
+        function go$appendFile(path4, data2, options2, cb2, startTime) {
+          return fs$appendFile(path4, data2, options2, function(err) {
             if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
-              enqueue([go$appendFile, [path3, data2, options2, cb2], err, startTime || Date.now(), Date.now()]);
+              enqueue([go$appendFile, [path4, data2, options2, cb2], err, startTime || Date.now(), Date.now()]);
             else {
               if (typeof cb2 === "function")
                 cb2.apply(this, arguments);
@@ -601,31 +601,31 @@ var require_graceful_fs = __commonJS({
       var fs$readdir = fs2.readdir;
       fs2.readdir = readdir2;
       var noReaddirOptionVersions = /^v[0-5]\./;
-      function readdir2(path2, options, cb) {
+      function readdir2(path3, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
-        var go$readdir = noReaddirOptionVersions.test(process.version) ? function go$readdir2(path3, options2, cb2, startTime) {
-          return fs$readdir(path3, fs$readdirCallback(
-            path3,
+        var go$readdir = noReaddirOptionVersions.test(process.version) ? function go$readdir2(path4, options2, cb2, startTime) {
+          return fs$readdir(path4, fs$readdirCallback(
+            path4,
             options2,
             cb2,
             startTime
           ));
-        } : function go$readdir2(path3, options2, cb2, startTime) {
-          return fs$readdir(path3, options2, fs$readdirCallback(
-            path3,
+        } : function go$readdir2(path4, options2, cb2, startTime) {
+          return fs$readdir(path4, options2, fs$readdirCallback(
+            path4,
             options2,
             cb2,
             startTime
           ));
         };
-        return go$readdir(path2, options, cb);
-        function fs$readdirCallback(path3, options2, cb2, startTime) {
+        return go$readdir(path3, options, cb);
+        function fs$readdirCallback(path4, options2, cb2, startTime) {
           return function(err, files) {
             if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
               enqueue([
                 go$readdir,
-                [path3, options2, cb2],
+                [path4, options2, cb2],
                 err,
                 startTime || Date.now(),
                 Date.now()
@@ -696,7 +696,7 @@ var require_graceful_fs = __commonJS({
         enumerable: true,
         configurable: true
       });
-      function ReadStream(path2, options) {
+      function ReadStream(path3, options) {
         if (this instanceof ReadStream)
           return fs$ReadStream.apply(this, arguments), this;
         else
@@ -716,7 +716,7 @@ var require_graceful_fs = __commonJS({
           }
         });
       }
-      function WriteStream(path2, options) {
+      function WriteStream(path3, options) {
         if (this instanceof WriteStream)
           return fs$WriteStream.apply(this, arguments), this;
         else
@@ -734,22 +734,22 @@ var require_graceful_fs = __commonJS({
           }
         });
       }
-      function createReadStream3(path2, options) {
-        return new fs2.ReadStream(path2, options);
+      function createReadStream3(path3, options) {
+        return new fs2.ReadStream(path3, options);
       }
-      function createWriteStream2(path2, options) {
-        return new fs2.WriteStream(path2, options);
+      function createWriteStream2(path3, options) {
+        return new fs2.WriteStream(path3, options);
       }
       var fs$open = fs2.open;
       fs2.open = open2;
-      function open2(path2, flags, mode, cb) {
+      function open2(path3, flags, mode, cb) {
         if (typeof mode === "function")
           cb = mode, mode = null;
-        return go$open(path2, flags, mode, cb);
-        function go$open(path3, flags2, mode2, cb2, startTime) {
-          return fs$open(path3, flags2, mode2, function(err, fd) {
+        return go$open(path3, flags, mode, cb);
+        function go$open(path4, flags2, mode2, cb2, startTime) {
+          return fs$open(path4, flags2, mode2, function(err, fd) {
             if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
-              enqueue([go$open, [path3, flags2, mode2, cb2], err, startTime || Date.now(), Date.now()]);
+              enqueue([go$open, [path4, flags2, mode2, cb2], err, startTime || Date.now(), Date.now()]);
             else {
               if (typeof cb2 === "function")
                 cb2.apply(this, arguments);
@@ -1004,9 +1004,9 @@ var require_retry = __commonJS({
         }
       }
       for (var i = 0; i < methods.length; i++) {
-        var method2 = methods[i];
-        var original = obj[method2];
-        obj[method2] = function retryWrapper(original2) {
+        var method4 = methods[i];
+        var original = obj[method4];
+        obj[method4] = function retryWrapper(original2) {
           var op = exports.operation(options);
           var args = Array.prototype.slice.call(arguments, 1);
           var callback = args.pop();
@@ -1023,7 +1023,7 @@ var require_retry = __commonJS({
             original2.apply(obj, args);
           });
         }.bind(obj, original);
-        obj[method2].options = options;
+        obj[method4].options = options;
       }
     };
   }
@@ -1278,7 +1278,7 @@ var require_mtime_precision = __commonJS({
 var require_lockfile = __commonJS({
   "../../../../node_modules/.pnpm/proper-lockfile@4.1.2/node_modules/proper-lockfile/lib/lockfile.js"(exports, module) {
     "use strict";
-    var path2 = __require("path");
+    var path3 = __require("path");
     var fs = require_graceful_fs();
     var retry = require_retry2();
     var onExit = require_signal_exit();
@@ -1289,7 +1289,7 @@ var require_lockfile = __commonJS({
     }
     function resolveCanonicalPath(file, options, callback) {
       if (!options.realpath) {
-        return callback(null, path2.resolve(file));
+        return callback(null, path3.resolve(file));
       }
       options.fs.realpath(file, callback);
     }
@@ -1519,12 +1519,12 @@ var require_adapter = __commonJS({
     function createSyncFs(fs2) {
       const methods = ["mkdir", "realpath", "stat", "rmdir", "utimes"];
       const newFs = { ...fs2 };
-      methods.forEach((method2) => {
-        newFs[method2] = (...args) => {
+      methods.forEach((method4) => {
+        newFs[method4] = (...args) => {
           const callback = args.pop();
           let ret;
           try {
-            ret = fs2[`${method2}Sync`](...args);
+            ret = fs2[`${method4}Sync`](...args);
           } catch (err) {
             return callback(err);
           }
@@ -1533,7 +1533,7 @@ var require_adapter = __commonJS({
       });
       return newFs;
     }
-    function toPromise(method2) {
+    function toPromise(method4) {
       return (...args) => new Promise((resolve, reject2) => {
         args.push((err, result) => {
           if (err) {
@@ -1542,10 +1542,10 @@ var require_adapter = __commonJS({
             resolve(result);
           }
         });
-        method2(...args);
+        method4(...args);
       });
     }
-    function toSync(method2) {
+    function toSync(method4) {
       return (...args) => {
         let err;
         let result;
@@ -1553,7 +1553,7 @@ var require_adapter = __commonJS({
           err = _err;
           result = _result;
         });
-        method2(...args);
+        method4(...args);
         if (err) {
           throw err;
         }
@@ -1661,6 +1661,355 @@ function createArchiveImportApplication(port, dependencies) {
   };
 }
 
+// ../../packages/contracts/whiteboard/stickers.ts
+var yellow = "#f5c75e";
+var orange = "#e99662";
+var red = "#e87970";
+var blue = "#8eb5dc";
+var green = "#b3c894";
+var pink = "#e9a9c7";
+var purple = "#bab0da";
+function path(d, fill = "none") {
+  return { kind: "path", d, fill };
+}
+function circle(cx, cy, r, fill) {
+  return { kind: "circle", cx, cy, r, fill };
+}
+function rect(x, y, width, height, fill, rx = 1) {
+  return { kind: "rect", x, y, width, height, rx, fill };
+}
+function sticker(id, label2, keywords, ...graphics) {
+  return { id, label: label2, keywords, graphics };
+}
+var definitions = [
+  sticker(
+    "smile",
+    "\u7B11\u8138",
+    "smile happy \u5F00\u5FC3 \u8868\u60C5",
+    circle(12, 12, 9, yellow),
+    path("M7 10q1-3 3 0m4 0q1-3 3 0M7 13h10q-1 6-5 6t-5-6Z", "#fff1be")
+  ),
+  sticker("plus", "\u52A0\u53F7", "plus add \u6DFB\u52A0 \u6B63\u5411", path("M9 3h6v6h6v6h-6v6H9v-6H3V9h6Z", green)),
+  sticker(
+    "thumbs-up",
+    "\u8D5E\u540C",
+    "thumbs up agree good like \u8D5E \u70B9\u8D5E",
+    path("M8 10c3-1 4-4 5-7 3 0 3 3 1 6h5q3 0 2 3l-2 8H8ZM3 10h5v10H3Z", yellow),
+    path("M16 12h5m-6 4h5")
+  ),
+  sticker(
+    "thumbs-down",
+    "\u4E0D\u8D5E\u540C",
+    "thumbs down disagree \u4E0D\u540C\u610F \u53CD\u5BF9",
+    path("M8 14c3 1 4 4 5 7 3 0 3-3 1-6h5q3 0 2-3l-2-8H8ZM3 4h5v10H3Z", yellow),
+    path("M16 12h5m-6-4h5")
+  ),
+  sticker(
+    "heart",
+    "\u7231\u5FC3",
+    "heart love \u559C\u6B22 \u5173\u5FC3",
+    path("M12 21C8 18 3 14 3 9 3 3 9 2 12 7c3-5 9-4 9 2 0 5-5 9-9 12Z", red)
+  ),
+  sticker(
+    "wave",
+    "\u6325\u624B",
+    "wave hand hello \u4F60\u597D \u62DB\u547C",
+    path(
+      "m7 20-3-8q0-2 2-1l2 3-2-8q0-2 2-1l2 7V4q1-2 2 0v8l2-7q2-1 2 1l-1 7 2-4q2-1 2 1l-2 8q-3 5-10 2Z",
+      yellow
+    ),
+    path("M3 5 5 3m14 1 2 2M2 8H1")
+  ),
+  sticker(
+    "clap",
+    "\u9F13\u638C",
+    "clap applause hands \u652F\u6301 \u62CD\u624B",
+    path("M4 20V9q1-2 2 0v5-8q1-2 2 0v7-9q1-2 2 0v9-7q1-2 2 0v9l2-3q2-1 2 1l-3 7Z", yellow),
+    path("m14 20 4-7V7q2-2 2 0v13ZM5 2 4 1m10 2 1-2m6 3 1-1", "#f7d98b")
+  ),
+  sticker(
+    "handshake",
+    "\u63E1\u624B",
+    "handshake agree partnership \u5408\u4F5C \u5171\u8BC6",
+    path("m2 9 5-5 5 2 5-2 5 5-4 7-5 4-8-5Z", yellow),
+    path("m8 9 4-3 4 3q0 3-3 2l-2-1-3 3m1 4 2-2m1 4 2-2m1 0 2-2")
+  ),
+  sticker(
+    "heart-hand",
+    "\u7528\u5FC3\u652F\u6301",
+    "care heart support \u5173\u6000 \u611F\u8C22",
+    path("M11 12C7 10 5 8 5 5q2-4 6 0 4-4 6 0 1 3-6 7Z", red),
+    path("M3 15h4l4 2h6q2-1 1-3l3-1q2 4-3 7H6l-3 1Z", pink)
+  ),
+  sticker(
+    "bulb",
+    "\u60F3\u6CD5",
+    "lightbulb idea insight \u7075\u611F \u70B9\u5B50",
+    path("M8 16c0-3-4-4-3-8 1-7 13-7 14 0 1 4-3 5-3 8ZM8 17h8v4H8Z", "#f8dda0"),
+    path("m10 15-1-6 3 2 3-2-1 6M9 19h6")
+  ),
+  sticker(
+    "question",
+    "\u95EE\u9898",
+    "question help why \u7591\u95EE \u5E2E\u52A9",
+    circle(12, 12, 9, purple),
+    path("M9 8q0-4 4-3 5 2 0 6-2 1-1 4m0 3h.1")
+  ),
+  sticker(
+    "alert",
+    "\u63D0\u9192",
+    "alert warning caution \u6CE8\u610F \u98CE\u9669 \u8B66\u544A",
+    path("M12 3 22 21H2Z", yellow),
+    path("M12 8v6"),
+    circle(12, 17.5, 0.65, "#273443")
+  ),
+  sticker(
+    "check",
+    "\u5B8C\u6210",
+    "check done yes success \u6210\u529F \u901A\u8FC7 \u5BF9\u52FE",
+    rect(4, 4, 16, 16, green, 2),
+    path("m7 11 4 4L22 5")
+  ),
+  sticker(
+    "cross",
+    "\u53D6\u6D88",
+    "cross no cancel stop \u62D2\u7EDD \u9519\u8BEF \u5173\u95ED",
+    circle(12, 12, 9, red),
+    path("m8 8 8 8m0-8-8 8")
+  ),
+  sticker(
+    "flag",
+    "\u65D7\u5E1C",
+    "flag milestone mark \u91CC\u7A0B\u7891 \u6807\u8BB0",
+    path("M5 21V3m1 1h15l-4 6 4 5H6Z", red),
+    circle(5, 3, 1.5, "#f7eee7")
+  ),
+  sticker(
+    "bolt",
+    "\u95EA\u7535",
+    "bolt lightning zap fast \u5FEB\u901F \u80FD\u91CF",
+    path("m14 2-11 12h7l-1 8L22 9h-8Z", yellow)
+  ),
+  sticker(
+    "pin",
+    "\u5730\u70B9",
+    "pin location map \u5B9A\u4F4D \u4F4D\u7F6E",
+    path("M12 22C8 16 4 13 4 9a8 8 0 0 1 16 0c0 4-4 7-8 13Z", red),
+    circle(12, 9, 3, "#f4aa9f")
+  ),
+  sticker(
+    "search",
+    "\u53D1\u73B0",
+    "search find discover \u641C\u7D22 \u67E5\u627E \u653E\u5927\u955C",
+    circle(9, 9, 6.5, blue),
+    path("m14 13 8 7-3 3-7-8Z", "#b9d5ec")
+  ),
+  sticker(
+    "key",
+    "\u94A5\u5319",
+    "key access important \u5173\u952E \u6743\u9650",
+    path("M14 11a6 6 0 1 0-5 4v6h4v-3h3v-3h-3Z", yellow),
+    circle(8, 8, 2.5, "#f8e1aa")
+  ),
+  sticker(
+    "party",
+    "\u5E86\u795D",
+    "party celebrate confetti \u5F69\u5E26 \u795D\u8D3A",
+    path("M4 21 7 7l10 10Z", pink),
+    path("m11 5 2-3m4 7 4-1m-7 5 5-6m1 9 3 2M7 3l1 1"),
+    circle(18, 3, 1, yellow),
+    circle(22, 12, 1, blue)
+  ),
+  sticker(
+    "trophy",
+    "\u5956\u676F",
+    "trophy win award \u51A0\u519B \u5956\u52B1",
+    path("M7 3h10v9q-1 5-5 5t-5-5Zm3 14h4v3h-4ZM7 21h10M7 5H3q0 8 5 7M17 5h4q0 8-5 7", yellow)
+  ),
+  sticker(
+    "crown",
+    "\u7687\u51A0",
+    "crown royal best \u7B2C\u4E00 \u4F18\u79C0",
+    path("M5 20 3 7l6 5 3-9 3 9 6-5-2 13Z", yellow),
+    circle(3, 6, 1.4, "#f8e1aa"),
+    circle(12, 3, 1.4, "#f8e1aa"),
+    circle(21, 6, 1.4, "#f8e1aa")
+  ),
+  sticker(
+    "gift",
+    "\u793C\u7269",
+    "gift present thanks \u8D60\u793C \u60CA\u559C",
+    rect(4, 10, 16, 11, red),
+    rect(3, 7, 18, 4, "#f2a79b"),
+    path("M12 7v14M12 7C3 8 4 1 8 3l4 4Zm0 0c9 1 8-6 4-4Z", "#f1b1bd")
+  ),
+  sticker(
+    "clock",
+    "\u65F6\u949F",
+    "clock time deadline \u65F6\u95F4 \u622A\u6B62",
+    circle(12, 12, 9, blue),
+    path("M12 6v7h5")
+  ),
+  sticker(
+    "calendar",
+    "\u65E5\u5386",
+    "calendar date plan \u65E5\u671F \u8BA1\u5212",
+    rect(3, 5, 18, 16, red, 2),
+    path("M3 10h18M8 3v5m8-5v5M8 10v11m8-11v11M3 15h18")
+  ),
+  sticker(
+    "hourglass",
+    "\u6C99\u6F0F",
+    "hourglass wait patience \u7B49\u5F85 \u5012\u8BA1\u65F6",
+    path("M5 3h14c0 6-2 6-5 9 3 3 5 3 5 9H5c0-6 2-6 5-9-3-3-5-3-5-9Z", "#f9e8ba"),
+    path("M6 6h12l-6 5Zm0 13 6-6 6 6Z", yellow),
+    path("M4 2h16M4 22h16")
+  ),
+  sticker(
+    "messages",
+    "\u8BA8\u8BBA",
+    "messages chat discuss \u5BF9\u8BDD \u6C9F\u901A",
+    path("M14 17H7l-4 3v-7a7 7 0 1 1 11 4Z", blue),
+    path("M14 10q8-2 8 5v7l-4-2q-7 1-8-5Z", "#aecbe5")
+  ),
+  sticker(
+    "megaphone",
+    "\u516C\u544A",
+    "megaphone announce broadcast \u5BA3\u5E03 \u901A\u77E5",
+    path("m3 10 13-6v16L3 14Zm3 5 2 6h4l-2-7Z", orange),
+    path("M18 8q4 4 0 8m2-10q6 6 0 12")
+  ),
+  sticker(
+    "pencil",
+    "\u94C5\u7B14",
+    "pencil edit write \u7F16\u8F91 \u4E66\u5199",
+    path("m4 15 11-12q2-2 5 1t1 4L9 20l-7 2Z", yellow),
+    path("m14 4 6 6M4 15l5 5m-6 1 2-5"),
+    path("m3 22 5-1 4 1 3-2 4 1 3-2")
+  ),
+  sticker(
+    "chart",
+    "\u589E\u957F\u56FE\u8868",
+    "chart growth graph mountain \u6570\u636E \u8FDB\u5C55",
+    path("M3 21V4h3v14h15v3Z", purple),
+    path("m7 15 4-5 4 2 6-8v14H7Z", green),
+    path("m16 4 5-1 1 5")
+  ),
+  sticker(
+    "trending-up",
+    "\u5411\u4E0A\u8D8B\u52BF",
+    "trending up progress improve \u63D0\u5347 \u8D8B\u52BF",
+    path("M3 21V13h5v-4h5V5h6V2l4 5-4 5V9h-3v5h-5v4H7v3Z", purple)
+  ),
+  sticker(
+    "send",
+    "\u7EB8\u98DE\u673A",
+    "send paper plane launch \u53D1\u9001 \u51FA\u53D1",
+    path("M2 8 22 2l-6 20-5-8Z", blue),
+    path("m3 8 8 6L22 2M11 14l-1 7 6-5")
+  ),
+  sticker(
+    "sun",
+    "\u592A\u9633",
+    "sun bright day \u9633\u5149 \u660E\u4EAE",
+    path("m12 1 2 5 4-3-1 5 5 1-4 4 4 3-5 1 1 5-5-3-3 4-1-5-5 1 3-5-4-3 5-1-1-5 5 3Z", "#f7dc8a"),
+    circle(12, 12, 4.5, yellow)
+  ),
+  sticker(
+    "sprout",
+    "\u840C\u82BD",
+    "sprout plant grow \u65B0\u82BD \u6210\u957F",
+    path("M12 22V11M12 13C1 13 1 3 6 5c6 0 6 8 6 8Zm0-2C12 0 23 1 22 6c-1 6-10 5-10 5Z", green),
+    path("M5 22h14")
+  ),
+  sticker(
+    "flower",
+    "\u82B1\u6735",
+    "flower bloom beauty \u9C9C\u82B1 \u7EFD\u653E",
+    path("M12 22V9m0 8q-9 0-9-6 7-1 9 6Zm0 3q9-1 9-7-7-1-9 7Z", green),
+    path("M12 3q4-4 5 1 5-1 3 4 2 4-4 4-3 4-5-1-6 0-4-4-3-4 1-5Z", pink),
+    circle(13, 6.5, 2, "#f6d58a")
+  ),
+  sticker(
+    "coffee",
+    "\u5496\u5561",
+    "coffee break cup \u4F11\u606F \u5496\u5561\u676F",
+    path("M4 8h13v9q-1 4-6 4t-7-4Zm13 1h3q4 5-3 7Z", "#c8a589"),
+    path("M2 22h18M7 5q-2-2 0-4m5 4q-2-2 0-4")
+  ),
+  sticker(
+    "piggy-bank",
+    "\u50A8\u84C4\u7F50",
+    "piggy bank save money \u5B58\u94B1 \u9884\u7B97",
+    path("M6 7q-2-5 3-3l2 2q9-2 9 5l3 1v5l-4 1v4h-4v-3H9v3H5v-5Q0 15 3 10L1 8q3-2 5-1Z", pink),
+    path("M10 8h5"),
+    circle(18, 11, 0.6, "#273443")
+  ),
+  sticker(
+    "arrow-right",
+    "\u5411\u53F3",
+    "arrow right next forward \u4E0B\u4E00\u6B65 \u524D\u8FDB",
+    path("M3 9h11V3l8 9-8 9v-6H3Z", blue)
+  ),
+  sticker("arrow-up", "\u5411\u4E0A", "arrow up top \u4E0A\u5347 \u9876\u90E8", path("M9 22V11H3l9-9 9 9h-6v11Z", green)),
+  sticker(
+    "repeat",
+    "\u5FAA\u73AF",
+    "repeat loop cycle \u8FED\u4EE3 \u5FAA\u73AF",
+    path("M5 9q1-7 10-5l2-2v6h-6l2-2q-5-1-6 4ZM19 15q-1 7-10 5l-2 2v-6h6l-2 2q5 1 6-4Z", green)
+  ),
+  sticker(
+    "target",
+    "\u76EE\u6807",
+    "target aim focus \u4E13\u6CE8 \u9776\u5FC3",
+    circle(12, 12, 9, red),
+    circle(12, 12, 6, "#f9e8db"),
+    circle(12, 12, 3, red),
+    path("m12 12 9-9m-5 0h5v5")
+  ),
+  sticker(
+    "rocket",
+    "\u706B\u7BAD",
+    "rocket launch release \u53D1\u5E03 \u542F\u52A8",
+    path("M9 16 5 19l-1-7 4-3m7 6 0 5-6 1 3-4", orange),
+    path("M7 15Q7 3 21 2q1 13-11 15Z", blue),
+    circle(15, 8, 2.5, "#dcebf5"),
+    path("m7 17-4 4 5-1", yellow)
+  )
+];
+var byId = new Map(definitions.map((definition) => [definition.id, definition]));
+var stickerCatalog = definitions.map(
+  ({ id, label: label2, keywords }) => ({
+    id,
+    label: label2,
+    keywords
+  })
+);
+function stickerDefinition(id) {
+  return id === void 0 ? void 0 : byId.get(id);
+}
+
+// src/modules/catalog/domain/thumbnail-sticker.ts
+function graphicMarkup(graphic) {
+  const { fill } = graphic;
+  switch (graphic.kind) {
+    case "path":
+      return `<path d="${graphic.d}" fill="${fill}"/>`;
+    case "circle":
+      return `<circle cx="${graphic.cx}" cy="${graphic.cy}" r="${graphic.r}" fill="${fill}"/>`;
+    case "rect":
+      return `<rect x="${graphic.x}" y="${graphic.y}" width="${graphic.width}" height="${graphic.height}" rx="${graphic.rx}" fill="${fill}"/>`;
+  }
+}
+function renderThumbnailSticker(id, frame) {
+  const definition = typeof id === "string" ? stickerDefinition(id) : void 0;
+  if (!definition) {
+    return void 0;
+  }
+  const graphics = definition.graphics.map(graphicMarkup).join("");
+  return `<svg ${frame} viewBox="0 0 24 24"><g stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="4">${graphics}</g><g stroke="#273443" stroke-width="1.3">${graphics}</g></g></svg>`;
+}
+
 // src/modules/catalog/domain/thumbnail.ts
 var imageWidth = 560;
 var imageHeight = 320;
@@ -1686,8 +2035,8 @@ function readRecord(value) {
     }
   }
 }
-function color(value, fallback) {
-  return typeof value === "string" && colorLiteral.test(value) ? value : fallback;
+function color(value, fallback2) {
+  return typeof value === "string" && colorLiteral.test(value) ? value : fallback2;
 }
 function xml(value) {
   return value.replace(new RegExp("\\p{Cc}|[\\uFFFE\\uFFFF]", "gu"), "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;");
@@ -1732,6 +2081,123 @@ function previewLabel(label2, frame) {
   const centerY = frame.y + frame.height / 2 + 3;
   return `<text x="${centerX}" y="${centerY}" text-anchor="middle" fill="${ink}" font-family="sans-serif" font-size="9">${xml(display)}</text>`;
 }
+function textValue(value) {
+  return typeof value === "string" ? value : "";
+}
+function blockText(value) {
+  if (!Array.isArray(value)) {
+    return textValue(value);
+  }
+  return value.slice(0, 120).map((run) => {
+    const entry = record(run);
+    const children = entry?.content;
+    return entry?.type === "link" && Array.isArray(children) ? children.slice(0, 24).map((item) => textValue(record(item)?.text)).join("") : textValue(entry?.text ?? run);
+  }).join("");
+}
+function documentLines(content, count) {
+  const pending = Array.isArray(content.blocks) ? content.blocks.slice(0, 48).reverse() : [];
+  const lines = [];
+  for (let visited = 0; visited < 48 && pending.length && lines.length < count; visited += 1) {
+    const block = record(pending.pop());
+    const text3 = blockText(block?.content) || textValue(record(block?.props)?.caption);
+    if (text3.trim()) {
+      lines.push(text3);
+    }
+    if (Array.isArray(block?.children)) {
+      pending.push(...block.children.slice(0, 48).reverse());
+    }
+  }
+  return lines;
+}
+function todoLines(content, count) {
+  const items = Array.isArray(content.items) ? content.items : [];
+  return items.slice(0, count).map((raw) => {
+    const item = record(raw);
+    return (item?.checked === true ? "\u2713 " : "\u25A1 ") + textValue(item?.text);
+  });
+}
+function truncateLine(text3, width, fontSize) {
+  const end2 = width / fontSize;
+  let extent = 0;
+  let result = "";
+  for (const character of text3.trim().replace(/\s+/gu, " ").slice(0, 360)) {
+    extent += character.codePointAt(0) > 255 ? 1 : 0.58;
+    if (extent > end2) {
+      return result + "\u2026";
+    }
+    result += character;
+  }
+  return result;
+}
+function previewTextContent(object3, frame, scale) {
+  const { content, kind, label: label2 } = object3;
+  if (!content || frame.width < 27 || frame.height < 12) {
+    return void 0;
+  }
+  const isCard = kind === "document" || kind === "todo";
+  const plain = textValue(content.text);
+  if (!isCard && !plain.trim()) {
+    return void 0;
+  }
+  const textSize = typeof content.fontSize === "number" ? content.fontSize : 15;
+  const fontSize = Math.min(16, Math.max(5, textSize * scale));
+  const pad2 = Math.max(2, fontSize * 0.5);
+  const step2 = fontSize * 1.35;
+  const count = Math.min(12, Math.floor((frame.height - pad2 * 2) / step2));
+  if (count < 1) {
+    return void 0;
+  }
+  const title = textValue(content.title) || label2;
+  const lines = kind === "document" ? documentLines(content, count - 1) : todoLines(content, count - 1);
+  const text3 = isCard ? [title, ...lines] : plain.split("\n", count);
+  const x = frame.x + pad2;
+  const y = frame.y + pad2 + fontSize;
+  const rows2 = text3.map((line, index) => {
+    const display = truncateLine(line, frame.width - pad2 * 2, fontSize);
+    const weight = isCard && index === 0 ? ' font-weight="bold"' : "";
+    return `<tspan x="${x}" y="${y + index * step2}"${weight}>${xml(display)}</tspan>`;
+  }).join("");
+  return rows2 ? `<text fill="${color(content.color, ink)}" font-family="sans-serif" font-size="${fontSize}">${rows2}</text>` : void 0;
+}
+function detailedContent(object3, frame, scale, shape) {
+  if (object3.kind === "sticker") {
+    const graphic = renderThumbnailSticker(object3.content?.stickerId, dimensions(frame));
+    return graphic ?? previewLabel(textValue(object3.content?.fallback) || object3.label, frame);
+  }
+  if (object3.html) {
+    const { x, y } = frame;
+    const size = `width="${object3.width}" height="${object3.height}"`;
+    return `${shape}<g transform="translate(${x} ${y}) scale(${scale})"><foreignObject ${size} style="overflow:hidden">${object3.html}</foreignObject></g>`;
+  }
+  if (object3.image && inlineImage.test(object3.image)) {
+    return shape + previewImage(object3.image, object3.content, frame);
+  }
+  const text3 = previewTextContent(object3, frame, scale);
+  return text3 === void 0 ? void 0 : shape + text3;
+}
+function finiteNumber(value, fallback2) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback2;
+}
+function previewImage(image, data, frame) {
+  const crop = record(data?.crop);
+  const natural = record(data?.naturalSize);
+  const naturalWidth = finiteNumber(natural?.width, 0);
+  const naturalHeight = finiteNumber(natural?.height, 0);
+  const usableSize = [naturalWidth, naturalHeight].every(
+    (value) => Number.isInteger(value) && value > 0 && value <= 4294967295
+  );
+  if (!crop || !usableSize) {
+    return `<image ${dimensions(frame)} preserveAspectRatio="xMidYMid meet" href="${image}"/>`;
+  }
+  const { width, height } = frame;
+  const zoom = Math.max(1, Math.min(10, finiteNumber(crop.zoom, 1)));
+  const scale = Math.max(width / naturalWidth, height / naturalHeight) * zoom;
+  const imageWidth2 = naturalWidth * scale;
+  const imageHeight2 = naturalHeight * scale;
+  const x = (width - imageWidth2) * Math.max(0, Math.min(1, finiteNumber(crop.x, 0.5)));
+  const y = (height - imageHeight2) * Math.max(0, Math.min(1, finiteNumber(crop.y, 0.5)));
+  return `<svg ${dimensions(frame)} viewBox="0 0 ${width} ${height}" overflow="hidden"><image x="${x}" y="${y}" width="${imageWidth2}" height="${imageHeight2}" preserveAspectRatio="none" href="${image}"/></svg>`;
+}
 function point(input) {
   const value = record(input);
   const x = value?.x;
@@ -1754,21 +2220,21 @@ function attachedPoint(object3, port) {
       return { x: x + width / 2, y: y + height / 2 };
   }
 }
-function previewEndpoint(endpoint2, byId2, fallback) {
+function previewEndpoint(endpoint2, byId3, fallback2) {
   const value = record(endpoint2);
   const attachment = record(value?.attachment);
-  const object3 = typeof attachment?.objectId === "string" ? byId2.get(attachment.objectId) : void 0;
-  return object3 ? attachedPoint(object3, attachment?.port) : point(value?.point) ?? fallback;
+  const object3 = typeof attachment?.objectId === "string" ? byId3.get(attachment.objectId) : void 0;
+  return object3 ? attachedPoint(object3, attachment?.port) : point(value?.point) ?? fallback2;
 }
-function previewConnector(object3, projection, stroke) {
+function previewConnector(object3, projection2, stroke) {
   const info = readRecord(object3.detail);
-  const start = previewEndpoint(info?.start, projection.byId, object3);
-  const stop = previewEndpoint(info?.end, projection.byId, {
+  const start = previewEndpoint(info?.start, projection2.byId, object3);
+  const stop = previewEndpoint(info?.end, projection2.byId, {
     x: object3.x + object3.width,
     y: object3.y + object3.height
   });
   const bends = Array.isArray(info?.bends) ? info.bends.slice(0, 16).flatMap((bend) => point(bend) ?? []) : [];
-  const points = [start, ...bends, stop].map(projection.project).map(({ x, y }) => `${x},${y}`).join(" ");
+  const points = [start, ...bends, stop].map(projection2.project).map(({ x, y }) => `${x},${y}`).join(" ");
   return `<polyline points="${points}" fill="none" stroke="${stroke}" stroke-width="1.1"/>`;
 }
 function appearance(object3) {
@@ -1780,20 +2246,20 @@ function appearance(object3) {
   const dash = style?.dashed === true ? ' stroke-dasharray="3 2"' : "";
   return { fill, stroke, dash };
 }
-function previewObject(object3, projection, includeImages) {
+function previewObject(object3, projection2, detailed) {
   const { fill, stroke, dash } = appearance(object3);
   if (object3.kind === "connector" || object3.kind === "arrow") {
-    return previewConnector(object3, projection, stroke);
+    return previewConnector(object3, projection2, stroke);
   }
-  const position = projection.project(object3);
-  const width = Math.max(1, Math.round(object3.width * projection.scale * 10) / 10);
-  const height = Math.max(1, Math.round(object3.height * projection.scale * 10) / 10);
+  const position = projection2.project(object3);
+  const width = Math.max(1, Math.round(object3.width * projection2.scale * 10) / 10);
+  const height = Math.max(1, Math.round(object3.height * projection2.scale * 10) / 10);
   const frame = { ...position, width, height };
   const info = readRecord(object3.detail);
   const paint = `fill="${fill}" stroke="${stroke}" stroke-width="1"${dash}`;
   const shape = previewShape(frame, info?.outline, paint);
-  const image = includeImages && object3.image && inlineImage.test(object3.image) ? object3.image : void 0;
-  const content = image ? `${shape}<image ${dimensions(frame)} preserveAspectRatio="xMidYMid meet" href="${image}"/>` : shape + previewLabel(object3.label, frame);
+  const details = detailed ? detailedContent(object3, frame, projection2.scale, shape) : void 0;
+  const content = details ?? shape + previewLabel(object3.label, frame);
   if (object3.rotation === 0) {
     return content;
   }
@@ -1817,8 +2283,8 @@ function projectScene({ objects, left, top, right, bottom }) {
     })
   };
 }
-function renderOverview(scene, projection, includeImages) {
-  const content = scene.objects.map((object3) => previewObject(object3, projection, includeImages)).join("");
+function renderOverview(scene, projection2, detailed) {
+  const content = scene.objects.map((object3) => previewObject(object3, projection2, detailed)).join("");
   return new TextEncoder().encode(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${imageWidth}" height="${imageHeight}" viewBox="0 0 ${imageWidth} ${imageHeight}"><rect width="100%" height="100%" fill="${paper}"/>${content}</svg>`
   );
@@ -1827,9 +2293,9 @@ function renderCatalogThumbnail(scene) {
   if (scene.objects.length === 0) {
     return void 0;
   }
-  const projection = projectScene(scene);
-  const detailed = renderOverview(scene, projection, true);
-  const content = detailed.byteLength > previewBytes ? renderOverview(scene, projection, false) : detailed;
+  const projection2 = projectScene(scene);
+  const detailed = renderOverview(scene, projection2, true);
+  const content = detailed.byteLength > previewBytes ? renderOverview(scene, projection2, false) : detailed;
   return content.byteLength <= previewBytes ? { revision: scene.revision, mimeType: "image/svg+xml", content } : void 0;
 }
 
@@ -2084,22 +2550,22 @@ function manageBoard(repository, actorId2, command, now) {
     (writer2) => manage(writer2, actorId2, command, now)
   );
 }
-function uniqueTargets(targets) {
-  if (targets.length === 0 || targets.length > maxPurgeTargets) {
+function uniqueTargets(targets2) {
+  if (targets2.length === 0 || targets2.length > maxPurgeTargets) {
     return void 0;
   }
-  const byId2 = /* @__PURE__ */ new Map();
-  for (const target2 of targets) {
+  const byId3 = /* @__PURE__ */ new Map();
+  for (const target2 of targets2) {
     if (!validTarget(target2)) {
       return void 0;
     }
-    const existing = byId2.get(target2.boardId);
+    const existing = byId3.get(target2.boardId);
     if (existing && existing.expectedEntryVersion !== target2.expectedEntryVersion) {
       return void 0;
     }
-    byId2.set(target2.boardId, target2);
+    byId3.set(target2.boardId, target2);
   }
-  return [...byId2.values()];
+  return [...byId3.values()];
 }
 function purgeOne(writer2, actorId2, target2) {
   const { boardId } = target2;
@@ -2114,22 +2580,22 @@ function purgeOne(writer2, actorId2, target2) {
   writer2.deleteBoard(boardId);
   return { boardId, deleted: true };
 }
-function purgeSignature(targets) {
-  const entries = targets.map(
+function purgeSignature(targets2) {
+  const entries = targets2.map(
     ({ boardId, expectedEntryVersion }) => JSON.stringify([boardId, expectedEntryVersion.toString()])
   );
   return JSON.stringify(["purge", entries.sort()]);
 }
 function purgeBoards(repository, actorId2, command) {
   const { commandId } = command;
-  const targets = uniqueTargets(command.targets);
-  if (!targets) {
+  const targets2 = uniqueTargets(command.targets);
+  if (!targets2) {
     return rejection(commandId, "invalidCommand");
   }
-  return execute(repository, actorId2, commandId, purgeSignature(targets), (writer2) => ({
+  return execute(repository, actorId2, commandId, purgeSignature(targets2), (writer2) => ({
     kind: "purged",
     commandId,
-    items: targets.map((target2) => purgeOne(writer2, actorId2, target2))
+    items: targets2.map((target2) => purgeOne(writer2, actorId2, target2))
   }));
 }
 
@@ -2275,7 +2741,7 @@ function documentUnits(data, ids) {
   if (data.schemaVersion !== 1 || !Array.isArray(data.blocks)) {
     return void 0;
   }
-  const targets = new Set(ids);
+  const targets2 = new Set(ids);
   const found = /* @__PURE__ */ new Map();
   const blocks = [...data.blocks];
   for (let index = 0; index < blocks.length && index < maximumBlockNodes; index += 1) {
@@ -2283,7 +2749,7 @@ function documentUnits(data, ids) {
     if (!block) {
       continue;
     }
-    if (typeof block.blockId === "string" && targets.has(block.blockId)) {
+    if (typeof block.blockId === "string" && targets2.has(block.blockId)) {
       found.set(block.blockId, excerpt(block.content).trim());
     }
     if (Array.isArray(block.children)) {
@@ -2292,7 +2758,7 @@ function documentUnits(data, ids) {
       }
     }
   }
-  return found.size === targets.size ? ids.map((id) => found.get(id)).filter(Boolean).join("\n").slice(0, maximumExcerpt) : void 0;
+  return found.size === targets2.size ? ids.map((id) => found.get(id)).filter(Boolean).join("\n").slice(0, maximumExcerpt) : void 0;
 }
 function todoUnit(data, itemId) {
   if (!Array.isArray(data.items)) {
@@ -2444,14 +2910,19 @@ function requireWriteAccess(reader2, actor, boardId) {
 function canDeleteThread(actor, access, thread) {
   return permitsFeedback(access) && (access.isOwner || thread.first.authorActorId === actor.id);
 }
-function viewMessage(actor, access, message) {
+function viewMessage(actor, access, message, legacyNames) {
   const authoredByViewer = message.authorActorId === actor.id;
-  return { ...message, authoredByViewer, canEdit: permitsFeedback(access) && authoredByViewer };
+  return {
+    ...message,
+    authorName: message.authorName ?? legacyNames?.(message.authorActorId),
+    authoredByViewer,
+    canEdit: permitsFeedback(access) && authoredByViewer
+  };
 }
-function viewThread(actor, access, thread) {
+function viewThread(actor, access, thread, legacyNames) {
   return {
     ...thread,
-    first: viewMessage(actor, access, thread.first),
+    first: viewMessage(actor, access, thread.first, legacyNames),
     canResolve: permitsFeedback(access),
     canDelete: canDeleteThread(actor, access, thread)
   };
@@ -2529,6 +3000,7 @@ function makeMessage(context, messageId, text3, updatedAtMillis) {
   return {
     messageId,
     authorActorId: context.actor.id,
+    authorName: context.authorName,
     text: text3,
     version: 1n,
     createdAtMillis: updatedAtMillis,
@@ -2557,16 +3029,16 @@ function createThread(context, operation) {
   }
   const object3 = target2.kind === "board" ? void 0 : writer2.getObject(boardId, target2.objectId);
   const content = target2.kind === "content" && object3 ? writer2.getContentSource(boardId, target2) : void 0;
-  const anchor = freezeFeedbackAnchor(writer2.getBoardRevision(boardId), target2, object3, content);
-  if ("kind" in anchor) {
-    return anchor;
+  const anchor2 = freezeFeedbackAnchor(writer2.getBoardRevision(boardId), target2, object3, content);
+  if ("kind" in anchor2) {
+    return anchor2;
   }
   const threadId = writer2.allocateId();
   const updatedAtMillis = timestamp(now);
   const first = makeMessage(context, threadId, text3, updatedAtMillis);
   const thread = {
     threadId,
-    anchor,
+    anchor: anchor2,
     status: "open",
     first,
     updatedAtMillis,
@@ -2667,7 +3139,8 @@ function executeCommand(context, operation) {
 }
 function applyFeedback(repository, services, actor, command) {
   const { boardId, commandId, operation } = command;
-  return repository.write((writer2) => {
+  let changed = false;
+  const receipt = repository.write((writer2) => {
     const access = requireWriteAccess(writer2, actor, boardId);
     const signature = services.digest(commandSignature(operation));
     const previous = writer2.getReceipt(boardId, actor.id, commandId);
@@ -2678,13 +3151,25 @@ function applyFeedback(repository, services, actor, command) {
       return { boardId, commandId, outcome: { kind: "rejected", reason: "commandIdReuse" } };
     }
     const outcome = executeCommand(
-      { writer: writer2, actor, access, boardId, now: services.now },
+      {
+        writer: writer2,
+        actor,
+        access,
+        boardId,
+        now: services.now,
+        authorName: access.isOwner ? services.ownerDisplayName : access.name
+      },
       operation
     );
-    const receipt = { boardId, commandId, outcome };
-    writer2.saveReceipt(actor.id, { signature, receipt });
-    return receipt;
+    const receipt2 = { boardId, commandId, outcome };
+    writer2.saveReceipt(actor.id, { signature, receipt: receipt2 });
+    changed = outcome.kind === "applied";
+    return receipt2;
   });
+  if (changed) {
+    services.onChanged?.(boardId);
+  }
+  return receipt;
 }
 
 // src/modules/feedback/application/pagination.ts
@@ -2737,35 +3222,46 @@ function readReplyPosition(cursor) {
 
 // src/modules/feedback/application/index.ts
 function currentThread(reader2, boardId, thread) {
-  const { anchor } = thread;
-  const { target: target2 } = anchor;
-  if (target2.kind !== "content" || anchor.targetMissing) {
+  const { anchor: anchor2 } = thread;
+  const { target: target2 } = anchor2;
+  if (target2.kind !== "content" || anchor2.targetMissing) {
     return thread;
   }
   const source = reader2.getContentSource(boardId, target2);
-  return source && hasFeedbackContent(target2.content, source) ? thread : { ...thread, anchor: { ...anchor, targetMissing: true } };
+  return source && hasFeedbackContent(target2.content, source) ? thread : { ...thread, anchor: { ...anchor2, targetMissing: true } };
 }
 function createFeedbackApplication(repository, services) {
+  function legacyNames(reader2, boardId) {
+    const names = /* @__PURE__ */ new Map();
+    return (authorId) => {
+      if (!names.has(authorId)) {
+        const access = reader2.getAccess(boardId, authorId);
+        names.set(authorId, access?.isOwner ? services.ownerDisplayName : access?.name);
+      }
+      return names.get(authorId);
+    };
+  }
   return {
     listThreads: (actor, boardId, query) => repository.read((reader2) => {
       const access = requireAccess(reader2, actor, boardId);
       const { cursor, status, authorActorId } = query;
       const limit = pageLimit(query.pageSize);
       const position = readThreadPosition(cursor);
-      const rows = reader2.listThreads({
+      const rows2 = reader2.listThreads({
         boardId,
         limit: limit + 1,
         position,
         status,
         authorActorId
       });
-      const page = rows.slice(0, limit);
+      const page = rows2.slice(0, limit);
       const last = page.at(-1);
+      const names = legacyNames(reader2, boardId);
       return {
         threads: page.map(
-          (thread) => viewThread(actor, access, currentThread(reader2, boardId, thread))
+          (thread) => viewThread(actor, access, currentThread(reader2, boardId, thread), names)
         ),
-        nextCursor: last && rows.length > limit ? writeThreadPosition(last) : void 0,
+        nextCursor: last && rows2.length > limit ? writeThreadPosition(last) : void 0,
         canWrite: permitsFeedback(access)
       };
     }),
@@ -2778,9 +3274,10 @@ function createFeedbackApplication(repository, services) {
       const limit = pageLimit(query.pageSize);
       const position = readReplyPosition(query.cursor);
       const replies = reader2.listReplies(boardId, threadId, position, limit + 1);
+      const names = legacyNames(reader2, boardId);
       return {
-        thread: viewThread(actor, access, currentThread(reader2, boardId, thread)),
-        replies: replies.slice(0, limit).map((reply) => viewMessage(actor, access, reply)),
+        thread: viewThread(actor, access, currentThread(reader2, boardId, thread), names),
+        replies: replies.slice(0, limit).map((reply) => viewMessage(actor, access, reply, names)),
         nextCursor: replies.length > limit ? String(position + limit) : void 0,
         canWrite: permitsFeedback(access)
       };
@@ -2870,8 +3367,8 @@ function projectedActivityAreas(scope2, metadata) {
 function overlappingWorkspaces(left, right) {
   return left.some(
     (area) => right.some((other) => {
-      const sameObject = area.id !== declaredAreaId && area.id === other.id;
-      return sameObject || intersects(area.bounds, other.bounds);
+      const sameObject2 = area.id !== declaredAreaId && area.id === other.id;
+      return sameObject2 || intersects(area.bounds, other.bounds);
     })
   );
 }
@@ -2944,8 +3441,8 @@ function validDuration(milliseconds) {
   return Number.isInteger(milliseconds) && inRange;
 }
 function timerView(state, now) {
-  const { version, durationMs, deadlineUnixMs, pausedRemainingMs } = state;
-  const base = { version, durationMs };
+  const { version: version2, durationMs, deadlineUnixMs, pausedRemainingMs } = state;
+  const base = { version: version2, durationMs };
   if (pausedRemainingMs !== void 0) {
     return { ...base, phase: "paused", remainingMs: pausedRemainingMs };
   }
@@ -3261,6 +3758,45 @@ function createAgentActivity(options) {
   };
 }
 
+// src/modules/rooms/application/room-event-journal.ts
+var maxReplayEvents = 32;
+var maxReplayContentBytes = 256 * 1024;
+function contentBytes(event) {
+  const { payload } = event;
+  if (payload.kind !== "contentChanged") {
+    return 0;
+  }
+  const { changedObjects, changedObjectIds: changedObjectIds2, removedObjectIds } = payload.change;
+  const metadata = changedObjects?.reduce((sum, value) => sum + value.byteLength, 0) ?? 0;
+  const changedIds = changedObjectIds2?.reduce((sum, id) => sum + id.length * 2, 0) ?? 0;
+  const removedIds = removedObjectIds?.reduce((sum, id) => sum + id.length * 2, 0) ?? 0;
+  return metadata + changedIds + removedIds;
+}
+var RoomEventJournal = class {
+  entries = [];
+  bytes = 0;
+  append(event) {
+    const bytes = contentBytes(event);
+    this.entries.push({ event, bytes });
+    this.bytes += bytes;
+    while (this.entries.length > maxReplayEvents || this.bytes > maxReplayContentBytes) {
+      this.bytes -= this.entries.shift()?.bytes ?? 0;
+    }
+  }
+  after(cursor, head2) {
+    if (cursor.roomInstanceId !== head2.roomInstanceId || cursor.sequence > head2.sequence) {
+      return;
+    }
+    if (cursor.sequence === head2.sequence) {
+      return [];
+    }
+    const start = this.entries.findIndex(({ event }) => event.sequence === cursor.sequence + 1n);
+    if (start !== -1) {
+      return this.entries.slice(start).map(({ event }) => event);
+    }
+  }
+};
+
 // src/modules/rooms/application/room-memory.ts
 var maxParticipants = 64;
 var maxPresenceSlots = 256;
@@ -3270,6 +3806,11 @@ var gestureTtlMs = 1200;
 var snapshotGestureBudget = 128;
 var tombstoneTtlMs = 3e4;
 var minimumUpdateGapMs = 40;
+function moved(previous, next) {
+  const cursor = previous.cursor;
+  const view = previous.viewport;
+  return cursor?.x !== next.cursor?.x || cursor?.y !== next.cursor?.y || view?.centerX !== next.viewport?.centerX || view?.centerY !== next.viewport?.centerY || view?.zoom !== next.viewport?.zoom || previous.following !== next.following;
+}
 function peerKey({ actorId: actorId2, viewId }) {
   return JSON.stringify([actorId2, viewId]);
 }
@@ -3289,12 +3830,17 @@ var RoomMemory = class {
   boardId;
   roomInstanceId;
   slots = /* @__PURE__ */ new Map();
-  listeners = /* @__PURE__ */ new Set();
+  listeners = /* @__PURE__ */ new Map();
   pending = [];
+  ownerJournal = new RoomEventJournal();
+  publicJournal = new RoomEventJournal();
   delivering = false;
   sequence = 0n;
+  publicSequence = 0n;
   baselineRevision;
   agentWorkspaces = [];
+  feedbackVersion = 0n;
+  suggestionsVersion = 0n;
   get active() {
     return this.listeners.size > 0 || this.slots.size > 0;
   }
@@ -3321,44 +3867,64 @@ var RoomMemory = class {
       return participant;
     });
   }
-  event(payload, now) {
+  cursor(owner) {
+    return {
+      roomInstanceId: this.roomInstanceId + (owner ? ":owner" : ":member"),
+      sequence: owner ? this.sequence : this.publicSequence
+    };
+  }
+  event(payload, now, owner = true) {
     return {
       boardId: this.boardId,
-      roomInstanceId: this.roomInstanceId,
-      sequence: this.sequence,
+      ...this.cursor(owner),
       serverTimeUnixMs: now,
       payload
     };
   }
+  replay(cursor, owner) {
+    const journal = owner ? this.ownerJournal : this.publicJournal;
+    return journal.after(cursor, this.cursor(owner));
+  }
   publish(payload, now) {
     this.sequence++;
-    this.pending.push(this.event(payload, now));
+    const ownerEvent = this.event(payload, now);
+    this.ownerJournal.append(ownerEvent);
+    let publicEvent;
+    if (payload.kind !== "suggestionsChanged") {
+      this.publicSequence++;
+      publicEvent = this.event(payload, now, false);
+      this.publicJournal.append(publicEvent);
+    }
+    this.pending.push({ ownerEvent, publicEvent });
     if (this.delivering) {
       return;
     }
     this.delivering = true;
     try {
-      for (const event of this.pending) {
-        for (const listener2 of [...this.listeners]) {
-          listener2.deliver(event);
-        }
+      for (const publication of this.pending) {
+        [...this.listeners].forEach(([listener2, owner]) => {
+          const event = owner ? publication.ownerEvent : publication.publicEvent;
+          if (event) {
+            listener2.deliver(event);
+          }
+        });
       }
     } finally {
       this.delivering = false;
       this.pending.length = 0;
     }
   }
-  listen(listener2) {
+  listen(listener2, owner = true) {
     if (this.listeners.size >= maxSubscriptions) {
       return void 0;
     }
-    this.listeners.add(listener2);
+    this.listeners.set(listener2, owner);
     return () => {
       this.listeners.delete(listener2);
     };
   }
   close() {
-    for (const listener2 of [...this.listeners]) {
+    for (const listener2 of [...this.listeners.keys()]) {
       listener2.close();
     }
     this.listeners.clear();
@@ -3366,7 +3932,7 @@ var RoomMemory = class {
     this.pending.length = 0;
   }
   recheck() {
-    for (const listener2 of [...this.listeners]) {
+    for (const listener2 of [...this.listeners.keys()]) {
       listener2.recheck?.();
     }
   }
@@ -3403,12 +3969,14 @@ var RoomMemory = class {
     if (!previous?.participant && this.snapshot().length >= maxParticipants) {
       return false;
     }
+    const prior = previous?.participant;
     const participant = {
       key,
       displayName: access.displayName,
       role: access.role,
       sequence: input.sequence,
       expiresAtUnixMs: now + presenceTtlMs,
+      activityAtUnixMs: prior && !moved(prior, input) ? prior.activityAtUnixMs ?? now : now,
       cursor: input.cursor,
       viewport: input.viewport,
       following: input.following,
@@ -3504,16 +4072,16 @@ function limitedChange(change) {
   const {
     boardId,
     boardRevision,
-    changedObjectIds = [],
+    changedObjectIds: changedObjectIds2 = [],
     removedObjectIds = [],
     changedObjects = []
   } = change;
   const changedBytes = changedObjects.reduce((sum, value) => sum + value.byteLength, 0);
-  const tooManyIds = changedObjectIds.length + removedObjectIds.length > maxChangedIds;
-  const incomplete = changedObjectIds.length !== changedObjects.length;
+  const tooManyIds = changedObjectIds2.length + removedObjectIds.length > maxChangedIds;
+  const incomplete = changedObjectIds2.length !== changedObjects.length;
   const tooLarge = changedBytes > maxChangedMetadataBytes || tooManyIds;
   const refreshScene = change.refreshScene || tooLarge || incomplete;
-  return refreshScene ? { boardId, boardRevision, refreshScene: true } : { boardId, boardRevision, changedObjectIds, removedObjectIds, changedObjects };
+  return refreshScene ? { boardId, boardRevision, refreshScene: true } : { boardId, boardRevision, changedObjectIds: changedObjectIds2, removedObjectIds, changedObjects };
 }
 function createRoomsApplication(repository, clock, instanceId, activityOptions) {
   const rooms = /* @__PURE__ */ new Map();
@@ -3572,6 +4140,7 @@ function createRoomsApplication(repository, clock, instanceId, activityOptions) 
     const room = roomFor(boardId, stored.access.boardRevision, now);
     room.sweep(now);
     syncAgentWorkspaces(boardId, room, now);
+    const owner = stored.access.role === "owner";
     const event = room.event(
       {
         kind: "snapshot",
@@ -3582,10 +4151,13 @@ function createRoomsApplication(repository, clock, instanceId, activityOptions) 
           participants: room.currentParticipants(now),
           timer: timerView(stored.timer, now),
           agentWorkspaces: room.agentWorkspaces,
-          canReleaseAgentActivity: agentActivity !== void 0 && stored.access.role === "owner"
+          canReleaseAgentActivity: agentActivity !== void 0 && stored.access.role === "owner",
+          feedbackVersion: room.feedbackVersion,
+          suggestionsVersion: owner ? room.suggestionsVersion : void 0
         }
       },
-      now
+      now,
+      owner
     );
     return { room, event, access: stored.access };
   }
@@ -3596,6 +4168,13 @@ function createRoomsApplication(repository, clock, instanceId, activityOptions) 
     }
     room.baselineRevision = change.boardRevision;
     room.publish({ kind: "contentChanged", change: limitedChange(change) }, clock.nowMillis());
+  }
+  function listen(room, listener2, access2) {
+    const release = room.listen(listener2, access2.role === "owner");
+    if (!release) {
+      throw new RoomCapacityError("Too many room connections");
+    }
+    return release;
   }
   return {
     snapshot: (boardId, actorId2) => readSnapshot2(boardId, actorId2, clock.nowMillis()).event,
@@ -3631,11 +4210,25 @@ function createRoomsApplication(repository, clock, instanceId, activityOptions) 
         throw new RoomInputError("Invalid room presence identity");
       }
       const { room, event, access: access2 } = readSnapshot2(boardId, key.actorId, clock.nowMillis());
-      const release = room.listen(listener2);
-      if (!release) {
-        throw new RoomCapacityError("Too many room connections");
+      return { initial: event, access: access2, release: listen(room, listener2, access2) };
+    },
+    subscribeAfter(boardId, key, cursor, listener2) {
+      if (!validViewId(key.viewId)) {
+        throw new RoomInputError("Invalid room presence identity");
       }
-      return { initial: event, access: access2, release };
+      const now = clock.nowMillis();
+      const currentAccess = requireAccess2(access(boardId, key.actorId));
+      const room = roomFor(boardId, currentAccess.boardRevision, now);
+      room.sweep(now);
+      syncAgentWorkspaces(boardId, room, now);
+      publishContentChange({
+        boardId,
+        boardRevision: currentAccess.boardRevision,
+        refreshScene: true
+      });
+      const replay = cursor && room.replay(cursor, currentAccess.role === "owner");
+      const events = replay ?? [readSnapshot2(boardId, key.actorId, now).event];
+      return { events, access: currentAccess, release: listen(room, listener2, currentAccess) };
     },
     tick(boardId, boardRevision) {
       rooms.get(boardId)?.sweep(clock.nowMillis());
@@ -3678,6 +4271,13 @@ function createRoomsApplication(repository, clock, instanceId, activityOptions) 
       return result;
     },
     publishContentChange,
+    publishDiscussionChange(boardId, kind) {
+      const room = rooms.get(boardId);
+      if (room) {
+        const version2 = kind === "feedbackChanged" ? ++room.feedbackVersion : ++room.suggestionsVersion;
+        room.publish({ kind, version: version2 }, clock.nowMillis());
+      }
+    },
     close() {
       for (const room of rooms.values()) {
         room.close();
@@ -3689,6 +4289,8 @@ function createRoomsApplication(repository, clock, instanceId, activityOptions) 
 
 // src/modules/whiteboard/domain/export-types.ts
 var maxExportFileBytes = 32 * 1024 * 1024;
+var maxBoardBackupBytes = 128 * 1024 * 1024;
+var maxBoardBackupAssetBytes = 20 * 1024 * 1024;
 
 // src/modules/whiteboard/domain/section.ts
 var radiansPerDegree = Math.PI / 180;
@@ -3757,13 +4359,13 @@ function includeWithinSection(ids, objects, section) {
     }
   }
 }
-function expandSelection(ids, objects, byId2) {
+function expandSelection(ids, objects, byId3) {
   const byParent = indexByRelation(objects, "parentId");
   const byGroup = indexByRelation(objects, "groupId");
   const groups = /* @__PURE__ */ new Set();
   let checks = 0;
   for (const id of ids) {
-    const entry = byId2.get(id);
+    const entry = byId3.get(id);
     if (!entry) {
       return { kind: "rejected", reason: "invalidSelection" };
     }
@@ -3781,7 +4383,7 @@ function expandSelection(ids, objects, byId2) {
     }
   }
 }
-function selectExportObjects(objects, byId2, scope2) {
+function selectExportObjects(objects, byId3, scope2) {
   if (scope2.kind === "whole") {
     return objects;
   }
@@ -3789,7 +4391,7 @@ function selectExportObjects(objects, byId2, scope2) {
     return { kind: "rejected", reason: "invalidSelection" };
   }
   const ids = new Set(scope2.objectIds);
-  const expansionFailure = expandSelection(ids, objects, byId2);
+  const expansionFailure = expandSelection(ids, objects, byId3);
   if (expansionFailure) {
     return expansionFailure;
   }
@@ -3982,16 +4584,16 @@ var colorLiteral2 = /^(?:#(?:[\da-f]{3,4}|[\da-f]{6}|[\da-f]{8})|rgba?\([-\d., %
 var canvasTint = /^color-mix\(in srgb, *canvas (100|[1-9]?\d)%, *(#(?:[\da-f]{3,4}|[\da-f]{6}|[\da-f]{8}))\)$/iu;
 var defaultStrokeWidth = 1.4;
 var maximumStrokeWidth = 256;
-function svgColor(value, fallback) {
+function svgColor(value, fallback2) {
   const color2 = value?.trim().toLowerCase() ?? "";
   const tint = canvasTint.exec(color2);
   if (tint) {
     return `color-mix(in srgb, #f5f5f5 ${tint[1]}%, ${tint[2]})`;
   }
-  return palette.get(color2) ?? (colorLiteral2.test(color2) ? color2 : fallback);
+  return palette.get(color2) ?? (colorLiteral2.test(color2) ? color2 : fallback2);
 }
-function svgStrokeWidth(value, fallback = defaultStrokeWidth) {
-  return value !== void 0 && value >= 0 && value <= maximumStrokeWidth ? value : fallback;
+function svgStrokeWidth(value, fallback2 = defaultStrokeWidth) {
+  return value !== void 0 && value >= 0 && value <= maximumStrokeWidth ? value : fallback2;
 }
 function databaseShape(width, height) {
   const top = Math.min(18, height / 4);
@@ -4087,8 +4689,8 @@ function record3(value) {
 function stringValue(value) {
   return typeof value === "string" ? value : "";
 }
-function bounded(value, minimum, maximum, fallback) {
-  return typeof value === "number" && Number.isFinite(value) ? Math.max(minimum, Math.min(maximum, value)) : fallback;
+function bounded(value, minimum, maximum, fallback2) {
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(minimum, Math.min(maximum, value)) : fallback2;
 }
 function lineText(value) {
   if (typeof value === "string") {
@@ -4101,15 +4703,15 @@ function lineText(value) {
 }
 function documentRows(data, count) {
   const queue = Array.isArray(data.blocks) ? [...data.blocks] : [];
-  const rows = [];
-  for (let cursor = 0; cursor < queue.length && rows.length < count; cursor += 1) {
+  const rows2 = [];
+  for (let cursor = 0; cursor < queue.length && rows2.length < count; cursor += 1) {
     const block = record3(queue[cursor]);
     if (!block) {
       continue;
     }
     const text3 = lineText(block.content) || stringValue(record3(block.props)?.caption);
     if (text3) {
-      rows.push(text3);
+      rows2.push(text3);
     }
     if (Array.isArray(block.children)) {
       for (const child3 of block.children) {
@@ -4117,15 +4719,7 @@ function documentRows(data, count) {
       }
     }
   }
-  return rows;
-}
-function todoRows(data, count) {
-  const items = Array.isArray(data.items) ? data.items : [];
-  return items.slice(0, count).map((item) => {
-    const row = record3(item);
-    const checked = row?.checked === true ? "\u2713" : "\u25A1";
-    return checked + " " + stringValue(row?.text);
-  });
+  return rows2;
 }
 function cellValue(cell2) {
   const data = record3(cell2);
@@ -4138,11 +4732,11 @@ function cellValue(cell2) {
   return stringValue(data?.text);
 }
 function tableRows(data, count) {
-  const rows = record3(data.grid)?.rows;
-  if (!Array.isArray(rows)) {
+  const rows2 = record3(data.grid)?.rows;
+  if (!Array.isArray(rows2)) {
     return [];
   }
-  return rows.slice(0, count).map((row) => {
+  return rows2.slice(0, count).map((row) => {
     const cells = record3(row)?.cells;
     return Array.isArray(cells) ? cells.map(cellValue).join("  |  ") : "";
   });
@@ -4162,34 +4756,74 @@ function svgLabel(label2, width, height, data, centered) {
   const x = right ? width : alignedX;
   const y = centered ? Math.max(fontSize, (height - lines.length * rowHeight) / 2 + fontSize) : fontSize;
   const alignedAnchor = center ? "middle" : "start";
-  const anchor = right ? "end" : alignedAnchor;
+  const anchor2 = right ? "end" : alignedAnchor;
   const body = lines.map((line) => `<tspan x="${x}" dy="${rowHeight}">${escapeXml(line)}</tspan>`).join("");
-  return `<text y="${y - rowHeight}" font-size="${fontSize}" text-anchor="${anchor}" fill="${fill}">${body}</text>`;
+  return `<text y="${y - rowHeight}" font-size="${fontSize}" text-anchor="${anchor2}" fill="${fill}">${body}</text>`;
+}
+function todoSourceAttribute(source) {
+  if (!source || typeof source.objectId !== "string") {
+    return "";
+  }
+  const { objectId, boardId, blockId, itemId, version: version2 } = source;
+  const numericVersion2 = typeof version2 === "string" ? Number(version2) : version2;
+  const exportedVersion = Number.isSafeInteger(numericVersion2) ? numericVersion2 : version2;
+  const reference = {
+    elementId: objectId,
+    artifactId: boardId,
+    blockId,
+    itemId,
+    version: exportedVersion
+  };
+  return ` data-source-ref="${escapeXml(JSON.stringify(reference))}"`;
+}
+function todoCard(object3, data) {
+  const { width, height } = object3.geometry;
+  const items = Array.isArray(data.items) ? data.items : [];
+  const rows2 = items.map(record3).filter((row) => row !== void 0);
+  const count = rows2.filter(({ checked }) => checked === true).length;
+  const paper2 = svgColor(object3.appearance?.fill, "#ffffff");
+  const line = svgColor(object3.appearance?.stroke, "#bfc0c0");
+  const ink2 = svgColor(stringValue(data.color), "#2d3142");
+  const muted2 = "#4f5d75";
+  const accent = "#7657c6";
+  const title = stringValue(data.title) || object3.label || "\u4EFB\u52A1\u6E05\u5355";
+  const progress = rows2.length ? Math.max(width - 24, 0) * count / rows2.length : 0;
+  const heading = `<svg x="12" width="${Math.max(1, width - 72)}" height="36" overflow="hidden"><text y="25" fill="${ink2}" font-size="17" font-weight="600">${escapeXml(title)}</text></svg><text x="${width - 12}" y="25" fill="${muted2}" font-size="12" text-anchor="end">${count}/${rows2.length}</text>`;
+  const bar = `<rect x="12" y="32" width="${Math.max(width - 24, 0)}" height="3" rx="1.5" fill="${line}"/><rect x="12" y="32" width="${progress}" height="3" rx="1.5" fill="${accent}"/>`;
+  const content = rows2.map((row, index) => {
+    const checked = row.checked === true;
+    const taskId = escapeXml(stringValue(row.itemId));
+    const source = todoSourceAttribute(record3(row.sourceRef));
+    const check = checked ? `<path d="M17 16l3 3 5-6" fill="none" stroke="${paper2}" stroke-width="1.5"/>` : "";
+    const text3 = stringValue(row.text).replace(/\s+/gu, " ");
+    const [caption] = compactLines(text3, Math.max(0, width - (source ? 72 : 48)), 14, 1);
+    const sourceIcon = source ? `<g transform="translate(${width - 24} 10)" fill="none" stroke="${accent}" stroke-width="1.4" stroke-linecap="round"><title>\u4EFB\u52A1\u6765\u6E90</title><path d="M5 8l4-4M4 5l-2 2a2.8 2.8 0 0 0 4 4l2-2M6 4l2-2a2.8 2.8 0 0 1 4 4l-2 2"/></g>` : "";
+    return `<g transform="translate(0 ${40 + index * 32})" data-studio-task-id="${taskId}" data-checked="${checked}"${source}><title>${escapeXml(text3)}</title><path d="M0 0H${width}" stroke="${line}"/><rect x="14" y="9" width="14" height="14" rx="3" fill="${checked ? accent : paper2}" stroke="${checked ? accent : line}"/>${check}<text x="38" y="21" fill="${checked ? muted2 : ink2}" font-size="14">${escapeXml(caption ?? "")}</text>${sourceIcon}</g>`;
+  });
+  return `<rect width="${width}" height="${height}" rx="7" fill="${paper2}" stroke="${line}"/>${heading}${bar}${content.join("")}`;
 }
 function nativeCard(object3, payload) {
   const { width, height } = object3.geometry;
   const data = payload?.data ?? {};
   const count = Math.max(0, Math.min(maxRows, Math.floor((height - 40) / rowHeight)));
-  let rows = [];
+  let rows2 = [];
   if (object3.kind === "document") {
-    rows = documentRows(data, count);
-  } else if (object3.kind === "todo") {
-    rows = todoRows(data, count);
+    rows2 = documentRows(data, count);
   } else if (object3.kind === "table") {
-    rows = tableRows(data, count);
+    rows2 = tableRows(data, count);
   }
-  const text3 = [stringValue(data.title) || object3.label, ...rows].join("\n");
+  const text3 = [stringValue(data.title) || object3.label, ...rows2].join("\n");
   const fill = svgColor(object3.appearance?.fill, object3.kind === "note" ? "#f6e39c" : "#ffffff");
   const stroke = svgColor(object3.appearance?.stroke, "#bfc0c0");
   const caption = svgLabel(text3, Math.max(0, width - 20), height, data, false);
   return `<rect width="${width}" height="${height}" rx="4" fill="${fill}" stroke="${stroke}"/><g transform="translate(10 8)">${caption}</g>`;
 }
-function rasterUri(source, assets) {
+function imageUri(source, assets) {
   if (typeof source !== "string") {
     return void 0;
   }
   const captured = assets.get(source);
-  if (captured && rasterMimeTypes.has(captured.mimeType)) {
+  if (captured && (rasterMimeTypes.has(captured.mimeType) || captured.mimeType === "image/svg+xml")) {
     return `data:${captured.mimeType};base64,${captured.base64}`;
   }
   const match = embeddedRaster.exec(source);
@@ -4231,13 +4865,13 @@ function svgImage(object3, data, assets) {
   if (!source) {
     return object3.kind === "video" ? nativeCard(object3, void 0) : void 0;
   }
-  const uri = rasterUri(source, assets);
+  const uri = imageUri(source, assets);
   if (!uri) {
     return void 0;
   }
   const { width, height } = object3.geometry;
-  const rect = imageExtent(width, height, data);
-  return `<image x="${rect.x}" y="${rect.y}" width="${rect.width}" height="${rect.height}" preserveAspectRatio="${rect.aspect}" href="${uri}"/>`;
+  const rect2 = imageExtent(width, height, data);
+  return `<image x="${rect2.x}" y="${rect2.y}" width="${rect2.width}" height="${rect2.height}" preserveAspectRatio="${rect2.aspect}" href="${uri}"/>`;
 }
 function svgInk(object3, data) {
   if (!Array.isArray(data.points)) {
@@ -4272,11 +4906,12 @@ function svgContent(object3, payload, assets) {
     case "sticker":
       return svgLabel(stringValue(data.text) || object3.label, width, height, data, false);
     case "document":
-    case "todo":
     case "table":
     case "note":
     case "link":
       return nativeCard(object3, payload);
+    case "todo":
+      return todoCard(object3, data);
     default:
       return void 0;
   }
@@ -4344,7 +4979,7 @@ function tableSpan(props, name) {
 function tableMarkup(value) {
   const table = object(value);
   const headerCount = typeof table?.headerRows === "number" ? table.headerRows : 0;
-  const rows = sequence(table?.rows).map((row, index) => {
+  const rows2 = sequence(table?.rows).map((row, index) => {
     const tag2 = index < headerCount ? "th" : "td";
     const cells = sequence(object(row)?.cells).map((cell2) => {
       const props = object(object(cell2)?.props);
@@ -4352,7 +4987,7 @@ function tableMarkup(value) {
     });
     return `<tr>${cells.join("")}</tr>`;
   });
-  return `<table><tbody>${rows.join("")}</tbody></table>`;
+  return `<table><tbody>${rows2.join("")}</tbody></table>`;
 }
 function blockMarkup(block, assets) {
   const content = inline(block.content);
@@ -4402,11 +5037,11 @@ function todoMarkup(value) {
   if (!Array.isArray(value)) {
     return "";
   }
-  const rows = value.map((entry) => {
+  const rows2 = value.map((entry) => {
     const item = object(entry);
     return `<li><label><input disabled type="checkbox"${item?.checked ? " checked" : ""}>${text(item?.text)}</label></li>`;
   });
-  return `<ul>${rows.join("")}</ul>`;
+  return `<ul>${rows2.join("")}</ul>`;
 }
 function bridge(seed) {
   const state = JSON.stringify(seed ?? null).replaceAll("<", "\\u003c");
@@ -4652,6 +5287,13 @@ function objectLayer(object3, index, snapshot, payload) {
   const bounds = geometryCorners(object3.geometry);
   return bounds.every(finitePoint) ? { value: native, bounds } : void 0;
 }
+function renderExportHtmlSource(snapshot) {
+  const [payload] = snapshot.payloads;
+  if (payload?.bodyKind === "embed" && typeof payload.data.html === "string") {
+    return payload.data.html;
+  }
+  return { kind: "rejected", reason: "unsupported" };
+}
 function renderExportHtml(snapshot) {
   const payloads = new Map(snapshot.payloads.map((payload) => [payload.objectId, payload]));
   const layers = [];
@@ -4729,7 +5371,7 @@ function jsonExport(snapshot) {
   );
   return json + "\n";
 }
-function encodeFile(snapshot, data, extension, mimeType) {
+function encodeFile(snapshot, data, extension, mimeType, title = snapshot.board.title) {
   if (typeof data !== "string") {
     return data;
   }
@@ -4739,7 +5381,7 @@ function encodeFile(snapshot, data, extension, mimeType) {
   }
   return {
     kind: "file",
-    filename: exportFilename(snapshot.board.title, extension),
+    filename: exportFilename(title, extension),
     mimeType,
     revision: snapshot.board.revision,
     content
@@ -4768,13 +5410,17 @@ function renderVectorFile(snapshot, format) {
   }
   return encodeFile(snapshot, scene.svg, "svg", "image/svg+xml");
 }
-function renderExportFile(snapshot, format) {
+function renderExportFile(snapshot, { format, scope: scope2 }) {
   switch (format) {
     case "svg":
     case "png":
       return renderVectorFile(snapshot, format);
-    case "html":
-      return encodeFile(snapshot, renderExportHtml(snapshot), "html", "text/html");
+    case "html": {
+      const selected = scope2.kind === "selection";
+      const html = selected ? renderExportHtmlSource(snapshot) : renderExportHtml(snapshot);
+      const title = selected ? snapshot.objects[0]?.label || snapshot.board.title : snapshot.board.title;
+      return encodeFile(snapshot, html, "html", "text/html", title);
+    }
     case "json":
       return encodeFile(snapshot, jsonExport(snapshot), "json", "application/json");
   }
@@ -4818,6 +5464,7 @@ var alignments = /* @__PURE__ */ new Map([
   ["TEXT_ALIGNMENT_RIGHT", "right"]
 ]);
 var attachmentSource = /(?<![\w/:.])\/studio-archive-assets\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+(?![\w./%-])/gu;
+var maxLegacyVersion = BigInt(Number.MAX_SAFE_INTEGER);
 function object2(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
@@ -4826,6 +5473,20 @@ function array(value) {
 }
 function rewrite(value, source) {
   return typeof value === "string" ? value.replaceAll(attachmentSource, source) : value;
+}
+function portableData(value, source) {
+  if (typeof value === "string") {
+    return value.replaceAll(attachmentSource, source);
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => portableData(item, source));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, portableData(item, source)])
+    );
+  }
+  return value;
 }
 function legacyVersion(value) {
   if (value === void 0) {
@@ -4863,7 +5524,7 @@ function todoItem(value) {
       elementId: source.objectId,
       blockId: source.blockId,
       itemId: source.itemId,
-      version: legacyVersion(source.version)
+      version: source.version === void 0 ? void 0 : Math.max(1, legacyVersion(source.version) ?? 1)
     }
   };
 }
@@ -4893,11 +5554,11 @@ function contentFields(element, payload, source) {
     case "todo":
       return { data: { items: array(data.items).map(todoItem) } };
     case "table": {
-      const { rows, ...fields } = object2(data.grid);
+      const { rows: rows2, ...fields } = object2(data.grid);
       return {
         data: {
           ...fields,
-          rows: array(rows).map((row) => array(object2(row).cells).map(tableCell))
+          rows: array(rows2).map((row) => array(object2(row).cells).map(tableCell))
         }
       };
     }
@@ -4932,6 +5593,8 @@ function contentFields(element, payload, source) {
         color: data.color,
         fontFamily: data.fontFamily,
         fontSize: data.fontSize,
+        bold: data.bold,
+        italic: data.italic,
         textAlign: typeof data.align === "string" ? alignments.get(data.align) : void 0
       };
   }
@@ -4951,22 +5614,28 @@ function connectorFields(detail) {
     bends: relativeBends ? [relativeBends.firstAxis === "horizontal" ? "h" : "v", ...relativeBends.offsets] : bends.flatMap(({ x, y }) => [x, y])
   };
 }
-function backupElement(element, payload, source) {
-  const { objectId, kind, label: label2, geometry, locked, parentId, groupId, appearance: appearance3, detail } = element;
-  if (!supported.has(kind)) {
-    return void 0;
-  }
-  const { width, height, x, y, rotation } = geometry;
-  const styled = {
+function legacyAppearance({ appearance: appearance3, detail }) {
+  return {
+    kind: detail?.kind === "shape" ? detail.outline : void 0,
     fill: appearance3?.fill,
     stroke: appearance3?.stroke,
     strokeWidth: detail?.kind === "ink" ? detail.width : appearance3?.strokeWidth,
     dash: appearance3?.dashed,
     hollow: detail?.kind === "section" ? detail.transparent : appearance3?.hollow
   };
+}
+function backupElement(element, payload, source) {
+  const { objectId, kind, label: label2, geometry, locked, parentId, groupId, appearance: appearance3, detail } = element;
+  if (!supported.has(kind)) {
+    return void 0;
+  }
+  const { width, height, x, y, rotation } = geometry;
+  const { geometryVersion, payloadVersion } = element;
+  const version2 = geometryVersion > (payloadVersion ?? 0n) ? geometryVersion : payloadVersion ?? 0n;
   return {
     id: objectId,
     type: legacyType.get(kind) ?? kind,
+    version: Number(version2 < maxLegacyVersion ? version2 + 1n : maxLegacyVersion),
     x,
     y,
     w: width,
@@ -4977,36 +5646,172 @@ function backupElement(element, payload, source) {
     locked,
     parentId,
     groupId,
-    kind: detail?.kind === "shape" ? detail.outline : void 0,
-    ...styled,
+    ...legacyAppearance(element),
     ...contentFields(element, payload, source),
-    ...detail?.kind === "connector" ? connectorFields(detail) : void 0
+    ...detail?.kind === "connector" ? connectorFields(detail) : void 0,
+    studioII: {
+      kind,
+      geometryVersion: String(geometryVersion),
+      payloadVersion: payloadVersion?.toString(),
+      appearance: appearance3,
+      detail,
+      bodyKind: payload?.bodyKind,
+      data: payload && portableData(payload.data, source)
+    }
   };
+}
+
+// src/modules/whiteboard/domain/backup-feedback.ts
+function anchor(thread, content, elementVersion) {
+  const { object_id: objectId, object_u: u, object_v: v, frozen_x: x, frozen_y: y } = thread;
+  const pin = { coordinateSpace: "board", x, y };
+  const validPin = Math.abs(Number(x)) <= 1e7 && Math.abs(Number(y)) <= 1e7;
+  const boardPin = validPin ? pin : void 0;
+  if (typeof objectId !== "string") {
+    return { coordinateSpace: "board", x, y, pin: boardPin };
+  }
+  const element = {
+    coordinateSpace: "element",
+    elementIds: [objectId],
+    x: u,
+    y: v,
+    pin: boardPin
+  };
+  if (typeof content?.unit_json !== "string") {
+    return element;
+  }
+  const unit = JSON.parse(content.unit_json);
+  const excerpt2 = content.frozen_excerpt ?? void 0;
+  const sourceVersion = elementVersion ?? Math.max(1, Number(content.payload_version) + 1);
+  if (unit.kind === "document") {
+    return {
+      ...element,
+      coordinateSpace: "document",
+      blockIds: unit.blockIds,
+      sourceVersion,
+      excerpt: excerpt2
+    };
+  }
+  if (unit.kind === "todo") {
+    return {
+      ...element,
+      coordinateSpace: "todo",
+      itemId: unit.itemId,
+      sourceVersion,
+      excerpt: excerpt2
+    };
+  }
+  if (unit.kind === "html") {
+    return {
+      ...element,
+      coordinateSpace: "html",
+      regionId: objectId,
+      targetIds: unit.nodeIds,
+      sourceRevision: Math.max(1, Number(unit.sourceRevision)),
+      excerpt: excerpt2
+    };
+  }
+  return element;
+}
+function frozenElement(thread) {
+  const {
+    object_id: id,
+    object_label: text3,
+    object_x: x,
+    object_y: y,
+    object_width: w,
+    object_height: h,
+    object_rotation: rotation,
+    object_geometry_version: version2
+  } = thread;
+  return { id, type: "shape", text: text3, x, y, w, h, rotation, version: Number(version2) + 1 };
+}
+function legacyBackupFeedback(boardId, { threads, messages, contentAnchors }, actorFor, formatTime, findTarget) {
+  const messagesByThread = /* @__PURE__ */ new Map();
+  for (const message of messages) {
+    const id = String(message.thread_id);
+    const list = messagesByThread.get(id) ?? [];
+    list.push(message);
+    messagesByThread.set(id, list);
+  }
+  const anchors = new Map(contentAnchors.map((item) => [item.thread_id, item]));
+  const sources = {};
+  const feedback = threads.flatMap((thread) => {
+    const id = String(thread.thread_id);
+    const [first, ...replies] = messagesByThread.get(id) ?? [];
+    if (!first) {
+      return [];
+    }
+    function portableMessage(message) {
+      const authorName = typeof message.author_name === "string" ? message.author_name : void 0;
+      return {
+        id: message.message_id,
+        author: actorFor(String(message.author_actor_id), authorName),
+        text: message.text,
+        createdAt: formatTime(Number(message.created_at_millis))
+      };
+    }
+    const objectId = thread.object_id;
+    const revision = String(thread.source_board_revision);
+    const element = typeof objectId === "string" ? findTarget(revision, objectId) : void 0;
+    const elementVersion = typeof element?.version === "number" ? element.version : void 0;
+    const target2 = anchor(thread, anchors.get(id), elementVersion);
+    if (typeof objectId === "string") {
+      const snapshot = element ?? frozenElement(thread);
+      const source = {
+        version: snapshot.version,
+        artifactId: boardId,
+        feedbackId: id,
+        element: snapshot
+      };
+      sources[id] = [
+        target2.coordinateSpace === "html" && typeof snapshot.html === "string" ? {
+          ...source,
+          html: snapshot.html,
+          regionId: objectId,
+          sourceRevision: target2.sourceRevision
+        } : { ...source, elementId: objectId }
+      ];
+    }
+    return [
+      {
+        ...portableMessage(first),
+        id,
+        artifactId: boardId,
+        type: "comment",
+        status: thread.status,
+        anchor: target2,
+        updatedAt: formatTime(Number(thread.updated_at_millis)),
+        replies: replies.map(portableMessage)
+      }
+    ];
+  });
+  return { feedback, sources };
 }
 
 // src/modules/whiteboard/domain/movement.ts
 var maxStoredVersion = (1n << 63n) - 1n;
-function validVersion(version) {
-  return version >= 0n && version <= maxStoredVersion;
+function validVersion(version2) {
+  return version2 >= 0n && version2 <= maxStoredVersion;
 }
-function canAdvanceVersion(version) {
-  return validVersion(version) && version < maxStoredVersion;
+function canAdvanceVersion(version2) {
+  return validVersion(version2) && version2 < maxStoredVersion;
 }
-function commandSignature2({ delta, targets }) {
-  const targetKeys = targets.map(
+function commandSignature2({ delta, targets: targets2 }) {
+  const targetKeys = targets2.map(
     ({ objectId, expectedGeometryVersion }) => JSON.stringify([objectId, expectedGeometryVersion.toString()])
   );
   return JSON.stringify([delta.dx.toString(), delta.dy.toString(), targetKeys.sort()]);
 }
-function hasValidMoveInput({ commandId, delta, targets }) {
-  if (!commandId.trim() || !targets.length) {
+function hasValidMoveInput({ commandId, delta, targets: targets2 }) {
+  if (!commandId.trim() || !targets2.length) {
     return false;
   }
   if (![delta.dx, delta.dy].every(Number.isFinite) || delta.dx === 0 && delta.dy === 0) {
     return false;
   }
   const ids = /* @__PURE__ */ new Set();
-  for (const { objectId, expectedGeometryVersion } of targets) {
+  for (const { objectId, expectedGeometryVersion } of targets2) {
     if (!objectId.trim() || ids.has(objectId) || !validVersion(expectedGeometryVersion)) {
       return false;
     }
@@ -5289,15 +6094,15 @@ function widthsAllowed(value, columns) {
 }
 function tableContentIssue(data) {
   const grid = contentRecord(data.grid);
-  const rows = grid?.rows;
+  const rows2 = grid?.rows;
   const columns = Array.isArray(grid?.columnIds) ? grid.columnIds.length : 0;
-  if (!grid || !Array.isArray(rows) || !rows.length) {
+  if (!grid || !Array.isArray(rows2) || !rows2.length) {
     return "invalidEdit";
   }
-  if (rows.length > maxRows2 || columns > maxColumns || rows.length * columns > maxCells) {
+  if (rows2.length > maxRows2 || columns > maxColumns || rows2.length * columns > maxCells) {
     return "tooLarge";
   }
-  const axes = columns > 0 && validAxis(grid.rowIds, rows.length) && validAxis(grid.columnIds, columns);
+  const axes = columns > 0 && validAxis(grid.rowIds, rows2.length) && validAxis(grid.columnIds, columns);
   const widths = widthsAllowed(grid.columnWidths, columns);
   const header = grid.head === void 0 || typeof grid.head === "boolean";
   if (!axes || !widths || !header) {
@@ -5306,7 +6111,7 @@ function tableContentIssue(data) {
   if (data.text !== void 0 && typeof data.text !== "string") {
     return "invalidEdit";
   }
-  if (!rows.every((row) => validRow(row, columns))) {
+  if (!rows2.every((row) => validRow(row, columns))) {
     return "invalidEdit";
   }
   if (!contentFits(data)) {
@@ -5430,14 +6235,14 @@ function supportsGeometryCreation(kind) {
   return initialBodyKinds.has(kind);
 }
 function defaultTableData({ objectId, label: label2, geometry }) {
-  const rows = defaultTableRows.map((row) => ({ cells: row.map((text3) => ({ text: text3 })) }));
-  const rowIds = rows.map((_row, index) => objectId + ":row:" + index);
+  const rows2 = defaultTableRows.map((row) => ({ cells: row.map((text3) => ({ text: text3 })) }));
+  const rowIds = rows2.map((_row, index) => objectId + ":row:" + index);
   const columnIds = Array.from(
     { length: defaultTableColumnCount },
     (_, index) => objectId + ":col:" + index
   );
   const columnWidths = columnIds.map(() => geometry.width / defaultTableColumnCount);
-  return { text: label2, grid: { rows, rowIds, columnIds, columnWidths, head: true } };
+  return { text: label2, grid: { rows: rows2, rowIds, columnIds, columnWidths, head: true } };
 }
 function defaultInitialData(kind, object3) {
   const { label: label2 } = object3;
@@ -5475,15 +6280,15 @@ function validInkPoints(points) {
   if (!Array.isArray(points)) {
     return false;
   }
-  const path2 = [];
+  const path3 = [];
   for (const value of points) {
     const point2 = readInkPoint(value);
     if (!point2) {
       return false;
     }
-    path2.push(point2);
+    path3.push(point2);
   }
-  return hasValidEditInk(path2);
+  return hasValidEditInk(path3);
 }
 function validInitialText({ text: text3, color: color2, fontFamily, fontSize, align: align2 }) {
   const validFont = fontSize === void 0 || typeof fontSize === "number" && fontSize > 0 && fontSize <= maxFontSize;
@@ -5773,13 +6578,13 @@ function validText(text3) {
   return text3.length <= maxTodoTextBytes && encoder2.encode(text3).byteLength <= maxTodoTextBytes;
 }
 function sourceData(source) {
-  const { boardId, objectId, blockId, itemId, version } = source;
+  const { boardId, objectId, blockId, itemId, version: version2 } = source;
   return {
     objectId,
     ...boardId === void 0 ? {} : { boardId },
     ...blockId === void 0 ? {} : { blockId },
     ...itemId === void 0 ? {} : { itemId },
-    ...version === void 0 ? {} : { version }
+    ...version2 === void 0 ? {} : { version: version2 }
   };
 }
 function rowData({ itemId, text: text3, checked, sourceRef }) {
@@ -5795,7 +6600,7 @@ function readRows(value) {
     return;
   }
   const ids = /* @__PURE__ */ new Set();
-  const rows = [];
+  const rows2 = [];
   for (const raw of value) {
     const row = contentRecord(raw);
     const id = row?.itemId;
@@ -5807,36 +6612,36 @@ function readRows(value) {
       return;
     }
     ids.add(id);
-    rows.push(row);
+    rows2.push(row);
   }
-  return { rows, usedIds: ids };
+  return { rows: rows2, usedIds: ids };
 }
-function rowPosition(rows, placement) {
+function rowPosition(rows2, placement) {
   switch (placement.kind) {
     case "first":
       return 0;
     case "append":
-      return rows.length;
+      return rows2.length;
     case "after": {
-      const anchor = rows.findIndex(({ itemId }) => itemId === placement.itemId);
-      return anchor < 0 ? -1 : anchor + 1;
+      const anchor2 = rows2.findIndex(({ itemId }) => itemId === placement.itemId);
+      return anchor2 < 0 ? -1 : anchor2 + 1;
     }
   }
 }
-function addRow(rows, usedIds, { item, placement }, canLink) {
-  if (rows.length >= maxTodoItems || !validText(item.text)) {
+function addRow(rows2, usedIds, { item, placement }, canLink) {
+  if (rows2.length >= maxTodoItems || !validText(item.text)) {
     return "tooLarge";
   }
-  const position = rowPosition(rows, placement);
+  const position = rowPosition(rows2, placement);
   const newIdentifier = contentIdentifier.test(item.itemId) && !usedIds.has(item.itemId);
   const sourceAllowed = item.sourceRef === void 0 || canLink(item.sourceRef);
   if (position < 0 || !newIdentifier || !sourceAllowed) {
     return "invalidEdit";
   }
-  rows.splice(position, 0, rowData(item));
+  rows2.splice(position, 0, rowData(item));
   usedIds.add(item.itemId);
 }
-function updateRow(rows, index, change, canLink) {
+function updateRow(rows2, index, change, canLink) {
   const { text: text3, checked, sourceRef } = change;
   if (text3 !== void 0 && !validText(text3)) {
     return "tooLarge";
@@ -5844,7 +6649,7 @@ function updateRow(rows, index, change, canLink) {
   if (sourceRef && !canLink(sourceRef)) {
     return "invalidEdit";
   }
-  const next = { ...rows[index] };
+  const next = { ...rows2[index] };
   if (text3 !== void 0) {
     next.text = text3;
   }
@@ -5856,36 +6661,36 @@ function updateRow(rows, index, change, canLink) {
   } else if (sourceRef) {
     next.sourceRef = sourceData(sourceRef);
   }
-  rows[index] = next;
+  rows2[index] = next;
 }
-function moveRow(rows, index, row, placement) {
+function moveRow(rows2, index, row, placement) {
   if (placement.kind === "after" && placement.itemId === row.itemId) {
     return "invalidEdit";
   }
-  rows.splice(index, 1);
-  const position = rowPosition(rows, placement);
+  rows2.splice(index, 1);
+  const position = rowPosition(rows2, placement);
   if (position < 0) {
     return "invalidEdit";
   }
-  rows.splice(position, 0, row);
+  rows2.splice(position, 0, row);
 }
-function applyRowEdit(rows, usedIds, change, canLink) {
+function applyRowEdit(rows2, usedIds, change, canLink) {
   if (change.kind === "insert") {
-    return addRow(rows, usedIds, change, canLink);
+    return addRow(rows2, usedIds, change, canLink);
   }
-  const index = rows.findIndex(({ itemId }) => itemId === change.itemId);
-  const row = rows[index];
+  const index = rows2.findIndex(({ itemId }) => itemId === change.itemId);
+  const row = rows2[index];
   if (!row) {
     return "invalidEdit";
   }
   switch (change.kind) {
     case "update":
-      return updateRow(rows, index, change, canLink);
+      return updateRow(rows2, index, change, canLink);
     case "delete":
-      rows.splice(index, 1);
+      rows2.splice(index, 1);
       return;
     case "move":
-      return moveRow(rows, index, row, change.placement);
+      return moveRow(rows2, index, row, change.placement);
   }
 }
 function editTodoContent(current, edits, canLink) {
@@ -5896,7 +6701,7 @@ function editTodoContent(current, edits, canLink) {
   if (!list || !edits.length || typeof current.title !== "string") {
     return { kind: "rejected", reason: "invalidEdit" };
   }
-  const { rows, usedIds } = list;
+  const { rows: rows2, usedIds } = list;
   let title = current.title;
   for (const edit of edits) {
     if (edit.kind === "rename") {
@@ -5905,13 +6710,13 @@ function editTodoContent(current, edits, canLink) {
         return { kind: "rejected", reason: "tooLarge" };
       }
     } else {
-      const reason = applyRowEdit(rows, usedIds, edit, canLink);
+      const reason = applyRowEdit(rows2, usedIds, edit, canLink);
       if (reason) {
         return { kind: "rejected", reason };
       }
     }
   }
-  const data = { title, items: rows };
+  const data = { title, items: rows2 };
   if (!contentFits(data)) {
     return { kind: "rejected", reason: "tooLarge" };
   }
@@ -6043,15 +6848,15 @@ var stickers = /* @__PURE__ */ new Map([
 ]);
 function editStickerContent(current, selection) {
   if (selection.kind === "legacy") {
-    const { fallback } = selection;
+    const { fallback: fallback2 } = selection;
     const currentId = current.stickerId;
     const isGraphic = typeof currentId === "string" && stickers.has(currentId);
-    if (isGraphic || fallback.length > maxStickerFallbackLength) {
+    if (isGraphic || fallback2.length > maxStickerFallbackLength) {
       return { kind: "rejected", reason: "invalidEdit" };
     }
-    const data = { ...current, fallback };
+    const data = { ...current, fallback: fallback2 };
     delete data.stickerId;
-    return { kind: "updated", label: fallback.trim().slice(0, maxStickerLabelLength), data };
+    return { kind: "updated", label: fallback2.trim().slice(0, maxStickerLabelLength), data };
   }
   const label2 = stickers.get(selection.id);
   if (!label2) {
@@ -6105,8 +6910,8 @@ function hasSignature(view) {
   if (view.byteLength < screenDescriptorSize || view.getUint32(0) !== 1195984440) {
     return false;
   }
-  const version = view.getUint16(4);
-  return version === 14177 || version === 14689;
+  const version2 = view.getUint16(4);
+  return version2 === 14177 || version2 === 14689;
 }
 function skipSubBlocks(bytes, start) {
   for (let offset = start; offset < bytes.byteLength; ) {
@@ -6177,15 +6982,234 @@ function readGifSize(bytes) {
   }
 }
 
+// src/modules/whiteboard/domain/svg-image.ts
+var maximumElements = 4096;
+var maximumAttributes = 256;
+var maximumDepth2 = 128;
+var maximumSide = 16384;
+var maximumPixels = 32e6;
+var namespace = "http://www.w3.org/2000/svg";
+var xlinkNamespace = "http://www.w3.org/1999/xlink";
+var xmlDeclaration = /^\s*<\?xml\s+version\s*=\s*(['"])1\.0\1(?:\s+encoding\s*=\s*(['"])UTF-8\2)?(?:\s+standalone\s*=\s*(['"])(?:yes|no)\3)?\s*\?>/iu;
+var localReference = /^#[A-Za-z_][\w.:-]*$/u;
+var localPaint = /url\(\s*(?:"#[A-Za-z_][\w.:-]*"|'#[A-Za-z_][\w.:-]*'|#[A-Za-z_][\w.:-]*)\s*\)/giu;
+var unsafeReference = /[\\@&]|\b(?:https?|file|data|javascript|blob|ftp):|\/\/|\burl\s*\(/iu;
+var textEntity = /&(?:amp|lt|gt|quot|apos|#(\d{1,7})|#x([\da-fA-F]{1,6}));/gu;
+var invalidXmlCharacters = new RegExp("(?:(?![\\t\\n\\r])\\p{Cc}|[\\ufffe\\uffff])", "u");
+var xmlWhitespace2 = /[\t\n\r ]*/uy;
+var absoluteDimension = /^(\d+(?:\.\d+)?|\.\d+)(?:px)?$/u;
+var svgElements = /* @__PURE__ */ new Set([
+  "svg",
+  "g",
+  "defs",
+  "path",
+  "rect",
+  "line",
+  "polyline",
+  "polygon",
+  "circle",
+  "ellipse",
+  "text",
+  "tspan",
+  "textPath",
+  "title",
+  "desc",
+  "style",
+  "symbol",
+  "use",
+  "marker",
+  "mask",
+  "clipPath",
+  "pattern",
+  "linearGradient",
+  "radialGradient",
+  "stop",
+  "filter",
+  "feGaussianBlur",
+  "feColorMatrix",
+  "feOffset",
+  "feMerge",
+  "feMergeNode",
+  "feBlend",
+  "feComposite",
+  "feFlood",
+  "feDropShadow"
+]);
+function safeReferences(value) {
+  return !unsafeReference.test(value.replace(localPaint, ""));
+}
+function safeAttribute(name, value) {
+  if (name === "xmlns") {
+    return value === namespace;
+  }
+  if (name === "xmlns:xlink") {
+    return value === xlinkNamespace;
+  }
+  if (name === "xml:space") {
+    return value === "default" || value === "preserve";
+  }
+  if (name === "href" || name === "xlink:href") {
+    return localReference.test(value);
+  }
+  const asksForResource = /^(?:on|src|background|xmlns|xml)/iu.test(name) || name.includes(":");
+  return !asksForResource && safeReferences(value);
+}
+function readAttributes(tail) {
+  const attributes2 = /* @__PURE__ */ new Map();
+  const assignment = /[\t\n\r ]+([A-Za-z_][\w:-]*)[\t\n\r ]*=[\t\n\r ]*(?:"([^"]*)"|'([^']*)')/uy;
+  let offset = 0;
+  while (offset < tail.length) {
+    assignment.lastIndex = offset;
+    const match = assignment.exec(tail);
+    if (!match) {
+      xmlWhitespace2.lastIndex = offset;
+      return xmlWhitespace2.test(tail) && xmlWhitespace2.lastIndex === tail.length ? attributes2 : void 0;
+    }
+    const name = match[1];
+    const value = match[2] ?? match[3];
+    if (name === void 0 || value === void 0) {
+      return void 0;
+    }
+    if (attributes2.has(name) || attributes2.size >= maximumAttributes) {
+      return void 0;
+    }
+    if (!safeAttribute(name, value)) {
+      return void 0;
+    }
+    attributes2.set(name, value);
+    offset = assignment.lastIndex;
+  }
+  return attributes2;
+}
+function safeText(text3, parent) {
+  if (parent === "style") {
+    const css = text3.trim().replace(/^<!\[CDATA\[([\s\S]*)\]\]>$/u, "$1");
+    return !css.includes("<") && !css.includes("]]>") && safeReferences(css);
+  }
+  if (!parent) {
+    return /^[\t\n\r ]*$/u.test(text3);
+  }
+  if (text3.includes("<") || text3.includes("]]>")) {
+    return false;
+  }
+  return !text3.replace(textEntity, (_entity, decimal2, hex) => {
+    if (decimal2 === void 0 && hex === void 0) {
+      return "";
+    }
+    const point2 = decimal2 === void 0 ? Number.parseInt(hex ?? "", 16) : Number(decimal2);
+    const whitespace = point2 === 9 || point2 === 10 || point2 === 13;
+    const basic = point2 >= 32 && point2 <= 55295 || point2 >= 57344 && point2 <= 65533;
+    const supplementary = point2 >= 65536 && point2 <= 1114111;
+    return whitespace || basic || supplementary ? "" : "&";
+  }).includes("&");
+}
+function readSvgRoot(source) {
+  const stack = [];
+  const token2 = /<(\/?)([A-Za-z][\w:-]*)([^<>]*)>/gu;
+  let offset = 0;
+  let elements2 = 0;
+  let root;
+  for (const match of source.matchAll(token2)) {
+    const [markup, closing, name, tail] = match;
+    if (!name || tail === void 0 || !svgElements.has(name)) {
+      return void 0;
+    }
+    if (!safeText(source.slice(offset, match.index), stack.at(-1))) {
+      return void 0;
+    }
+    offset = match.index + markup.length;
+    if (closing) {
+      if (!/^[\t\n\r ]*$/u.test(tail) || stack.pop() !== name) {
+        return void 0;
+      }
+      continue;
+    }
+    const empty = tail.endsWith("/");
+    const parameters = readAttributes(empty ? tail.slice(0, -1) : tail);
+    elements2 += 1;
+    if (!parameters || elements2 > maximumElements || stack.length >= maximumDepth2) {
+      return void 0;
+    }
+    if (stack.length === 0) {
+      if (root || name !== "svg") {
+        return void 0;
+      }
+      root = { attributes: parameters, end: offset, empty };
+    }
+    if (!empty) {
+      stack.push(name);
+    }
+  }
+  return stack.length === 0 && safeText(source.slice(offset), void 0) ? root : void 0;
+}
+function dimensions2(attributes2) {
+  const viewBox = attributes2.get("viewBox")?.trim().split(/[\s,]+/u).map(Number);
+  const viewWidth = viewBox?.length === 4 ? viewBox[2] : void 0;
+  const viewHeight = viewBox?.length === 4 ? viewBox[3] : void 0;
+  const rawWidth = attributes2.get("width")?.trim().match(absoluteDimension)?.[1];
+  const rawHeight = attributes2.get("height")?.trim().match(absoluteDimension)?.[1];
+  const width = Math.ceil(rawWidth === void 0 ? viewWidth ?? 300 : Number(rawWidth));
+  const height = Math.ceil(rawHeight === void 0 ? viewHeight ?? 150 : Number(rawHeight));
+  const validWidth2 = width > 0 && width <= maximumSide;
+  const validHeight = height > 0 && height <= maximumSide;
+  return validWidth2 && validHeight && width * height <= maximumPixels ? { width, height } : void 0;
+}
+function looksLikeSvgImage(bytes) {
+  const head2 = new TextDecoder().decode(bytes.subarray(0, 4096)).trimStart();
+  return !head2 || head2.startsWith("<");
+}
+function readSafeSvgImage(bytes) {
+  let decoded;
+  try {
+    decoded = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch (error) {
+    if (!(error instanceof TypeError)) {
+      throw error;
+    }
+    return void 0;
+  }
+  const source = decoded.replace(xmlDeclaration, "").replace(/<!--[\s\S]*?-->/gu, "");
+  if (invalidXmlCharacters.test(source)) {
+    return void 0;
+  }
+  const root = readSvgRoot(source);
+  const size = root ? dimensions2(root.attributes) : void 0;
+  if (!root || !size) {
+    return void 0;
+  }
+  const extra = [...root.attributes].filter(([name]) => !["width", "height", "xmlns"].includes(name)).map(([name, value]) => {
+    const quote = value.includes('"') ? "'" : '"';
+    return ` ${name}=${quote}${value}${quote}`;
+  }).join("");
+  const xlink = !root.attributes.has("xmlns:xlink") && source.includes("xlink:href") ? ` xmlns:xlink="${xlinkNamespace}"` : "";
+  const start = `<svg xmlns="${namespace}" width="${size.width}" height="${size.height}"${xlink}${extra}`;
+  const markup = start + (root.empty ? "/>" : ">") + source.slice(root.end);
+  const validDimensions2 = ["width", "height"].every((name) => {
+    const value = root.attributes.get(name)?.trim();
+    return value === void 0 || absoluteDimension.test(value);
+  });
+  const canKeepOriginalDimensions = root.attributes.has("xmlns") && !xlink && validDimensions2;
+  return {
+    markup,
+    size,
+    originalDimensionsMarkup: canKeepOriginalDimensions ? source.trim() : void 0
+  };
+}
+function encodeSafeSvgImage(image, maximumBytes) {
+  const encoder5 = new TextEncoder();
+  const bytes = encoder5.encode(image.markup);
+  return bytes.byteLength > maximumBytes && image.originalDimensionsMarkup ? encoder5.encode(image.originalDimensionsMarkup) : bytes;
+}
+
 // src/modules/whiteboard/domain/image-edits.ts
 var assetIdPrefix = "image-";
 var archiveAssetPath = "/studio-archive-assets/";
 var pathSegment = /^[A-Za-z0-9_-]{1,128}$/u;
 var unsafeName = new RegExp("[/\\\\]|\\p{Cc}|^[A-Za-z]:", "u");
 var maximumDisplayName = 160;
-var maximumImageBytes = 8 * 1024 * 1024;
+var maximumBoardImageBytes = 20 * 1024 * 1024;
 var maximumDimension = 16384;
-var maximumPixels = 32 * 1024 * 1024;
+var maximumPixels2 = 32 * 1024 * 1024;
 var pngSignatureStart = 2303741511;
 var pngSignatureEnd = 218765834;
 var pngHeaderSize = 13;
@@ -6221,7 +7245,7 @@ function validDimensions({ width, height }) {
   const withinDimensions = [width, height].every(
     (dimension) => dimension > 0 && dimension <= maximumDimension
   );
-  return withinDimensions && width * height <= maximumPixels;
+  return withinDimensions && width * height <= maximumPixels2;
 }
 function hasPngSignature(view) {
   return view.byteLength >= pngFirstDataOffset && view.getUint32(0) === pngSignatureStart && view.getUint32(4) === pngSignatureEnd;
@@ -6492,31 +7516,36 @@ function validImagePlacement(boardId, assetId, operation) {
 function archiveImageSource(boardId, assetId) {
   return archiveAssetPath + boardId + "/" + assetId;
 }
-function planDocumentImageAsset(boardId, assetId, content) {
-  if (content.byteLength > maximumImageBytes) {
+function inspectImageAsset(content, vector) {
+  const bytes = vector ? encodeSafeSvgImage(vector, maximumBoardImageBytes) : content;
+  if (content.byteLength > maximumBoardImageBytes || bytes.byteLength > maximumBoardImageBytes) {
     return { kind: "rejected", reason: "tooLarge" };
   }
+  const image = vector ? { mimeType: "image/svg+xml", size: vector.size } : inspectCanvasImage(content);
+  if (!image?.size) {
+    return { kind: "rejected", reason: "invalidImage" };
+  }
+  return { kind: "image", mimeType: image.mimeType, size: image.size, bytes };
+}
+function planDocumentImageAsset(boardId, assetId, content, vector) {
   if (!pathSegment.test(boardId) || !pathSegment.test(assetId)) {
     return { kind: "rejected", reason: "invalidEdit" };
   }
-  const image = inspectImage(content);
-  if (!image?.size) {
-    return { kind: "rejected", reason: "invalidImage" };
+  const image = inspectImageAsset(content, vector);
+  if (image.kind === "rejected") {
+    return image;
   }
-  return { kind: "changes", assets: [{ assetId, mimeType: image.mimeType, bytes: content }] };
+  return { kind: "changes", assets: [{ assetId, mimeType: image.mimeType, bytes: image.bytes }] };
 }
-function planImageChanges(boardId, operation) {
+function planImageChanges(boardId, operation, vector) {
   const { objectId, displayName, geometry, content } = operation;
   const assetId = assetIdPrefix + objectId;
-  if (content.byteLength > maximumImageBytes) {
-    return { kind: "rejected", reason: "tooLarge" };
-  }
   if (!validImagePlacement(boardId, assetId, operation)) {
     return { kind: "rejected", reason: "invalidEdit" };
   }
-  const image = inspectCanvasImage(content);
-  if (!image?.size) {
-    return { kind: "rejected", reason: "invalidImage" };
+  const image = inspectImageAsset(content, vector);
+  if (image.kind === "rejected") {
+    return image;
   }
   return {
     kind: "changes",
@@ -6542,185 +7571,8 @@ function planImageChanges(boardId, operation) {
         }
       }
     ],
-    assets: [{ assetId, mimeType: image.mimeType, bytes: content }]
+    assets: [{ assetId, mimeType: image.mimeType, bytes: image.bytes }]
   };
-}
-
-// src/modules/whiteboard/domain/svg-image.ts
-var maximumSvgBytes = 1024 * 1024;
-var maximumElements = 4096;
-var maximumSide = 16384;
-var maximumPixels2 = 32e6;
-var namespace = "http://www.w3.org/2000/svg";
-var xlinkNamespace = "http://www.w3.org/1999/xlink";
-var xmlDeclaration = /^\s*<\?xml\s+version\s*=\s*(['"])1\.0\1(?:\s+encoding\s*=\s*(['"])UTF-8\2)?(?:\s+standalone\s*=\s*(['"])(?:yes|no)\3)?\s*\?>/iu;
-var localReference = /^#[A-Za-z_][\w.:-]*$/u;
-var localPaint = /url\(\s*(?:"#[A-Za-z_][\w.:-]*"|'#[A-Za-z_][\w.:-]*'|#[A-Za-z_][\w.:-]*)\s*\)/giu;
-var unsafeReference = /[\\@&]|\b(?:https?|file|data|javascript|blob|ftp):|\/\/|\burl\s*\(/iu;
-var textEntity = /&(?:amp|lt|gt|quot|apos|#\d{1,7}|#x[\da-f]{1,6});/giu;
-var svgElements = /* @__PURE__ */ new Set([
-  "svg",
-  "g",
-  "defs",
-  "path",
-  "rect",
-  "line",
-  "polyline",
-  "polygon",
-  "circle",
-  "ellipse",
-  "text",
-  "tspan",
-  "textPath",
-  "title",
-  "desc",
-  "style",
-  "symbol",
-  "use",
-  "marker",
-  "mask",
-  "clipPath",
-  "pattern",
-  "linearGradient",
-  "radialGradient",
-  "stop",
-  "filter",
-  "feGaussianBlur",
-  "feColorMatrix",
-  "feOffset",
-  "feMerge",
-  "feMergeNode",
-  "feBlend",
-  "feComposite",
-  "feFlood",
-  "feDropShadow"
-]);
-function safeReferences(value) {
-  return !unsafeReference.test(value.replace(localPaint, ""));
-}
-function safeAttribute(name, value) {
-  if (name === "xmlns") {
-    return value === namespace;
-  }
-  if (name === "xmlns:xlink") {
-    return value === xlinkNamespace;
-  }
-  if (name === "xml:space") {
-    return value === "default" || value === "preserve";
-  }
-  if (name === "href" || name === "xlink:href") {
-    return localReference.test(value);
-  }
-  const asksForResource = /^(?:on|src|background|xmlns|xml)/iu.test(name) || name.includes(":");
-  return !asksForResource && safeReferences(value);
-}
-function readAttributes(tail) {
-  const attributes2 = /* @__PURE__ */ new Map();
-  const assignment = /\s+([A-Za-z_][\w:-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/guy;
-  let offset = 0;
-  while (tail.slice(offset).trim()) {
-    assignment.lastIndex = offset;
-    const match = assignment.exec(tail);
-    const name = match?.[1];
-    const value = match?.[2] ?? match?.[3];
-    if (name === void 0 || value === void 0 || attributes2.has(name)) {
-      return void 0;
-    }
-    if (!safeAttribute(name, value)) {
-      return void 0;
-    }
-    attributes2.set(name, value);
-    offset = assignment.lastIndex;
-  }
-  return attributes2;
-}
-function safeText(text3, parent) {
-  if (parent === "style") {
-    const css = text3.trim().replace(/^<!\[CDATA\[([\s\S]*)\]\]>$/u, "$1");
-    return !css.includes("<") && safeReferences(css);
-  }
-  if (!parent) {
-    return text3.trim() === "";
-  }
-  return !text3.includes("<") && !text3.replace(textEntity, "").includes("&");
-}
-function readSvgRoot(source) {
-  const stack = [];
-  const token2 = /<(\/?)([A-Za-z][\w:-]*)([^<>]*)>/gu;
-  let offset = 0;
-  let elements2 = 0;
-  let root;
-  for (const match of source.matchAll(token2)) {
-    const [markup, closing, name, tail] = match;
-    if (!name || tail === void 0 || !svgElements.has(name)) {
-      return void 0;
-    }
-    if (!safeText(source.slice(offset, match.index), stack.at(-1))) {
-      return void 0;
-    }
-    offset = match.index + markup.length;
-    if (closing) {
-      if (tail.trim() || stack.pop() !== name) {
-        return void 0;
-      }
-      continue;
-    }
-    const empty = /\/\s*$/u.test(tail);
-    const parameters = readAttributes(empty ? tail.replace(/\/\s*$/u, "") : tail);
-    elements2 += 1;
-    if (!parameters || elements2 > maximumElements) {
-      return void 0;
-    }
-    if (stack.length === 0) {
-      if (root || name !== "svg") {
-        return void 0;
-      }
-      root = { attributes: parameters, end: offset, empty };
-    }
-    if (!empty) {
-      stack.push(name);
-    }
-  }
-  return stack.length === 0 && safeText(source.slice(offset), void 0) ? root : void 0;
-}
-function dimensions2(attributes2) {
-  const viewBox = attributes2.get("viewBox")?.trim().split(/[\s,]+/u).map(Number);
-  const viewWidth = viewBox?.length === 4 ? viewBox[2] : void 0;
-  const viewHeight = viewBox?.length === 4 ? viewBox[3] : void 0;
-  const rawWidth = attributes2.get("width")?.trim().match(/^(\d+(?:\.\d+)?|\.\d+)(?:px)?$/u)?.[1];
-  const rawHeight = attributes2.get("height")?.trim().match(/^(\d+(?:\.\d+)?|\.\d+)(?:px)?$/u)?.[1];
-  const width = Math.ceil(rawWidth === void 0 ? viewWidth ?? 300 : Number(rawWidth));
-  const height = Math.ceil(rawHeight === void 0 ? viewHeight ?? 150 : Number(rawHeight));
-  const validWidth2 = width > 0 && width <= maximumSide;
-  const validHeight = height > 0 && height <= maximumSide;
-  return validWidth2 && validHeight && width * height <= maximumPixels2 ? { width, height } : void 0;
-}
-function looksLikeSvgImage(bytes) {
-  const head2 = new TextDecoder().decode(bytes.subarray(0, 4096)).trimStart();
-  return head2.startsWith("<");
-}
-function svgForImagePreview(bytes) {
-  if (bytes.byteLength > maximumSvgBytes) {
-    return void 0;
-  }
-  let decoded;
-  try {
-    decoded = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch (error) {
-    if (!(error instanceof TypeError)) {
-      throw error;
-    }
-    return void 0;
-  }
-  const source = decoded.replace(xmlDeclaration, "").replace(/<!--[\s\S]*?-->/gu, "");
-  const root = readSvgRoot(source);
-  const size = root ? dimensions2(root.attributes) : void 0;
-  if (!root || !size) {
-    return void 0;
-  }
-  const extra = [...root.attributes].filter(([name]) => !["width", "height", "xmlns"].includes(name)).map(([name, value]) => ` ${name}="${value.replaceAll('"', "&quot;")}"`).join("");
-  const start = `<svg xmlns="${namespace}" width="${size.width}" height="${size.height}"${extra}`;
-  return start + (root.empty ? "/>" : ">") + source.slice(root.end);
 }
 
 // src/modules/whiteboard/domain/video-iso.ts
@@ -7266,19 +8118,19 @@ function copiedEndpoint(source, translated, resolved, scope2) {
   return scope2.attachableObjects.has(attachment.objectId) ? source : { point: point2 };
 }
 function clipboardObject(source, objectId, scope2) {
-  const moved = translateObject({ ...source, geometryVersion: 0n }, scope2.delta);
-  if (!moved || !geometryInWorld(moved.geometry)) {
+  const moved2 = translateObject({ ...source, geometryVersion: 0n }, scope2.delta);
+  if (!moved2 || !geometryInWorld(moved2.geometry)) {
     return void 0;
   }
   const copy = {
-    ...moved,
+    ...moved2,
     objectId,
     geometryVersion: 0n,
     payloadVersion: source.payloadVersion === void 0 ? void 0 : 0n,
     groupId: source.groupId === void 0 ? void 0 : scope2.groups.get(source.groupId),
     parentId: source.parentId === void 0 ? void 0 : scope2.ids.get(source.parentId)
   };
-  const { detail } = moved;
+  const { detail } = moved2;
   if (source.detail?.kind !== "connector" || detail?.kind !== "connector") {
     return copy;
   }
@@ -7315,6 +8167,7 @@ function payloadResult(objectId, payload) {
 
 // src/modules/whiteboard/application/export-assets.ts
 var maxAssetBytes = 20 * 1024 * 1024;
+var encodingChunkBytes = 24 * 1024;
 var assetPrefix = "/studio-archive-assets/";
 var assetSource = /^\/studio-archive-assets\/([A-Za-z0-9_-]{1,128})\/([A-Za-z0-9_-]{1,128})$/u;
 var embeddedSource = /(?:\b(?:src|href|poster)\s*=\s*["']|\burl\(\s*["']?)(\/studio-archive-assets\/[A-Za-z0-9_-]{1,128}\/[A-Za-z0-9_-]{1,128})(?=["'\s)])/gu;
@@ -7376,8 +8229,23 @@ function collectSources(payloads, format) {
   }
   return sources;
 }
+function safeVectorAsset(asset) {
+  const original = Uint8Array.from(atob(asset.base64), (character) => character.charCodeAt(0));
+  const svg = readSafeSvgImage(original);
+  if (!svg) {
+    return void 0;
+  }
+  const bytes = new TextEncoder().encode(svg.markup);
+  const encoded = [];
+  for (let offset = 0; offset < bytes.length; offset += encodingChunkBytes) {
+    const chunk = bytes.subarray(offset, offset + encodingChunkBytes);
+    encoded.push(btoa(String.fromCharCode(...chunk)));
+  }
+  return { mimeType: asset.mimeType, byteLength: bytes.length, base64: encoded.join("") };
+}
 function captureExportAssets(reader2, boardId, payloads, format) {
   const assets = /* @__PURE__ */ new Map();
+  const vectorExport = format === "svg" || format === "png";
   let remaining = maxAssetBytes;
   for (const source of collectSources(payloads, format)) {
     const match = assetSource.exec(source);
@@ -7392,8 +8260,13 @@ function captureExportAssets(reader2, boardId, payloads, format) {
     if (result.kind === "tooLarge" || result.asset.byteLength > remaining) {
       return { kind: "rejected", reason: "tooLarge" };
     }
-    remaining -= result.asset.byteLength;
-    assets.set(source, result.asset);
+    const { asset } = result;
+    remaining -= asset.byteLength;
+    const captured = vectorExport && asset.mimeType === "image/svg+xml" ? safeVectorAsset(asset) : asset;
+    if (!captured) {
+      return { kind: "rejected", reason: "unsupported" };
+    }
+    assets.set(source, captured);
   }
   return assets;
 }
@@ -7401,12 +8274,32 @@ function captureExportAssets(reader2, boardId, payloads, format) {
 // src/modules/whiteboard/application/export-board.ts
 var maxExportObjects = 1e4;
 var maxSnapshotObjects = 2e4;
+function captureHtmlSelection(reader2, board, objectIds) {
+  const [objectId] = objectIds;
+  if (objectIds.length !== 1 || !objectId) {
+    return { kind: "rejected", reason: "invalidSelection" };
+  }
+  const [object3] = reader2.getObjects(board.boardId, [objectId]);
+  if (!object3) {
+    return { kind: "rejected", reason: "invalidSelection" };
+  }
+  if (object3.kind !== "html" && object3.kind !== "diagram") {
+    return { kind: "rejected", reason: "unsupported" };
+  }
+  return {
+    board,
+    objects: [object3],
+    geometry: /* @__PURE__ */ new Map([[objectId, object3]]),
+    payloads: reader2.getPayloads(board.boardId, [objectId]),
+    assets: /* @__PURE__ */ new Map()
+  };
+}
 function captureSnapshot(reader2, command, board) {
   if (board.revision !== command.expectedRevision) {
     return { kind: "stale", revision: board.revision };
   }
-  if (command.format === "html" && command.scope.kind !== "whole") {
-    return { kind: "rejected", reason: "invalidSelection" };
+  if (command.format === "html" && command.scope.kind === "selection") {
+    return captureHtmlSelection(reader2, board, command.scope.objectIds);
   }
   const objects = reader2.listObjects(command.boardId, maxSnapshotObjects + 1);
   if (objects.length > maxSnapshotObjects) {
@@ -7421,8 +8314,8 @@ function captureSnapshot(reader2, command, board) {
     return { kind: "rejected", reason: "tooLarge" };
   }
   const ids = selected.map(({ objectId }) => objectId);
-  const rows = reader2.getPayloads(command.boardId, ids);
-  const payloadById = new Map(rows.map((row) => [row.objectId, row]));
+  const rows2 = reader2.getPayloads(command.boardId, ids);
+  const payloadById = new Map(rows2.map((row) => [row.objectId, row]));
   const payloads = ids.flatMap((id) => payloadById.get(id) ?? []);
   const assets = captureExportAssets(reader2, command.boardId, payloads, command.format);
   if ("kind" in assets) {
@@ -7438,7 +8331,7 @@ function executeBoardExport(repository, actor, command, requireAccess4, readBoar
   if ("kind" in snapshot) {
     return snapshot;
   }
-  const file = renderExportFile(snapshot, command.format);
+  const file = renderExportFile(snapshot, command);
   if (file.kind === "file" || file.kind === "browserPng") {
     repository.read((reader2) => requireAccess4(reader2, actor, command.boardId));
   }
@@ -7490,8 +8383,8 @@ function collectObjects(initial, getRelated, isLocked2) {
   }
   return [...pending.values()].filter(canTranslate);
 }
-function createMoveScope(writer2, boardId, targets) {
-  const objectIds = targets.map(({ objectId }) => objectId);
+function createMoveScope(writer2, boardId, targets2) {
+  const objectIds = targets2.map(({ objectId }) => objectId);
   const cachedObjects = new Map(
     objectIds.map((id) => [id, void 0])
   );
@@ -7634,10 +8527,20 @@ function executeMove(writer2, actor, command, now) {
 // src/modules/whiteboard/application/export-backup.ts
 var maxVersions = 200;
 var maxObjects = 4e3;
-var maxStoredPayload = 32n * 1024n * 1024n;
-var maxAssetBytes2 = 20 * 1024 * 1024;
+var maxStoredPayload = 64n * 1024n * 1024n;
 var portableId = /^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/u;
 var assetPrefix2 = "/studio-archive-assets/";
+var legacyStyle = {
+  name: "Diagram",
+  paper: "#f5f5f5",
+  ink: "#2d3142",
+  muted: "#4f5d75",
+  accent: "#eb6c36",
+  link: "#2e5aa8",
+  fontFamily: 'Arial, "Microsoft YaHei", sans-serif',
+  titleFont: 'Georgia, "Songti SC", serif',
+  monoFont: "Consolas, monospace"
+};
 var BackupError = class extends Error {
   constructor(reason) {
     super("Could not compose the whiteboard archive.");
@@ -7653,38 +8556,41 @@ function requireOwner(reader2, actor, boardId) {
   return metadata;
 }
 function numericVersion(value) {
-  const version = Number(value);
-  if (!Number.isSafeInteger(version) || version < 0) {
+  const version2 = Number(value);
+  if (!Number.isSafeInteger(version2) || version2 < 0) {
     throw new BackupError("unsupported");
   }
-  return version;
+  return version2;
 }
-function timeString(value, formatTime) {
-  return value === void 0 ? void 0 : formatTime(value);
-}
-function artifact(board, metadata, formatTime, version) {
+function artifact(board, metadata, formatTime, version2) {
   return {
     id: board.boardId,
-    title: version?.title ?? board.title,
+    title: version2?.title ?? board.title,
     type: "whiteboard",
-    revision: numericVersion(version?.revision ?? board.revision),
-    createdAt: timeString(metadata.createdAtMillis, formatTime),
-    updatedAt: timeString(version?.savedAtMillis ?? metadata.updatedAtMillis, formatTime),
+    revision: numericVersion(version2?.revision ?? board.revision),
+    createdAt: formatTime(metadata.createdAtMillis ?? metadata.updatedAtMillis),
+    updatedAt: formatTime(version2?.savedAtMillis ?? metadata.updatedAtMillis),
     pinned: metadata.pinned,
     sharing: false
   };
 }
-function historyEntry(version, formatTime) {
-  const { actorId: actorId2, revision, savedAtMillis, kind, sourceRevision, changedObjectCount } = version;
+function historyEntry(version2, actor, metadata, formatTime, changedIds) {
+  const { actorId: actorId2, revision, savedAtMillis, kind, sourceRevision, changedObjectCount } = version2;
   return {
     id: "revision-" + revision,
     revision: numericVersion(revision),
-    createdAt: timeString(savedAtMillis, formatTime),
-    actor: actorId2 ? { id: actorId2, name: actorId2 } : void 0,
+    createdAt: formatTime(savedAtMillis ?? metadata.createdAtMillis ?? metadata.updatedAtMillis),
+    actor,
     summary: kind,
-    changedIds: [],
-    changedObjectCount,
-    restoredFrom: sourceRevision !== void 0 ? "revision-" + sourceRevision : void 0
+    changedIds,
+    restoredFrom: sourceRevision !== void 0 ? "revision-" + sourceRevision : void 0,
+    studioII: {
+      actorId: actorId2,
+      savedAtMillis,
+      kind,
+      sourceRevision: sourceRevision?.toString(),
+      changedObjectCount
+    }
   };
 }
 function payloadKey(objectId, payloadVersion) {
@@ -7701,7 +8607,7 @@ var BackupCapture = class {
   payloads = /* @__PURE__ */ new Map();
   objects = /* @__PURE__ */ new Map();
   remainingPayload = maxStoredPayload;
-  remainingAssets = maxAssetBytes2;
+  remainingAssets = maxBoardBackupBytes;
   readAsset(source) {
     const prefix = assetPrefix2 + this.boardId + "/";
     const assetId = source.slice(prefix.length);
@@ -7709,14 +8615,15 @@ var BackupCapture = class {
       throw new BackupError("assetUnavailable");
     }
     if (!this.assets.has(assetId)) {
-      const media = this.reader.getExportAsset?.(this.boardId, assetId, this.remainingAssets);
+      const limit = Math.min(maxBoardBackupAssetBytes, this.remainingAssets);
+      const media = this.reader.getBackupAsset?.(this.boardId, assetId, limit);
       if (!media) {
         throw new BackupError("assetUnavailable");
       }
-      if (media.kind === "tooLarge" || media.asset.byteLength > this.remainingAssets) {
+      if (media.kind === "tooLarge" || media.asset.bytes.byteLength > limit) {
         throw new BackupError("tooLarge");
       }
-      this.remainingAssets -= media.asset.byteLength;
+      this.remainingAssets -= media.asset.bytes.byteLength;
       this.assets.set(assetId, media.asset);
     }
     return "/assets/" + this.boardId + "/" + assetId;
@@ -7768,7 +8675,25 @@ var BackupCapture = class {
     return objects.map((object3) => this.encodeObject(object3));
   }
 };
-function capture(reader2, actor, command, formatTime) {
+function currentVersion(board) {
+  return {
+    revision: board.revision,
+    title: board.title,
+    kind: "baseline",
+    changedObjectCount: 0
+  };
+}
+function changedObjectIds(previous, elements2) {
+  const unchanged = new Set(previous);
+  const remaining = new Set(elements2);
+  return [
+    .../* @__PURE__ */ new Set([
+      ...elements2.filter((element) => !unchanged.has(element)).map((element) => String(element.id)),
+      ...previous.filter((element) => !remaining.has(element)).map((element) => String(element.id))
+    ])
+  ];
+}
+function capture(reader2, actor, command, formatTime, ownerName) {
   const { boardId, expectedRevision, scope: scope2 } = command;
   const metadata = requireOwner(reader2, actor, boardId);
   const board = reader2.getBoard(boardId);
@@ -7783,40 +8708,101 @@ function capture(reader2, actor, command, formatTime) {
   }
   const builder = new BackupCapture(reader2, boardId);
   const elements2 = builder.elements(reader2.listObjects(boardId, maxObjects + 1));
-  const history = [...reader2.listVersions(boardId, void 0, maxVersions)].reverse().map((version) => ({
-    entry: historyEntry(version, formatTime),
-    artifact: artifact(board, metadata, formatTime, version),
-    elements: version.revision === board.revision ? elements2 : builder.elements(
-      reader2.listVersionObjects(boardId, version.revision),
-      version.revision
-    )
-  }));
+  const details = reader2.getBackupDetails?.(boardId);
+  const authors = /* @__PURE__ */ new Map();
+  function author(id, role, name) {
+    const known = authors.get(id) ?? details?.actors.get(id);
+    const ownerFallback = id === actor.id && (!known || known.name === id || known.name === "\u6211");
+    const profile = {
+      id,
+      name: name ?? (ownerFallback ? ownerName : void 0) ?? known?.name ?? id,
+      kind: known?.kind ?? "human",
+      role: known?.role ?? role
+    };
+    authors.set(id, profile);
+    return profile;
+  }
+  const versions = [...reader2.listVersions(boardId, void 0, maxVersions)].reverse();
+  if (versions.at(-1)?.revision !== board.revision) {
+    versions.push(reader2.getVersion(boardId, board.revision) ?? currentVersion(board));
+  }
+  let previous;
+  const history = versions.slice(-maxVersions).map((version2) => {
+    const scene = version2.revision === board.revision ? elements2 : builder.elements(reader2.listVersionObjects(boardId, version2.revision), version2.revision);
+    const changedIds = previous ? changedObjectIds(previous, scene) : [];
+    previous = scene;
+    return {
+      entry: historyEntry(
+        version2,
+        author(
+          version2.actorId ?? actor.id,
+          !version2.actorId || version2.actorId === actor.id ? "owner" : "editor"
+        ),
+        metadata,
+        formatTime,
+        changedIds
+      ),
+      artifact: artifact(board, metadata, formatTime, version2),
+      elements: scene
+    };
+  });
+  const feedback = details?.feedback ?? { threads: [], messages: [], contentAnchors: [] };
+  const historyElements = new Map(
+    history.map((version2) => [String(version2.entry.revision), version2.elements])
+  );
+  const legacyFeedback = legacyBackupFeedback(
+    boardId,
+    feedback,
+    (id, name) => author(id, id === actor.id ? "owner" : "commenter", name),
+    formatTime,
+    (revision, objectId) => historyElements.get(revision)?.find((element) => element.id === objectId)
+  );
   const assetIndex = Object.fromEntries(
     [...builder.assets].map(([id, asset]) => [
       id,
-      { id, filename: id, size: asset.byteLength, mimeType: asset.mimeType }
+      { id, filename: id, size: asset.bytes.byteLength, mimeType: asset.mimeType }
     ])
   );
   const properties = {
     schemaVersion: 2,
     artifact: artifact(board, metadata, formatTime),
-    feedback: [],
-    sources: {},
+    ...legacyFeedback,
     operations: [],
     sharing: { enabled: false, generation: 0, tokens: {} },
-    assets: assetIndex
+    assets: assetIndex,
+    studioII: {
+      version: 1,
+      revision: board.revision.toString(),
+      createdAtMillis: metadata.createdAtMillis ?? metadata.updatedAtMillis,
+      updatedAtMillis: metadata.updatedAtMillis,
+      actors: [...authors.values()],
+      feedback,
+      reviewSources: details?.reviewSources ?? { sources: [], targetSnapshots: [] }
+    }
   };
-  return { board, archive: { boardId, properties, elements: elements2, history, assets: builder.assets } };
+  return {
+    board,
+    archive: {
+      boardId,
+      properties,
+      contentFields: { style: legacyStyle },
+      elements: elements2,
+      history,
+      assets: builder.assets
+    }
+  };
 }
-function createBoardBackup(repository, encode, formatTime) {
+function createBoardBackup(repository, encode, formatTime, ownerName) {
   return async (actor, command) => {
     try {
-      const snapshot = repository.read((reader2) => capture(reader2, actor, command, formatTime));
+      const snapshot = repository.read(
+        (reader2) => capture(reader2, actor, command, formatTime, ownerName?.trim() || void 0)
+      );
       if ("kind" in snapshot) {
         return snapshot;
       }
-      const content = await encode(snapshot.archive, maxExportFileBytes);
-      if (!content?.byteLength) {
+      const content = await encode(snapshot.archive, maxBoardBackupBytes);
+      if (!content?.byteLength || content.byteLength > maxBoardBackupBytes) {
         return { kind: "rejected", reason: "tooLarge" };
       }
       repository.read((reader2) => requireOwner(reader2, actor, command.boardId));
@@ -7833,6 +8819,101 @@ function createBoardBackup(repository, encode, formatTime) {
       }
       throw error;
     }
+  };
+}
+
+// src/modules/whiteboard/application/run-board-edit.ts
+function rejected3(identity, reason) {
+  return { ...identity, outcome: { kind: "rejected", reason } };
+}
+function runBoardEdit(repository, actor, identity, request, plan) {
+  return repository.write(
+    (writer2) => runBoardEditInTransaction(writer2, actor, identity, request, plan)
+  );
+}
+function runBoardEditInTransaction(writer2, actor, identity, request, plan) {
+  const { boardId, commandId } = identity;
+  const access = writer2.getAccess(boardId, actor.id);
+  const board = access?.canEdit ? writer2.getBoard(boardId) : void 0;
+  if (!board) {
+    return rejected3(identity, "forbidden");
+  }
+  const stored = writer2.getEditReceipt(boardId, actor.id, commandId);
+  if (stored) {
+    return stored.signature === request.signature ? stored.receipt : rejected3(identity, "commandIdReuse");
+  }
+  const decision = plan(writer2, board);
+  if (decision.kind !== "changes") {
+    return { ...identity, outcome: decision };
+  }
+  if (!canAdvanceVersion(board.revision)) {
+    return rejected3(identity, "invalidEdit");
+  }
+  const { signature, ...details } = request;
+  const applied2 = writer2.applyBoardChanges(board, decision, { ...details, actorId: actor.id });
+  const advancedRevision = applied2.boardRevision > board.revision;
+  const outcome = advancedRevision ? applied2 : { ...applied2, order: void 0 };
+  const receipt = { ...identity, outcome };
+  writer2.saveEditReceipt(actor.id, { signature, receipt, advancedRevision });
+  return receipt;
+}
+function readBoardEditReceipt(repository, actor, identity) {
+  const { boardId, commandId } = identity;
+  return repository.read(
+    (reader2) => reader2.getAccess(boardId, actor.id)?.canEdit ? reader2.getEditReceipt(boardId, actor.id, commandId)?.receipt : rejected3(identity, "forbidden")
+  );
+}
+function checkBoardEditBeforePreparation(repository, actor, identity, signature) {
+  const { boardId, commandId } = identity;
+  return repository.read((reader2) => {
+    if (!reader2.getAccess(boardId, actor.id)?.canEdit) {
+      return rejected3(identity, "forbidden");
+    }
+    const stored = reader2.getEditReceipt(boardId, actor.id, commandId);
+    if (stored) {
+      return stored.signature === signature ? stored.receipt : rejected3(identity, "commandIdReuse");
+    }
+    return void 0;
+  });
+}
+
+// src/modules/whiteboard/application/prepare-board-image.ts
+function readArchivedSvgImage(content) {
+  if (content.byteLength > maximumBoardImageBytes) {
+    return void 0;
+  }
+  const svg = readSafeSvgImage(content);
+  if (!svg) {
+    return void 0;
+  }
+  const bytes = encodeSafeSvgImage(svg, maximumBoardImageBytes);
+  return bytes.byteLength <= maximumBoardImageBytes ? bytes : void 0;
+}
+function createImageEdit(repository, now, validateUploadedSvg) {
+  return async function editImage(actor, command, plan) {
+    const { operation, signature, boardId, commandId } = command;
+    const identity = { boardId, commandId };
+    let vector;
+    if (looksLikeSvgImage(operation.content)) {
+      const prior = checkBoardEditBeforePreparation(repository, actor, identity, signature);
+      if (prior) {
+        return prior;
+      }
+      if (operation.content.byteLength > maximumBoardImageBytes) {
+        return { ...identity, outcome: { kind: "rejected", reason: "tooLarge" } };
+      }
+      vector = readSafeSvgImage(operation.content);
+      if (!vector || !validateUploadedSvg || !await validateUploadedSvg(vector.markup)) {
+        return { ...identity, outcome: { kind: "rejected", reason: "invalidImage" } };
+      }
+    }
+    return runBoardEdit(
+      repository,
+      actor,
+      identity,
+      { kind: "image", signature, savedAtMillis: now() },
+      (writer2, board) => plan(writer2, board, operation, vector)
+    );
   };
 }
 
@@ -7890,10 +8971,10 @@ function createSuggestionOverlay(base, boardId, pinClocks) {
     if (current !== boardId) {
       return originals;
     }
-    const byId2 = new Map(originals.map((payload) => [payload.objectId, payload]));
+    const byId3 = new Map(originals.map((payload) => [payload.objectId, payload]));
     const result = [];
     for (const id of ids) {
-      const saved = byId2.get(id);
+      const saved = byId3.get(id);
       const pending = payloads.get(id);
       const next = pending === void 0 ? saved : pending;
       if (next) {
@@ -7929,10 +9010,10 @@ function createSuggestionOverlay(base, boardId, pinClocks) {
       if (current !== boardId) {
         return originals;
       }
-      const targets = new Set(ids);
+      const targets2 = new Set(ids);
       return projectedObjects(
         originals,
-        ({ detail }) => detail?.kind === "connector" && connectorAttachmentIds(detail).some((id) => targets.has(id))
+        ({ detail }) => detail?.kind === "connector" && connectorAttachmentIds(detail).some((id) => targets2.has(id))
       );
     },
     getPayloads: projectedPayloads,
@@ -7982,12 +9063,12 @@ function createSuggestionOverlay(base, boardId, pinClocks) {
 
 // src/modules/whiteboard/application/edit-geometry-style.ts
 var textKinds = /* @__PURE__ */ new Set(["text", "note", "shape", "section", "connector"]);
-function textPayloads(scope2, objects, { targets, patch }) {
+function textPayloads(scope2, objects, { targets: targets2, patch }) {
   const ids = objects.map(({ objectId }) => objectId);
   const current = scope2.writer.getPayloads(scope2.board.boardId, ids);
   const bodies = new Map(current.map((payload) => [payload.objectId, payload]));
   const versions = new Map(
-    targets.map(({ target: target2, expectedPayloadVersion }) => [target2.objectId, expectedPayloadVersion])
+    targets2.map(({ target: target2, expectedPayloadVersion }) => [target2.objectId, expectedPayloadVersion])
   );
   const needsVersion = styleTouchesText(patch);
   const writesText = needsVersion || patch.label !== void 0;
@@ -8170,8 +9251,8 @@ function createSelectionSection(scope2, selected, { sectionId, title }) {
     order: orderWithSection(ordered, ids, sectionId)
   };
 }
-function requiredLayoutObjects(scope2, targets, movable) {
-  const moves = createMoveScope(scope2.writer, scope2.board.boardId, targets);
+function requiredLayoutObjects(scope2, targets2, movable) {
+  const moves = createMoveScope(scope2.writer, scope2.board.boardId, targets2);
   return moves.requiredObjects(movable);
 }
 function arrangeGeometry(scope2, selected, operation) {
@@ -8204,11 +9285,11 @@ function arrangeGeometry(scope2, selected, operation) {
     if (!delta) {
       continue;
     }
-    const moved = translateObject(object3, delta);
-    if (!moved || !geometryInWorld(moved.geometry)) {
+    const moved2 = translateObject(object3, delta);
+    if (!moved2 || !geometryInWorld(moved2.geometry)) {
       return { kind: "rejected", reason: "invalidEdit" };
     }
-    objects.push(moved);
+    objects.push(moved2);
   }
   return { kind: "changes", objects };
 }
@@ -8254,12 +9335,12 @@ function lockedParent(scope2, object3) {
 function conflict2(scope2, objects) {
   return { kind: "conflict", boardRevision: scope2.board.revision, objects };
 }
-function readTargets(scope2, targets) {
-  if (targets.length === 0 || targets.length > targetLimit) {
-    return reject(targets.length > targetLimit ? "tooLarge" : "invalidEdit");
+function readTargets(scope2, targets2) {
+  if (targets2.length === 0 || targets2.length > targetLimit) {
+    return reject(targets2.length > targetLimit ? "tooLarge" : "invalidEdit");
   }
-  const ids = new Set(targets.map(({ objectId }) => objectId));
-  if (ids.size !== targets.length || targets.some(
+  const ids = new Set(targets2.map(({ objectId }) => objectId));
+  if (ids.size !== targets2.length || targets2.some(
     ({ objectId, expectedGeometryVersion }) => !objectId.trim() || expectedGeometryVersion < 0n
   )) {
     return reject("invalidEdit");
@@ -8269,7 +9350,7 @@ function readTargets(scope2, targets) {
     return conflict2(scope2, objects);
   }
   const versions = new Map(
-    targets.map((target2) => [target2.objectId, target2.expectedGeometryVersion])
+    targets2.map((target2) => [target2.objectId, target2.expectedGeometryVersion])
   );
   if (objects.some((object3) => object3.geometryVersion !== versions.get(object3.objectId))) {
     return conflict2(scope2, objects);
@@ -8387,27 +9468,27 @@ function changeTransforms(scope2, operation, objects) {
   return { kind: "changes", objects: changed };
 }
 function transformObjects(scope2, operation) {
-  const targets = readTargets(
+  const targets2 = readTargets(
     scope2,
     operation.objects.map(({ target: target2 }) => target2)
   );
-  if (targets.kind !== "targets") {
-    return targets;
+  if (targets2.kind !== "targets") {
+    return targets2;
   }
   const { writer: writer2, board } = scope2;
-  const ids = targets.objects.map(({ objectId }) => objectId);
+  const ids = targets2.objects.map(({ objectId }) => objectId);
   const related = operation.transform === "connect" ? [] : writer2.listRelatedConnectors(board.boardId, ids);
   if (related.some((object3) => isLocked(scope2, object3))) {
     return reject("geometryLocked");
   }
-  return changeTransforms(scope2, operation, targets.objects);
+  return changeTransforms(scope2, operation, targets2.objects);
 }
 function changeLock(scope2, operation) {
-  const targets = readTargets(scope2, operation.targets);
-  if (targets.kind !== "targets") {
-    return targets;
+  const targets2 = readTargets(scope2, operation.targets);
+  if (targets2.kind !== "targets") {
+    return targets2;
   }
-  const objects = targets.objects.filter(({ locked }) => locked !== operation.locked);
+  const objects = targets2.objects.filter(({ locked }) => locked !== operation.locked);
   if (objects.length === 0) {
     return reject("invalidEdit");
   }
@@ -8426,9 +9507,9 @@ function changeLock(scope2, operation) {
     }))
   };
 }
-function objectsRemovedByDeletion(scope2, targets) {
+function objectsRemovedByDeletion(scope2, targets2) {
   const { writer: writer2, board } = scope2;
-  const removed = new Map(targets.map((object3) => [object3.objectId, object3]));
+  const removed = new Map(targets2.map((object3) => [object3.objectId, object3]));
   let batch = [...removed.keys()];
   while (batch.length > 0) {
     const related = writer2.listRelatedConnectors(board.boardId, batch);
@@ -8457,11 +9538,11 @@ function detachedChildren(scope2, removed) {
   return children;
 }
 function deleteObjects(scope2, operation) {
-  const targets = readTargets(scope2, operation);
-  if (targets.kind !== "targets") {
-    return targets;
+  const targets2 = readTargets(scope2, operation);
+  if (targets2.kind !== "targets") {
+    return targets2;
   }
-  const removed = objectsRemovedByDeletion(scope2, targets.objects);
+  const removed = objectsRemovedByDeletion(scope2, targets2.objects);
   if (!removed) {
     return reject("tooLarge");
   }
@@ -8514,18 +9595,18 @@ function reorder(ids, selected, direction) {
   };
 }
 function reorderObjects(scope2, operation) {
-  const targets = readTargets(scope2, operation.targets);
-  if (targets.kind !== "targets") {
-    return targets;
+  const targets2 = readTargets(scope2, operation.targets);
+  if (targets2.kind !== "targets") {
+    return targets2;
   }
   if (scope2.board.revision !== operation.expectedBoardRevision) {
-    return conflict2(scope2, targets.objects);
+    return conflict2(scope2, targets2.objects);
   }
-  if (targets.objects.some((object3) => isLocked(scope2, object3))) {
+  if (targets2.objects.some((object3) => isLocked(scope2, object3))) {
     return reject("geometryLocked");
   }
   const order = scope2.writer.listObjects(scope2.board.boardId).map(({ objectId }) => objectId);
-  const selected = new Set(targets.objects.map(({ objectId }) => objectId));
+  const selected = new Set(targets2.objects.map(({ objectId }) => objectId));
   const next = reorder(order, selected, operation.direction);
   return next.order.some((id, index) => order[index] !== id) ? { kind: "changes", ...next } : reject("invalidEdit");
 }
@@ -8543,13 +9624,13 @@ function copiedEndpoint2(endpoint2, { ids, delta }) {
   };
 }
 function duplicateObject(source, objectId, duplicate) {
-  const moved = translateObject({ ...source, geometryVersion: 0n }, duplicate.delta);
-  if (!moved || !geometryInWorld(moved.geometry)) {
+  const moved2 = translateObject({ ...source, geometryVersion: 0n }, duplicate.delta);
+  if (!moved2 || !geometryInWorld(moved2.geometry)) {
     return void 0;
   }
-  const { detail } = moved;
+  const { detail } = moved2;
   const copy = {
-    ...moved,
+    ...moved2,
     objectId,
     geometryVersion: 0n,
     payloadVersion: source.payloadVersion === void 0 ? void 0 : 0n,
@@ -8584,10 +9665,10 @@ function duplicatePayloads(scope2, sources, ids) {
     scope2.board.boardId,
     sources.map(({ objectId }) => objectId)
   );
-  const byId2 = new Map(bodies.map((body) => [body.objectId, body]));
+  const byId3 = new Map(bodies.map((body) => [body.objectId, body]));
   const copied = [];
   for (const source of sources) {
-    const body = byId2.get(source.objectId);
+    const body = byId3.get(source.objectId);
     const objectId = ids.get(source.objectId);
     if (!body || !objectId || body.payloadVersion !== source.payloadVersion) {
       return void 0;
@@ -8623,12 +9704,12 @@ function duplicateChanges(scope2, sources, duplicate) {
   return payloads ? { kind: "changes", objects, payloads } : reject("objectNotFound");
 }
 function duplicateObjects(scope2, operation) {
-  const targets = readTargets(
+  const targets2 = readTargets(
     scope2,
     operation.targets.map(({ source }) => source)
   );
-  if (targets.kind !== "targets") {
-    return targets;
+  if (targets2.kind !== "targets") {
+    return targets2;
   }
   const ids = new Map(
     operation.targets.map(({ source, newObjectId }) => [source.objectId, newObjectId])
@@ -8639,17 +9720,17 @@ function duplicateObjects(scope2, operation) {
   )) {
     return reject("invalidEdit");
   }
-  const groups = duplicateGroups(scope2, targets.objects, ids);
+  const groups = duplicateGroups(scope2, targets2.objects, ids);
   if (!groups) {
     return reject("invalidEdit");
   }
-  return duplicateChanges(scope2, targets.objects, { ids, groups, delta: operation.delta });
+  return duplicateChanges(scope2, targets2.objects, { ids, groups, delta: operation.delta });
 }
 function planSelectionEdit(scope2, operation) {
   const requested = operation.kind === "style" ? operation.targets.map(({ target: target2 }) => target2) : operation.targets;
-  const targets = readTargets(scope2, requested);
-  if (targets.kind !== "targets") {
-    return targets;
+  const targets2 = readTargets(scope2, requested);
+  if (targets2.kind !== "targets") {
+    return targets2;
   }
   const tools = {
     board: scope2.board,
@@ -8660,13 +9741,13 @@ function planSelectionEdit(scope2, operation) {
   switch (operation.kind) {
     case "group":
     case "ungroup":
-      return updateObjectGroups(tools, targets.objects, operation);
+      return updateObjectGroups(tools, targets2.objects, operation);
     case "createSection":
-      return createSelectionSection(tools, targets.objects, operation);
+      return createSelectionSection(tools, targets2.objects, operation);
     case "arrange":
-      return arrangeGeometry(tools, targets.objects, operation);
+      return arrangeGeometry(tools, targets2.objects, operation);
     case "style":
-      return applyBoardStyle(tools, targets.objects, operation);
+      return applyBoardStyle(tools, targets2.objects, operation);
   }
 }
 function planGeometryEdit(writer2, board, operation) {
@@ -8720,8 +9801,8 @@ function hasBlock(blocks, blockId) {
   }
   return false;
 }
-function validSourceVersion(version) {
-  return version === void 0 || sourceVersionPattern2.test(version) && BigInt(version) <= maxSourceVersion;
+function validSourceVersion(version2) {
+  return version2 === void 0 || sourceVersionPattern2.test(version2) && BigInt(version2) <= maxSourceVersion;
 }
 function optionalStableId(value) {
   return value === void 0 || stableId.test(value);
@@ -8741,14 +9822,14 @@ function resolveSourceLocation(writer2, boardId, { objectId, blockId, itemId }) 
   return payload.bodyKind === "todo" && Array.isArray(items) && items.some((row) => isRecord(row) && row.itemId === itemId);
 }
 function validTodoSource(writer2, boardId, source) {
-  const { boardId: owner, objectId, blockId, itemId, version } = source;
+  const { boardId: owner, objectId, blockId, itemId, version: version2 } = source;
   const sameBoard = owner === void 0 || owner === boardId;
   const validIds2 = [objectId, blockId, itemId].every(optionalStableId);
   const unambiguous = blockId === void 0 || itemId === void 0;
   if (!sameBoard || !validIds2 || !unambiguous) {
     return false;
   }
-  if (!validSourceVersion(version)) {
+  if (!validSourceVersion(version2)) {
     return false;
   }
   return resolveSourceLocation(writer2, boardId, source);
@@ -9270,12 +10351,12 @@ function undoChangesLockedGeometry(reader2, boardId, application) {
     boardId,
     saved.map(({ objectId }) => objectId)
   );
-  const byId2 = new Map(current.map((object3) => [object3.objectId, object3]));
+  const byId3 = new Map(current.map((object3) => [object3.objectId, object3]));
   const restoredUnlocks = new Set(
     saved.filter(({ locked }) => !locked).map(({ objectId }) => objectId)
   );
   return saved.some((object3) => {
-    const live = byId2.get(object3.objectId);
+    const live = byId3.get(object3.objectId);
     if (!live || protectedGeometry(live) === protectedGeometry(object3)) {
       return false;
     }
@@ -9467,61 +10548,6 @@ function finishSuggestionDecision(reader2, boardId, receivedRevision, draft, dig
   };
 }
 
-// src/modules/whiteboard/application/run-board-edit.ts
-function rejected3(identity, reason) {
-  return { ...identity, outcome: { kind: "rejected", reason } };
-}
-function runBoardEdit(repository, actor, identity, request, plan) {
-  return repository.write(
-    (writer2) => runBoardEditInTransaction(writer2, actor, identity, request, plan)
-  );
-}
-function runBoardEditInTransaction(writer2, actor, identity, request, plan) {
-  const { boardId, commandId } = identity;
-  const access = writer2.getAccess(boardId, actor.id);
-  const board = access?.canEdit ? writer2.getBoard(boardId) : void 0;
-  if (!board) {
-    return rejected3(identity, "forbidden");
-  }
-  const stored = writer2.getEditReceipt(boardId, actor.id, commandId);
-  if (stored) {
-    return stored.signature === request.signature ? stored.receipt : rejected3(identity, "commandIdReuse");
-  }
-  const decision = plan(writer2, board);
-  if (decision.kind !== "changes") {
-    return { ...identity, outcome: decision };
-  }
-  if (!canAdvanceVersion(board.revision)) {
-    return rejected3(identity, "invalidEdit");
-  }
-  const { signature, ...details } = request;
-  const applied2 = writer2.applyBoardChanges(board, decision, { ...details, actorId: actor.id });
-  const advancedRevision = applied2.boardRevision > board.revision;
-  const outcome = advancedRevision ? applied2 : { ...applied2, order: void 0 };
-  const receipt = { ...identity, outcome };
-  writer2.saveEditReceipt(actor.id, { signature, receipt, advancedRevision });
-  return receipt;
-}
-function readBoardEditReceipt(repository, actor, identity) {
-  const { boardId, commandId } = identity;
-  return repository.read(
-    (reader2) => reader2.getAccess(boardId, actor.id)?.canEdit ? reader2.getEditReceipt(boardId, actor.id, commandId)?.receipt : rejected3(identity, "forbidden")
-  );
-}
-function checkBoardEditBeforePreparation(repository, actor, identity, signature) {
-  const { boardId, commandId } = identity;
-  return repository.read((reader2) => {
-    if (!reader2.getAccess(boardId, actor.id)?.canEdit) {
-      return rejected3(identity, "forbidden");
-    }
-    const stored = reader2.getEditReceipt(boardId, actor.id, commandId);
-    if (stored) {
-      return stored.signature === signature ? stored.receipt : rejected3(identity, "commandIdReuse");
-    }
-    return void 0;
-  });
-}
-
 // src/modules/whiteboard/application/board-suggestions.ts
 function requireOwner2(reader2, actor, boardId, kind) {
   const allowed = actor.kind === kind && reader2.canReviewBoard(boardId, actor.id);
@@ -9599,8 +10625,8 @@ function captureSource(writer2, board, actor, request, sourceId, frozen) {
     };
   }
   const objectIds = sourceTargets(origin.objectIds);
-  const targets = writer2.getObjects(board.boardId, objectIds).map(reviewTarget);
-  if (targets.length !== objectIds.length) {
+  const targets2 = writer2.getObjects(board.boardId, objectIds).map(reviewTarget);
+  if (targets2.length !== objectIds.length) {
     throw new BoardSuggestionError(409, "\u767D\u677F\u4E0A\u5DF2\u6709\u5BF9\u8C61\u53D8\u5316\uFF0C\u8BF7\u91CD\u65B0\u6846\u9009\u3002");
   }
   return {
@@ -9609,7 +10635,7 @@ function captureSource(writer2, board, actor, request, sourceId, frozen) {
     ownerActorId: actor.id,
     capturedBoardRevision: board.revision,
     objectIds,
-    targets,
+    targets: targets2,
     targetsBoardRevision: board.revision
   };
 }
@@ -9694,9 +10720,9 @@ function acceptPending(writer2, actor, request, decodeEdit2, timeMillis, digest2
       reviewState: state
     });
   }
-  return edit;
+  return { receipt: edit, changed: review !== void 0 && edit.outcome.kind === "applied" };
 }
-function createBoardSuggestionApplication(repository, { now, newId, digest: digest2, readFeedbackSource }) {
+function createBoardSuggestionApplication(repository, { now, newId, digest: digest2, readFeedbackSource, onChanged }) {
   return {
     createSource(actor, request) {
       const frozen = attachedFeedback(repository, actor, request, readFeedbackSource);
@@ -9713,7 +10739,8 @@ function createBoardSuggestionApplication(repository, { now, newId, digest: dige
       });
     },
     submit(actor, request, decodeEdit2) {
-      return repository.write((writer2) => {
+      let changed = false;
+      const result = repository.write((writer2) => {
         const board = requireOwner2(writer2, actor, request.boardId, "agent");
         const replay = commandReplay(writer2, actor, request, "submit");
         if (replay) {
@@ -9750,8 +10777,13 @@ function createBoardSuggestionApplication(repository, { now, newId, digest: dige
         };
         writer2.createSuggestion(proposal);
         preserveReceipt(writer2, actor, request, "submit", proposal.proposalId);
+        changed = true;
         return publicSuggestion(proposal);
       });
+      if (changed) {
+        onChanged?.(request.boardId);
+      }
+      return result;
     },
     list(actor, { boardId, limit, beforeProposalId }) {
       return repository.read((reader2) => {
@@ -9779,11 +10811,18 @@ function createBoardSuggestionApplication(repository, { now, newId, digest: dige
         };
       });
     },
-    accept: (actor, request, decodeEdit2) => repository.write(
-      (writer2) => acceptPending(writer2, actor, request, decodeEdit2, now(), digest2)
-    ),
+    accept(actor, request, decodeEdit2) {
+      const { receipt, changed } = repository.write(
+        (writer2) => acceptPending(writer2, actor, request, decodeEdit2, now(), digest2)
+      );
+      if (changed) {
+        onChanged?.(request.boardId);
+      }
+      return receipt;
+    },
     reject(actor, request) {
-      return repository.write((writer2) => {
+      let changed = false;
+      const result = repository.write((writer2) => {
         const board = requireOwner2(writer2, actor, request.boardId, "human");
         const replay = commandReplay(writer2, actor, request, "reject");
         if (replay) {
@@ -9792,8 +10831,13 @@ function createBoardSuggestionApplication(repository, { now, newId, digest: dige
         const rejected7 = rejectPending(writer2, request, BigInt(now()));
         writer2.decideSuggestion(rejected7);
         preserveReceipt(writer2, actor, request, "reject", rejected7.proposalId);
+        changed = true;
         return publicSuggestion(rejected7);
       });
+      if (changed) {
+        onChanged?.(request.boardId);
+      }
+      return result;
     }
   };
 }
@@ -9812,8 +10856,13 @@ function reserveAttachment(writer2, board, operation, plan) {
   }
   return plan;
 }
-function planImageEdit(writer2, board, operation) {
-  return reserveAttachment(writer2, board, operation, planImageChanges(board.boardId, operation));
+function planImageEdit(writer2, board, operation, vector) {
+  return reserveAttachment(
+    writer2,
+    board,
+    operation,
+    planImageChanges(board.boardId, operation, vector)
+  );
 }
 function planVideoEdit(writer2, board, operation) {
   return reserveAttachment(writer2, board, operation, planVideoChanges(board.boardId, operation));
@@ -9981,11 +11030,11 @@ function rejected4(reason) {
   return { kind: "rejected", reason };
 }
 function currentSourceReader(writer2, { sourceBoardId, sourceRevision }, current) {
-  const version = current ? void 0 : sourceRevision;
+  const version2 = current ? void 0 : sourceRevision;
   return {
     objects: (ids) => current ? writer2.getObjects(sourceBoardId, ids) : writer2.listVersionObjects(sourceBoardId, sourceRevision, ids),
     payloads: (ids) => current ? writer2.getPayloads(sourceBoardId, ids) : writer2.getVersionPayloads(sourceBoardId, sourceRevision, ids),
-    bytes: (ids) => writer2.payloadByteSize?.(sourceBoardId, ids, version) ?? 0n
+    bytes: (ids) => writer2.payloadByteSize?.(sourceBoardId, ids, version2) ?? 0n
   };
 }
 function clipboardAttachments(objects) {
@@ -10000,7 +11049,7 @@ function clipboardAttachments(objects) {
   return [...linked];
 }
 function readSource(writer2, actor, operation) {
-  const { sourceBoardId, sourceRevision, targets } = operation;
+  const { sourceBoardId, sourceRevision, targets: targets2 } = operation;
   if (!writer2.getAccess(sourceBoardId, actor.id)) {
     return "forbidden";
   }
@@ -10010,7 +11059,7 @@ function readSource(writer2, actor, operation) {
     return "versionUnavailable";
   }
   const reader2 = currentSourceReader(writer2, operation, current);
-  const ids = targets.map(({ sourceObjectId }) => sourceObjectId);
+  const ids = targets2.map(({ sourceObjectId }) => sourceObjectId);
   const objects = reader2.objects(ids);
   if (objects.length !== ids.length) {
     return "objectNotFound";
@@ -10032,10 +11081,10 @@ function readSource(writer2, actor, operation) {
   const geometry = new Map([...objects, ...attached].map((object3) => [object3.objectId, object3]));
   return { objects, geometry, payloads, payloadBytes };
 }
-function destinationIds(writer2, boardId, targets) {
-  const ids = new Map(targets.map(({ objectId, sourceObjectId }) => [sourceObjectId, objectId]));
+function destinationIds(writer2, boardId, targets2) {
+  const ids = new Map(targets2.map(({ objectId, sourceObjectId }) => [sourceObjectId, objectId]));
   const generated = new Set(ids.values());
-  if (generated.size !== ids.size || ids.size !== targets.length) {
+  if (generated.size !== ids.size || ids.size !== targets2.length) {
     return void 0;
   }
   if ([...generated].some((id) => !validNewObjectId(id) || writer2.hasUsedObjectId(boardId, id))) {
@@ -10072,14 +11121,14 @@ function pasteObjects({ scope: scope2, source }) {
 }
 function pasteBoardObjects(writer2, board, actor, operation, signature) {
   const { boardId } = board;
-  const { targets, delta, sourceBoardId } = operation;
-  if (!targets.length || ![delta.dx, delta.dy].every(Number.isFinite)) {
+  const { targets: targets2, delta, sourceBoardId } = operation;
+  if (!targets2.length || ![delta.dx, delta.dy].every(Number.isFinite)) {
     return rejected4("invalidEdit");
   }
-  if (targets.length > clipboardObjectLimit) {
+  if (targets2.length > clipboardObjectLimit) {
     return rejected4("tooLarge");
   }
-  const ids = destinationIds(writer2, boardId, targets);
+  const ids = destinationIds(writer2, boardId, targets2);
   const assetNamespace = expectedNamespace.exec(signature)?.[1];
   if (!ids || !assetNamespace) {
     return rejected4("invalidEdit");
@@ -10115,7 +11164,7 @@ function pasteBoardObjects(writer2, board, actor, operation, signature) {
 }
 
 // src/modules/whiteboard/application/document-image.ts
-function planDocumentImageUpload(writer2, { boardId }, operation) {
+function planDocumentImageUpload(writer2, { boardId }, operation, vector) {
   const { objectId, assetId, content } = operation;
   const [document] = writer2.getObjects(boardId, [objectId]);
   if (!document) {
@@ -10127,35 +11176,7 @@ function planDocumentImageUpload(writer2, { boardId }, operation) {
   if (writer2.getExportAsset?.(boardId, assetId, 0)) {
     return { kind: "rejected", reason: "invalidEdit" };
   }
-  return planDocumentImageAsset(boardId, assetId, content);
-}
-
-// src/modules/whiteboard/application/prepare-board-image.ts
-function createAttachImage(repository, now, renderUploadedSvg) {
-  return async (actor, command) => {
-    const { operation, signature, boardId, commandId } = command;
-    const identity = { boardId, commandId };
-    let prepared = operation;
-    if (looksLikeSvgImage(operation.content)) {
-      const prior = checkBoardEditBeforePreparation(repository, actor, identity, signature);
-      if (prior) {
-        return prior;
-      }
-      const svg = svgForImagePreview(operation.content);
-      const raster = svg && renderUploadedSvg ? await renderUploadedSvg(svg) : void 0;
-      if (!raster) {
-        return { ...identity, outcome: { kind: "rejected", reason: "invalidImage" } };
-      }
-      prepared = { ...operation, content: raster };
-    }
-    return runBoardEdit(
-      repository,
-      actor,
-      identity,
-      { kind: "image", signature, savedAtMillis: now() },
-      (writer2, board) => planImageEdit(writer2, board, prepared)
-    );
-  };
+  return planDocumentImageAsset(boardId, assetId, content, vector);
 }
 
 // src/modules/whiteboard/application/board-restore.ts
@@ -10171,57 +11192,57 @@ function same(left, right) {
 function sameGeometry(left, right) {
   return left.kind === right.kind && left.parentId === right.parentId && left.groupId === right.groupId && same(left.geometry, right.geometry) && same(left.detail, right.detail);
 }
-function selectedRestore(current, historical, targets) {
+function selectedRestore(current, historical, targets2) {
   const head2 = [];
   const insertions = /* @__PURE__ */ new Map();
   const selected = [];
-  let anchor;
+  let anchor2;
   for (const saved of historical) {
     const { objectId } = saved;
     if (current.has(objectId)) {
-      anchor = objectId;
-      if (targets.has(objectId)) {
+      anchor2 = objectId;
+      if (targets2.has(objectId)) {
         selected.push(saved);
       }
-    } else if (targets.has(objectId)) {
-      appendRestoredObject(saved, anchor, head2, insertions);
+    } else if (targets2.has(objectId)) {
+      appendRestoredObject(saved, anchor2, head2, insertions);
     }
   }
   const inOrder = selected.values();
   const next = [...head2];
   for (const object3 of current.values()) {
-    const replacement = targets.has(object3.objectId) ? inOrder.next().value : object3;
+    const replacement = targets2.has(object3.objectId) ? inOrder.next().value : object3;
     if (replacement) {
       next.push(replacement, ...insertions.get(replacement.objectId) ?? []);
     }
   }
   return next;
 }
-function appendRestoredObject(object3, anchor, head2, insertions) {
-  if (anchor === void 0) {
+function appendRestoredObject(object3, anchor2, head2, insertions) {
+  if (anchor2 === void 0) {
     head2.push(object3);
     return;
   }
-  const siblings = insertions.get(anchor) ?? [];
+  const siblings = insertions.get(anchor2) ?? [];
   siblings.push(object3);
-  insertions.set(anchor, siblings);
+  insertions.set(anchor2, siblings);
 }
 function planScope(current, historical, scope2) {
   if (scope2.kind === "whole") {
     return { objects: historical, targets: new Set(historical.map(({ objectId }) => objectId)) };
   }
-  const targets = new Set(scope2.objectIds);
-  if (targets.size === 0 || targets.size !== scope2.objectIds.length || targets.has("")) {
+  const targets2 = new Set(scope2.objectIds);
+  if (targets2.size === 0 || targets2.size !== scope2.objectIds.length || targets2.has("")) {
     return { kind: "rejected", reason: "invalidEdit" };
   }
-  if (targets.size > maxRestoreSelection) {
+  if (targets2.size > maxRestoreSelection) {
     return { kind: "rejected", reason: "tooLarge" };
   }
   const historicalIds = new Set(historical.map(({ objectId }) => objectId));
   if (scope2.objectIds.some((id) => !historicalIds.has(id))) {
     return { kind: "rejected", reason: "objectNotFound" };
   }
-  return { objects: selectedRestore(current, historical, targets), targets };
+  return { objects: selectedRestore(current, historical, targets2), targets: targets2 };
 }
 function attachedIds(object3) {
   if (object3.detail?.kind !== "connector") {
@@ -10232,13 +11253,13 @@ function attachedIds(object3) {
   );
 }
 function validParentChain(object3, objects, verified) {
-  const path2 = /* @__PURE__ */ new Set();
+  const path3 = /* @__PURE__ */ new Set();
   let node = object3;
   while (!verified.has(node.objectId)) {
-    if (path2.has(node.objectId)) {
+    if (path3.has(node.objectId)) {
       return false;
     }
-    path2.add(node.objectId);
+    path3.add(node.objectId);
     if (node.parentId === void 0) {
       break;
     }
@@ -10248,7 +11269,7 @@ function validParentChain(object3, objects, verified) {
     }
     node = parent;
   }
-  for (const id of path2) {
+  for (const id of path3) {
     verified.add(id);
   }
   return true;
@@ -10267,11 +11288,11 @@ function protectedObjectIds(objects, isLocked2 = (object3) => object3.locked) {
   const visited = /* @__PURE__ */ new Set();
   const protectedObjects = /* @__PURE__ */ new Set();
   for (const object3 of objects.values()) {
-    const path2 = [];
+    const path3 = [];
     let current = object3;
     while (current && !visited.has(current.objectId)) {
       visited.add(current.objectId);
-      path2.push(current.objectId);
+      path3.push(current.objectId);
       if (isLocked2(current)) {
         protectedObjects.add(current.objectId);
         break;
@@ -10279,7 +11300,7 @@ function protectedObjectIds(objects, isLocked2 = (object3) => object3.locked) {
       current = current.parentId === void 0 ? void 0 : objects.get(current.parentId);
     }
     if (current && protectedObjects.has(current.objectId)) {
-      for (const id of path2) {
+      for (const id of path3) {
         protectedObjects.add(id);
       }
     }
@@ -10320,16 +11341,16 @@ function addsToProtectedParent(current, next, protectedObjects) {
   );
   return newParents.some((id) => protectedInNext.has(id));
 }
-function validateReversedScene(current, next, targets, order = [...next.keys()], payloadTargetIds = []) {
+function validateReversedScene(current, next, targets2, order = [...next.keys()], payloadTargetIds = []) {
   const protectedObjects = protectedObjectIds(current, (object3) => {
-    const unlockedByReversal = targets.has(object3.objectId) && next.get(object3.objectId)?.locked === false;
+    const unlockedByReversal = targets2.has(object3.objectId) && next.get(object3.objectId)?.locked === false;
     return object3.locked && !unlockedByReversal;
   });
   const protectedPayload = payloadTargetIds.some((id) => {
     const kind = current.get(id)?.kind;
     return protectedObjects.has(id) && (kind === "ink" || kind === "image");
   });
-  const protectedLayout = changesLockedLayout(current, next, protectedObjects) || lockedLayerMoved(current, order, targets, protectedObjects) || addsToProtectedParent(current, next, protectedObjects);
+  const protectedLayout = changesLockedLayout(current, next, protectedObjects) || lockedLayerMoved(current, order, targets2, protectedObjects) || addsToProtectedParent(current, next, protectedObjects);
   if (protectedLayout || protectedPayload) {
     return { kind: "rejected", reason: "geometryLocked" };
   }
@@ -10338,7 +11359,7 @@ function validateReversedScene(current, next, targets, order = [...next.keys()],
   }
   return void 0;
 }
-function lockedLayerMoved(current, order, targets, protectedObjects) {
+function lockedLayerMoved(current, order, targets2, protectedObjects) {
   const result = new Set(order);
   const surviving = [...current.keys()].filter((id) => result.has(id));
   const before = new Map(surviving.map((id, rank2) => [id, rank2]));
@@ -10350,7 +11371,7 @@ function lockedLayerMoved(current, order, targets, protectedObjects) {
       continue;
     }
     const orderingChanged = originalRank !== rank || highestSeen >= originalRank;
-    if (targets.has(id) && protectedObjects.has(id) && orderingChanged) {
+    if (targets2.has(id) && protectedObjects.has(id) && orderingChanged) {
       return true;
     }
     highestSeen = Math.max(highestSeen, originalRank);
@@ -10369,7 +11390,7 @@ function changesLockedPayload(object3, current, saved) {
 }
 function advanceVersion(revision, ...versions) {
   const latest = versions.reduce(
-    (maximum, version) => version !== void 0 && version > maximum ? version : maximum,
+    (maximum, version2) => version2 !== void 0 && version2 > maximum ? version2 : maximum,
     revision
   );
   return canAdvanceVersion(latest) ? latest + 1n : void 0;
@@ -10395,8 +11416,8 @@ function planRestoredPayload(context, before, source) {
   if (!saved) {
     return { changed: true };
   }
-  const version = advanceVersion(context.revision, previousVersion, saved.payloadVersion);
-  return version === void 0 ? { kind: "rejected", reason: "invalidEdit" } : { changed: true, version, row: { ...saved, payloadVersion: version } };
+  const version2 = advanceVersion(context.revision, previousVersion, saved.payloadVersion);
+  return version2 === void 0 ? { kind: "rejected", reason: "invalidEdit" } : { changed: true, version: version2, row: { ...saved, payloadVersion: version2 } };
 }
 function restoredObject(context, source, delta) {
   const { objectId } = source;
@@ -10583,18 +11604,18 @@ function reverseExplicitOrder({ current, desired, expected = [], existing }) {
 function reinsertRestoredObjects({ current, desired, existing }) {
   const live = new Set(current);
   const restored = /* @__PURE__ */ new Map();
-  let anchor;
+  let anchor2;
   for (const id of desired) {
     if (!existing.has(id)) {
       continue;
     }
     if (live.has(id)) {
-      anchor = id;
+      anchor2 = id;
       continue;
     }
-    const related = restored.get(anchor) ?? [];
+    const related = restored.get(anchor2) ?? [];
     related.push(id);
-    restored.set(anchor, related);
+    restored.set(anchor2, related);
   }
   return [
     ...restored.get(void 0) ?? [],
@@ -10608,7 +11629,7 @@ function planReverseOrder(change) {
 // src/modules/whiteboard/application/reverse-board-edit.ts
 var maxTargets = 500;
 var maxSceneObjects = 2e4;
-function byId(items) {
+function byId2(items) {
   return new Map(items.map((item) => [item.objectId, item]));
 }
 function confirmedChange(reader2, boardId, actorId2, source) {
@@ -10651,9 +11672,9 @@ function readPayloadStates(reader2, boardId, revision, ids) {
   if (beforeBytes + afterBytes + currentBytes > boardWritePayloadLimit) {
     return void 0;
   }
-  const before = byId(reader2.getVersionPayloads(boardId, prior, ids));
-  const after = byId(reader2.getVersionPayloads(boardId, revision, ids));
-  const current = byId(reader2.getPayloads(boardId, ids));
+  const before = byId2(reader2.getVersionPayloads(boardId, prior, ids));
+  const after = byId2(reader2.getVersionPayloads(boardId, revision, ids));
+  const current = byId2(reader2.getPayloads(boardId, ids));
   return new Map(
     ids.map((id) => [
       id,
@@ -10725,14 +11746,14 @@ function reverseObject(board, change, delta) {
   delta.objects.push({ ...next, geometryVersion });
   return true;
 }
-function buildChanges(board, targets, payloads) {
+function buildChanges(board, targets2, payloads) {
   const changes = {
     objects: [],
     payloads: [],
     removedObjectIds: [],
     removedPayloadObjectIds: []
   };
-  for (const target2 of targets) {
+  for (const target2 of targets2) {
     const payload = payloads.get(target2.objectId);
     if (!reverseObject(board, target2, changes) || !reversePayload(board, target2, payload, changes)) {
       return void 0;
@@ -10746,7 +11767,7 @@ function reverseScene(reader2, board, source, delta) {
   if (live.length > maxSceneObjects) {
     return { kind: "rejected", reason: "tooLarge" };
   }
-  const current = byId(live);
+  const current = byId2(live);
   const next = new Map(current);
   for (const id of delta.removedObjectIds) {
     next.delete(id);
@@ -10754,7 +11775,7 @@ function reverseScene(reader2, board, source, delta) {
   for (const object3 of delta.objects) {
     next.set(object3.objectId, object3);
   }
-  const targets = /* @__PURE__ */ new Set([...source.targets, ...source.layerTargets ?? []]);
+  const targets2 = /* @__PURE__ */ new Set([...source.targets, ...source.layerTargets ?? []]);
   const needsOrder = source.ordered || delta.objects.some(({ objectId }) => !current.has(objectId));
   const order = needsOrder ? readReverseOrder(reader2, boardId, source, current, next) : void 0;
   if (needsOrder && !order) {
@@ -10764,7 +11785,7 @@ function reverseScene(reader2, board, source, delta) {
     ...delta.payloads.map(({ objectId }) => objectId),
     ...delta.removedPayloadObjectIds
   ];
-  const invalid = validateReversedScene(current, next, targets, order, payloadIds);
+  const invalid = validateReversedScene(current, next, targets2, order, payloadIds);
   if (invalid) {
     return invalid;
   }
@@ -10778,15 +11799,15 @@ function translationOnly({ before, after }) {
   return sameObjectContent({ ...before, geometry: { ...before.geometry, x, y } }, after);
 }
 function reverseTranslation(writer2, board, live, changes) {
-  const targets = live.map(({ objectId, geometryVersion }) => ({
+  const targets2 = live.map(({ objectId, geometryVersion }) => ({
     objectId,
     expectedGeometryVersion: geometryVersion
   }));
   const { boardId, revision } = board;
-  const scope2 = createMoveScope(writer2, boardId, targets);
+  const scope2 = createMoveScope(writer2, boardId, targets2);
   const related = writer2.listRelatedConnectors(
     boardId,
-    targets.map(({ objectId }) => objectId)
+    targets2.map(({ objectId }) => objectId)
   );
   if ([...live, ...related].some((object3) => scope2.isLocked(object3))) {
     return { kind: "rejected", reason: "geometryLocked" };
@@ -10814,40 +11835,41 @@ function planBoardReverse(reader2, board, actor, command) {
   if (!source || source.revision === 0n) {
     return { kind: "rejected", reason: "versionUnavailable" };
   }
-  const version = reader2.getVersion(boardId, source.revision);
+  const version2 = reader2.getVersion(boardId, source.revision);
   const prior = source.revision - 1n;
-  if (version?.actorId !== actor.id || version.kind === "restore" || !reader2.getVersion(boardId, prior)) {
+  if (version2?.actorId !== actor.id || version2.kind === "restore" || !reader2.getVersion(boardId, prior)) {
     return { kind: "rejected", reason: "versionUnavailable" };
   }
   if (source.targets.length > maxTargets) {
     return { kind: "rejected", reason: "tooLarge" };
   }
-  const before = byId(reader2.listVersionObjects(boardId, prior, source.targets));
-  const after = byId(reader2.listVersionObjects(boardId, source.revision, source.targets));
-  const live = byId(reader2.getObjects(boardId, source.targets));
-  const targets = source.targets.map((objectId) => ({
+  const before = byId2(reader2.listVersionObjects(boardId, prior, source.targets));
+  const after = byId2(reader2.listVersionObjects(boardId, source.revision, source.targets));
+  const live = byId2(reader2.getObjects(boardId, source.targets));
+  const targets2 = source.targets.map((objectId) => ({
     objectId,
     before: before.get(objectId),
     after: after.get(objectId),
     current: live.get(objectId)
   }));
-  const ids = targets.filter(needsPayload).map(({ objectId }) => objectId);
+  const ids = targets2.filter(needsPayload).map(({ objectId }) => objectId);
   const payloads = readPayloadStates(reader2, boardId, source.revision, ids);
   if (!payloads) {
     return { kind: "rejected", reason: "tooLarge" };
   }
-  const changes = buildChanges(board, targets, payloads);
+  const changes = buildChanges(board, targets2, payloads);
   if (!changes) {
     return { kind: "conflict", boardRevision: board.revision, objects: [...live.values()] };
   }
-  if (!source.ordered && targets.length > 0 && targets.every(translationOnly)) {
+  if (!source.ordered && targets2.length > 0 && targets2.every(translationOnly)) {
     return reverseTranslation(reader2, board, [...live.values()], changes);
   }
   return reverseScene(reader2, board, source, changes);
 }
 
 // src/modules/whiteboard/application/board-editor.ts
-function createBoardEditorApplication(repository, now, renderUploadedSvg) {
+function createBoardEditorApplication(repository, now, validateUploadedSvg) {
+  const editImage = createImageEdit(repository, now, validateUploadedSvg);
   return {
     editGeometry(actor, { operation, signature, boardId, commandId }) {
       return runBoardEdit(
@@ -10867,7 +11889,7 @@ function createBoardEditorApplication(repository, now, renderUploadedSvg) {
         (writer2, board) => planContentEdit(writer2, board, operation)
       );
     },
-    attachImage: createAttachImage(repository, now, renderUploadedSvg),
+    attachImage: (actor, command) => editImage(actor, command, planImageEdit),
     attachVideo(actor, { operation, signature, boardId, commandId }) {
       return runBoardEdit(
         repository,
@@ -10877,17 +11899,11 @@ function createBoardEditorApplication(repository, now, renderUploadedSvg) {
         (writer2, board) => planVideoEdit(writer2, board, operation)
       );
     },
-    uploadDocumentImage(actor, { operation, signature, boardId, commandId }) {
-      const receipt = runBoardEdit(
-        repository,
-        actor,
-        { boardId, commandId },
-        { kind: "image", signature, savedAtMillis: now() },
-        (writer2, board) => planDocumentImageUpload(writer2, board, operation)
-      );
+    async uploadDocumentImage(actor, command) {
+      const receipt = await editImage(actor, command, planDocumentImageUpload);
       return {
         receipt,
-        assetUrl: receipt.outcome.kind === "applied" ? archiveImageSource(boardId, operation.assetId) : void 0
+        assetUrl: receipt.outcome.kind === "applied" ? archiveImageSource(command.boardId, command.operation.assetId) : void 0
       };
     },
     reverseEdit(actor, { operation, signature, boardId, commandId }) {
@@ -10939,11 +11955,11 @@ function readonlySnapshotReader(reader2, revision) {
   return {
     getAccess: (boardId, actorId2) => reader2.getAccess(boardId, actorId2),
     getBoard(boardId) {
-      const version = readVersion(reader2, currentBoard(reader2, boardId), revision);
-      if (!version) {
+      const version2 = readVersion(reader2, currentBoard(reader2, boardId), revision);
+      if (!version2) {
         throw new UnavailableBoardVersion("The saved board version is no longer available");
       }
-      return { boardId, title: version.title, revision };
+      return { boardId, title: version2.title, revision };
     },
     listObjects: (boardId, limit) => reader2.listVersionObjects(boardId, revision).slice(0, limit),
     getObjects: (boardId, ids) => reader2.listVersionObjects(boardId, revision, ids),
@@ -10994,12 +12010,12 @@ function createBoardHistoryApplication(repository, now, renderPng) {
     getVersionScene(actor, boardId, revision) {
       return repository.read((reader2) => {
         requireAccess3(reader2, actor, boardId);
-        const version = readVersion(reader2, currentBoard(reader2, boardId), revision);
-        if (!version) {
+        const version2 = readVersion(reader2, currentBoard(reader2, boardId), revision);
+        if (!version2) {
           return void 0;
         }
         return {
-          board: { boardId, title: version.title, revision },
+          board: { boardId, title: version2.title, revision },
           access: { canEdit: false },
           objects: reader2.listVersionObjects(boardId, revision)
         };
@@ -11011,9 +12027,9 @@ function createBoardHistoryApplication(repository, now, renderPng) {
         if (!readVersion(reader2, currentBoard(reader2, boardId), revision)) {
           return void 0;
         }
-        const rows = reader2.getVersionPayloads(boardId, revision, [...new Set(objectIds)]);
-        const byId2 = new Map(rows.map((row) => [row.objectId, row]));
-        return objectIds.map((id) => payloadResult(id, byId2.get(id)));
+        const rows2 = reader2.getVersionPayloads(boardId, revision, [...new Set(objectIds)]);
+        const byId3 = new Map(rows2.map((row) => [row.objectId, row]));
+        return objectIds.map((id) => payloadResult(id, byId3.get(id)));
       });
     },
     restoreVersion(actor, command, signature) {
@@ -11084,8 +12100,8 @@ function createWhiteboardApplication(repository, now, files = {}) {
           return [];
         }
         const payloads = reader2.getPayloads(boardId, [...new Set(objectIds)]);
-        const byId2 = new Map(payloads.map((payload) => [payload.objectId, payload]));
-        return objectIds.map((id) => payloadResult(id, byId2.get(id)));
+        const byId3 = new Map(payloads.map((payload) => [payload.objectId, payload]));
+        return objectIds.map((id) => payloadResult(id, byId3.get(id)));
       });
     },
     moveObjects(actor, command) {
@@ -11136,8 +12152,8 @@ function capabilities(role) {
 function permittedInvitations(role) {
   return role === "owner" ? guestRoles : guestRoles.slice(guestRoles.indexOf(role));
 }
-function nextSharingVersion(version) {
-  return version < maximumVersion2 ? version + 1n : void 0;
+function nextSharingVersion(version2) {
+  return version2 < maximumVersion2 ? version2 + 1n : void 0;
 }
 function normalizeGuestName(value) {
   const name = value.trim();
@@ -11154,8 +12170,8 @@ function getSettings(reader2, boardId) {
   return reader2.getSettings(boardId) ?? initialSettings;
 }
 function credential(boardId, invitation, services) {
-  const { role, version, seed } = invitation;
-  const identity = JSON.stringify([boardId, role, version.toString(), seed]);
+  const { role, version: version2, seed } = invitation;
+  const identity = JSON.stringify([boardId, role, version2.toString(), seed]);
   return role + "." + services.digest(identity);
 }
 function memberUrl(origin, boardId) {
@@ -11166,11 +12182,11 @@ function memberUrl(origin, boardId) {
   url.searchParams.set("board", boardId);
   return url.href;
 }
-function invitationUrl(path2, boardId, invitation, services) {
-  if (!path2 || !invitation.enabled) {
+function invitationUrl(path3, boardId, invitation, services) {
+  if (!path3 || !invitation.enabled) {
     return "";
   }
-  const url = new URL(path2);
+  const url = new URL(path3);
   url.hash = new URLSearchParams({ invite: credential(boardId, invitation, services) }).toString();
   return url.href;
 }
@@ -11192,11 +12208,11 @@ function readInvitation(reader2, services, boardId, token2, scope2) {
   }
   return { value: { settings, invitation, view: { ...board, role: invitation.role } } };
 }
-function readGuestSession(reader2, services, boardId, actorId2, scope2) {
-  const guest = reader2.getActiveGuest(boardId, actorId2, services.now());
+function readGuestSession(reader2, services, boardId, actorId2, scope2, now = services.now()) {
+  const guest = reader2.getActiveGuest(boardId, actorId2, now);
   if (guest && (scope2 === "local" || guest.scope === "lan")) {
-    const { role, name, version } = guest;
-    return { boardId, actorId: actorId2, role, name, version, ...capabilities(role) };
+    const { role, name, version: version2, lastSeenAtMillis } = guest;
+    return { boardId, actorId: actorId2, role, name, version: version2, lastSeenAtMillis, ...capabilities(role) };
   }
 }
 function guestSession(boardId, member, settings) {
@@ -11207,13 +12223,13 @@ function sharingView(reader2, services, boardId, role) {
   const settings = getSettings(reader2, boardId);
   const invitations = reader2.listInvitations(boardId);
   const permitted = permittedInvitations(role);
-  const path2 = settings.enabled ? memberUrl(services.inviteOrigin(settings.scope), boardId) : "";
+  const path3 = settings.enabled ? memberUrl(services.inviteOrigin(settings.scope), boardId) : "";
   const links = permitted.map((grade) => {
     const invitation = invitations.find(({ role: invitedRole }) => invitedRole === grade);
     return {
       role: grade,
       enabled: invitation?.enabled ?? false,
-      url: invitation ? invitationUrl(path2, boardId, invitation, services) : ""
+      url: invitation ? invitationUrl(path3, boardId, invitation, services) : ""
     };
   });
   const members = role === "owner" ? reader2.listMembers(boardId).map((member) => ({
@@ -11221,12 +12237,13 @@ function sharingView(reader2, services, boardId, role) {
     name: member.name,
     role: member.role,
     removed: member.removed,
+    lastSeenAtMillis: member.lastSeenAtMillis,
     active: settings.enabled && memberCanEnter(
       member,
       invitations.find(({ role: invitedRole }) => invitedRole === member.role)
     ) && reader2.actorSessionIsActive(member.actorId, services.now())
   })) : [];
-  return { ...settings, ...capabilities(role), boardId, role, links, members, memberUrl: path2 };
+  return { ...settings, ...capabilities(role), boardId, role, links, members, memberUrl: path3 };
 }
 
 // src/modules/sharing/application/commands.ts
@@ -11258,16 +12275,16 @@ function previousOrRejected(reader2, services, actorId2, command) {
   }
   return getSettings(reader2, boardId).version === expectedVersion ? void 0 : rejected5(command, "versionChanged");
 }
-function rotateInvitation(writer2, services, boardId, version, role) {
+function rotateInvitation(writer2, services, boardId, version2, role) {
   const enabled = writer2.getInvitation(boardId, role)?.enabled ?? true;
-  writer2.saveInvitation(boardId, { role, enabled, version, seed: services.newInvitationSeed() });
+  writer2.saveInvitation(boardId, { role, enabled, version: version2, seed: services.newInvitationSeed() });
 }
-function updateInvitations(writer2, services, command, version, operation) {
+function updateInvitations(writer2, services, command, version2, operation) {
   const { boardId } = command;
   if (operation.kind === "resetInvitation") {
-    const roles = operation.role === void 0 ? guestRoles : [operation.role];
-    for (const role of roles) {
-      rotateInvitation(writer2, services, boardId, version, role);
+    const roles2 = operation.role === void 0 ? guestRoles : [operation.role];
+    for (const role of roles2) {
+      rotateInvitation(writer2, services, boardId, version2, role);
     }
     return;
   }
@@ -11318,7 +12335,7 @@ function startSharing(writer2, services, boardId, current, next) {
     }
   }
 }
-function perform(writer2, services, command, current, version) {
+function perform(writer2, services, command, current, version2) {
   const { boardId, operation } = command;
   if (operation.kind === "setScope") {
     if (!services.inviteOrigin(operation.scope)) {
@@ -11327,7 +12344,7 @@ function perform(writer2, services, command, current, version) {
     startSharing(writer2, services, boardId, current, {
       enabled: true,
       scope: operation.scope,
-      version
+      version: version2
     });
     return;
   }
@@ -11335,14 +12352,14 @@ function perform(writer2, services, command, current, version) {
     return "invalidCommand";
   }
   if (operation.kind === "stop") {
-    writer2.saveSettings(boardId, { enabled: false, scope: "local", version });
+    writer2.saveSettings(boardId, { enabled: false, scope: "local", version: version2 });
     return;
   }
-  const problem = operation.kind === "setInvitation" || operation.kind === "resetInvitation" ? updateInvitations(writer2, services, command, version, operation) : updateMember(writer2, boardId, operation);
+  const problem = operation.kind === "setInvitation" || operation.kind === "resetInvitation" ? updateInvitations(writer2, services, command, version2, operation) : updateMember(writer2, boardId, operation);
   if (problem) {
     return problem;
   }
-  writer2.saveSettings(boardId, { ...current, version });
+  writer2.saveSettings(boardId, { ...current, version: version2 });
 }
 function applySharing(writer2, services, actorId2, command) {
   const prior = previousOrRejected(writer2, services, actorId2, command);
@@ -11351,21 +12368,22 @@ function applySharing(writer2, services, actorId2, command) {
   }
   const { boardId, commandId } = command;
   const current = getSettings(writer2, boardId);
-  const version = nextSharingVersion(current.version);
-  if (version === void 0) {
+  const version2 = nextSharingVersion(current.version);
+  if (version2 === void 0) {
     return rejected5(command, "invalidCommand");
   }
-  const problem = perform(writer2, services, command, current, version);
+  const problem = perform(writer2, services, command, current, version2);
   if (problem) {
     return rejected5(command, problem);
   }
-  const receipt = { boardId, commandId, outcome: { kind: "applied", version } };
+  const receipt = { boardId, commandId, outcome: { kind: "applied", version: version2 } };
   writer2.saveReceipt(actorId2, { signature: commandSignature3(command, services), receipt });
   return receipt;
 }
 
 // src/modules/sharing/application/index.ts
 var browserSessionMillis = 365 * 24 * 60 * 60 * 1e3;
+var visitUpdateInterval = 3e4;
 function validBrowserCredential(value) {
   return isBrowserCredential(value);
 }
@@ -11407,7 +12425,8 @@ function join(writer2, services, request) {
     actorId: actorId2,
     role: invitation.role,
     removed: false,
-    invitationVersion: invitation.version
+    invitationVersion: invitation.version,
+    lastSeenAtMillis: now
   };
   writer2.saveMember(boardId, member);
   return { value: guestSession(boardId, member, settings) };
@@ -11454,7 +12473,16 @@ function createSharingApplication(repository, services) {
       const session = readBrowser(token2);
       return session !== void 0 && session.expiresAt <= services.now();
     },
-    guestAccess: (boardId, actorId2, scope2) => repository.read((reader2) => readGuestSession(reader2, services, boardId, actorId2, scope2))
+    guestAccess(boardId, actorId2, scope2) {
+      const now = services.now();
+      const session = repository.read(
+        (reader2) => readGuestSession(reader2, services, boardId, actorId2, scope2, now)
+      );
+      if (session && (session.lastSeenAtMillis === void 0 || now - session.lastSeenAtMillis >= visitUpdateInterval)) {
+        repository.write((writer2) => writer2.touchMember(boardId, actorId2, now));
+      }
+      return session;
+    }
   };
 }
 
@@ -14342,9 +15370,9 @@ function addService(proto, file, reg) {
   file.services.push(desc);
   reg.add(desc);
   for (const methodProto of proto.method) {
-    const method2 = newMethod(methodProto, desc, reg);
-    desc.methods.push(method2);
-    desc.method[method2.localName] = method2;
+    const method4 = newMethod(methodProto, desc, reg);
+    desc.methods.push(method4);
+    desc.method[method4.localName] = method4;
   }
 }
 function newMethod(proto, parent, reg) {
@@ -14776,17 +15804,17 @@ function bootEnumDescriptorProto(init) {
 }
 
 // ../../../../node_modules/.pnpm/@bufbuild+protobuf@2.17.0/node_modules/@bufbuild/protobuf/dist/esm/codegenv2/message.js
-function messageDesc(file, path2, ...paths2) {
-  return paths2.reduce((acc, cur) => acc.nestedMessages[cur], file.messages[path2]);
+function messageDesc(file, path3, ...paths2) {
+  return paths2.reduce((acc, cur) => acc.nestedMessages[cur], file.messages[path3]);
 }
 
 // ../../../../node_modules/.pnpm/@bufbuild+protobuf@2.17.0/node_modules/@bufbuild/protobuf/dist/esm/codegenv2/enum.js
-function enumDesc(file, path2, ...paths2) {
+function enumDesc(file, path3, ...paths2) {
   if (paths2.length == 0) {
-    return file.enums[path2];
+    return file.enums[path3];
   }
   const e = paths2.pop();
-  return paths2.reduce((acc, cur) => acc.nestedMessages[cur], file.messages[path2]).nestedEnums[e];
+  return paths2.reduce((acc, cur) => acc.nestedMessages[cur], file.messages[path3]).nestedEnums[e];
 }
 function tsEnum(desc) {
   const enumObject = {};
@@ -15800,6 +16828,11 @@ function makeWriteOptions2(options) {
 function toJson(schema2, message, options) {
   return compiledWriter2(schema2)(makeWriteOptions2(options), message);
 }
+function toJsonString(schema2, message, options) {
+  var _a;
+  const jsonValue = toJson(schema2, message, options);
+  return JSON.stringify(jsonValue, null, (_a = options === null || options === void 0 ? void 0 : options.prettySpaces) !== null && _a !== void 0 ? _a : 0);
+}
 var compiledWriters2 = /* @__PURE__ */ new WeakMap();
 function compiledWriter2(desc) {
   let compiled = compiledWriters2.get(desc);
@@ -16296,6 +17329,9 @@ function timestampToJson(val) {
 var IMPLICIT6 = 2;
 function makeReadContext2(options) {
   return Object.assign(Object.assign({ ignoreUnknownFields: false, recursionLimit: 100 }, options), { depth: 0 });
+}
+function fromJsonString(schema2, json, options) {
+  return fromJson(schema2, parseJsonString(json, schema2.typeName), options);
 }
 function fromJson(schema2, json, options) {
   const message = create(schema2);
@@ -16890,6 +17926,83 @@ function int32FromJson(json) {
   }
   return json;
 }
+function parseJsonString(jsonString, typeName) {
+  let json;
+  try {
+    json = JSON.parse(jsonString);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    throw new Error(
+      `cannot decode message ${typeName} from JSON: ${message}`,
+      // @ts-expect-error we use the ES2022 error CTOR option "cause" for better stack traces
+      { cause: e }
+    );
+  }
+  checkDuplicateKeys(jsonString, typeName);
+  return json;
+}
+function checkDuplicateKeys(jsonString, typeName) {
+  const stack = [];
+  let expectKey = false;
+  let i = 0;
+  while (i < jsonString.length) {
+    switch (jsonString[i]) {
+      case "{":
+        stack.push(/* @__PURE__ */ new Set());
+        expectKey = true;
+        i++;
+        break;
+      case "[":
+        stack.push(null);
+        expectKey = false;
+        i++;
+        break;
+      case "}":
+      case "]":
+        stack.pop();
+        expectKey = false;
+        i++;
+        break;
+      case ",":
+        expectKey = stack[stack.length - 1] != null;
+        i++;
+        break;
+      case ":":
+        expectKey = false;
+        i++;
+        break;
+      case '"': {
+        const open2 = i++;
+        let escaped = false;
+        while (i < jsonString.length) {
+          if (jsonString[i] == "\\") {
+            escaped = true;
+            i += 2;
+            continue;
+          }
+          if (jsonString[i] == '"') {
+            break;
+          }
+          i++;
+        }
+        const close = i++;
+        const seen = stack[stack.length - 1];
+        if (expectKey && seen) {
+          const name = escaped ? JSON.parse(jsonString.substring(open2, close + 1)) : jsonString.substring(open2 + 1, close);
+          if (seen.has(name)) {
+            throw new Error(`cannot decode message ${typeName} from JSON: duplicate object key "${name}"`);
+          }
+          seen.add(name);
+        }
+        expectKey = false;
+        break;
+      }
+      default:
+        i++;
+        break;
+    }
+  }
+}
 function anyFromJson(any, json, ctx) {
   var _a;
   if (json === null || Array.isArray(json) || typeof json != "object") {
@@ -16977,11 +18090,11 @@ function fieldMaskFromJson(fieldMask, json) {
   if (json === "") {
     return;
   }
-  fieldMask.paths = json.split(",").map((path2) => {
-    if (path2.includes("_")) {
+  fieldMask.paths = json.split(",").map((path3) => {
+    if (path3.includes("_")) {
       throw new Error(`cannot decode message ${fieldMask.$typeName} from JSON: path names must be lowerCamelCase`);
     }
-    return protoSnakeCase(path2);
+    return protoSnakeCase(path3);
   });
 }
 function structFromJson(struct, json, ctx) {
@@ -17041,11 +18154,11 @@ function listValueFromJson(listValue, json, ctx) {
 }
 
 // ../../../../node_modules/.pnpm/@bufbuild+protobuf@2.17.0/node_modules/@bufbuild/protobuf/dist/esm/codegenv2/service.js
-function serviceDesc(file, path2, ...paths2) {
+function serviceDesc(file, path3, ...paths2) {
   if (paths2.length > 0) {
     throw new Error();
   }
-  return file.services[path2];
+  return file.services[path3];
 }
 
 // ../../packages/contracts/dist/proto/luming/studio/v1/board_archive_service_pb.js
@@ -17120,27 +18233,27 @@ function sendProtobuf(response, result) {
 }
 
 // src/entrypoints/http/unary-route.ts
-function unaryRoute(method2, handle) {
-  const path2 = `/${method2.parent.typeName}/${method2.name}`;
+function unaryRoute(method4, handle) {
+  const path3 = `/${method4.parent.typeName}/${method4.name}`;
   return [
-    path2,
+    path3,
     (actor, body) => {
-      const request = decodeRequest(method2.input, body);
+      const request = decodeRequest(method4.input, body);
       actor.authorize?.(request);
       const response = handle(actor, request);
-      return toBinary(method2.output, create(method2.output, response));
+      return toBinary(method4.output, create(method4.output, response));
     }
   ];
 }
-function asyncUnaryRoute(method2, handle) {
-  const path2 = `/${method2.parent.typeName}/${method2.name}`;
+function asyncUnaryRoute(method4, handle) {
+  const path3 = `/${method4.parent.typeName}/${method4.name}`;
   return [
-    path2,
+    path3,
     async (actor, body) => {
-      const request = decodeRequest(method2.input, body);
+      const request = decodeRequest(method4.input, body);
       actor.authorize?.(request);
       const response = await handle(actor, request);
-      return toBinary(method2.output, create(method2.output, response));
+      return toBinary(method4.output, create(method4.output, response));
     }
   ];
 }
@@ -17207,8 +18320,8 @@ async function importArchive(application, actor, request, response) {
   const schema2 = ImportBoardArchiveResponseSchema;
   sendProtobuf(response, toBinary(schema2, create(schema2, { receipt: receiptMessage(receipt) })));
 }
-function serveArchiveAsset(application, actor, path2, response) {
-  const [boardId, assetId, extra] = path2.slice(archiveAssetPrefix.length).split("/");
+function serveArchiveAsset(application, actor, path3, response) {
+  const [boardId, assetId, extra] = path3.slice(archiveAssetPrefix.length).split("/");
   if (!boardId || !assetId || extra !== void 0) {
     sendStatus(response, 404);
     return;
@@ -17219,26 +18332,31 @@ function serveArchiveAsset(application, actor, path2, response) {
     sendStatus(response, 404);
     return;
   }
+  const bytes = asset.mimeType === "image/svg+xml" ? readArchivedSvgImage(asset.bytes) : asset.bytes;
+  if (!bytes) {
+    sendStatus(response, 404);
+    return;
+  }
   response.writeHead(200, {
     "content-type": asset.mimeType,
-    "content-length": asset.bytes.byteLength,
+    "content-length": bytes.byteLength,
     "cache-control": "private, no-store",
     "content-security-policy": "default-src 'none'; sandbox",
     "x-content-type-options": "nosniff"
   });
-  response.end(asset.bytes);
+  response.end(bytes);
 }
-function archiveRoute(path2, application) {
-  if (path2 === archiveImportPath) {
+function archiveRoute(path3, application) {
+  if (path3 === archiveImportPath) {
     return {
       method: "POST",
       run: (actor, request, response) => importArchive(application, actor, request, response)
     };
   }
-  if (path2.startsWith(archiveAssetPrefix)) {
+  if (path3.startsWith(archiveAssetPrefix)) {
     return {
       method: "GET",
-      run: (actor, _request, response) => serveArchiveAsset(application, actor, path2, response)
+      run: (actor, _request, response) => serveArchiveAsset(application, actor, path3, response)
     };
   }
   return void 0;
@@ -17634,14 +18752,14 @@ var upload = BoardEditService.method.uploadBoardDocumentImage;
 var assetPrefix4 = "document-image-";
 var boardDocumentImageRoutePath = "/" + BoardEditService.typeName + "/" + upload.name;
 function createDocumentImageRoute(application, digest2) {
-  return unaryRoute(upload, (actor, request) => {
+  return asyncUnaryRoute(upload, async (actor, request) => {
     const boardId = requireId(request.boardId);
     const commandId = requireId(request.commandId);
     const objectId = requireId(request.objectId);
     const identity = new TextEncoder().encode(JSON.stringify([boardId, actor.id, commandId]));
     const assetId = assetPrefix4 + digest2(identity);
     const signature = assetPrefix4 + digest2(toBinary(upload.input, request));
-    const { receipt, assetUrl } = application.uploadDocumentImage(actor, {
+    const { receipt, assetUrl } = await application.uploadDocumentImage(actor, {
       boardId,
       commandId,
       operation: { objectId, assetId, content: request.content },
@@ -17814,8 +18932,8 @@ function readContentOperation({
       return { ...target2, kind: "embedState", state };
     }
     case "sticker": {
-      const { stickerId, fallback } = edit.value;
-      if (fallback === void 0) {
+      const { stickerId, fallback: fallback2 } = edit.value;
+      if (fallback2 === void 0) {
         return {
           ...target2,
           kind: "sticker",
@@ -17825,7 +18943,7 @@ function readContentOperation({
       if (stickerId !== "") {
         throw new HttpRequestError(400, "Choose either a sticker identifier or legacy text");
       }
-      return { ...target2, kind: "sticker", selection: { kind: "legacy", fallback } };
+      return { ...target2, kind: "sticker", selection: { kind: "legacy", fallback: fallback2 } };
     }
     case "crop":
       return { ...target2, kind: "crop", ...readCrop(edit.value) };
@@ -18070,12 +19188,12 @@ function readGeometryOperation({ operation }) {
         targets: operation.value.targets.map(readTarget)
       };
     case "duplicate": {
-      const { delta, targets } = operation.value;
+      const { delta, targets: targets2 } = operation.value;
       const { dx, dy } = requireField(delta, "Duplicate offset");
       return {
         kind: "duplicate",
         delta: { dx, dy },
-        targets: targets.map(({ source, newObjectId }) => ({
+        targets: targets2.map(({ source, newObjectId }) => ({
           source: readTarget(source),
           newObjectId: requireId(newObjectId)
         }))
@@ -18112,13 +19230,13 @@ function readGeometryOperation({ operation }) {
         }))
       };
     case "paste": {
-      const { sourceBoardId, sourceRevision, targets, delta } = operation.value;
+      const { sourceBoardId, sourceRevision, targets: targets2, delta } = operation.value;
       const { dx, dy } = requireField(delta, "Paste offset");
       return {
         kind: "paste",
         sourceBoardId: requireId(sourceBoardId),
         sourceRevision: requireField(sourceRevision, "Source revision"),
-        targets: targets.map(({ sourceObjectId, objectId }) => ({
+        targets: targets2.map(({ sourceObjectId, objectId }) => ({
           sourceObjectId: requireId(sourceObjectId),
           objectId: requireId(objectId)
         })),
@@ -18153,7 +19271,7 @@ var {
   getBoardEditReceipt
 } = BoardEditService.method;
 var boardImageRoutePath = "/" + BoardEditService.typeName + "/" + attachBoardImage.name;
-var boardImageRequestLimit = 8 * 1024 * 1024 + 32 * 1024;
+var boardImageRequestLimit = 20 * 1024 * 1024 + 32 * 1024;
 function createBoardEditRoutes(application, digest2, observe) {
   function changed(edit) {
     observe?.(edit);
@@ -18221,7 +19339,7 @@ function createBoardEditRoutes(application, digest2, observe) {
 }
 
 // ../../packages/contracts/dist/proto/luming/studio/v1/feedback_service_pb.js
-var file_luming_studio_v1_feedback_service = /* @__PURE__ */ fileDesc("CidsdW1pbmcvc3R1ZGlvL3YxL2ZlZWRiYWNrX3NlcnZpY2UucHJvdG8SEGx1bWluZy5zdHVkaW8udjEiJQoNRmVlZGJhY2tQb2ludBIJCgF4GAEgASgBEgkKAXkYAiABKAEicgoTRmVlZGJhY2tPYmplY3RQb2ludBIRCglvYmplY3RfaWQYASABKAkSCQoBdRgCIAEoARIJCgF2GAMgASgBEh0KEGdlb21ldHJ5X3ZlcnNpb24YBCABKARIAIgBAUITChFfZ2VvbWV0cnlfdmVyc2lvbiIrChZGZWVkYmFja0RvY3VtZW50QW5jaG9yEhEKCWJsb2NrX2lkcxgBIAMoCSJYChJGZWVkYmFja0h0bWxBbmNob3ISEAoIbm9kZV9pZHMYASADKAkSHAoPc291cmNlX3JldmlzaW9uGAIgASgESACIAQFCEgoQX3NvdXJjZV9yZXZpc2lvbiK8AgoURmVlZGJhY2tDb250ZW50UG9pbnQSEQoJb2JqZWN0X2lkGAEgASgJEgkKAXUYAiABKAESCQoBdhgDIAEoARIdChBnZW9tZXRyeV92ZXJzaW9uGAQgASgESAGIAQESHAoPcGF5bG9hZF92ZXJzaW9uGAUgASgESAKIAQESPAoIZG9jdW1lbnQYBiABKAsyKC5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrRG9jdW1lbnRBbmNob3JIABIWCgx0b2RvX2l0ZW1faWQYByABKAlIABI0CgRodG1sGAggASgLMiQubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja0h0bWxBbmNob3JIAEIJCgdjb250ZW50QhMKEV9nZW9tZXRyeV92ZXJzaW9uQhIKEF9wYXlsb2FkX3ZlcnNpb24i2AEKFEZlZWRiYWNrQW5jaG9yVGFyZ2V0EjYKC2JvYXJkX3BvaW50GAEgASgLMh8ubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1BvaW50SAASPQoMb2JqZWN0X3BvaW50GAIgASgLMiUubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja09iamVjdFBvaW50SAASPwoNY29udGVudF9wb2ludBgDIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tDb250ZW50UG9pbnRIAEIICgZ0YXJnZXQiegoURmVlZGJhY2tGcm96ZW5PYmplY3QSDAoEa2luZBgBIAEoCRINCgVsYWJlbBgCIAEoCRIJCgF4GAMgASgBEgkKAXkYBCABKAESDQoFd2lkdGgYBSABKAESDgoGaGVpZ2h0GAYgASgBEhAKCHJvdGF0aW9uGAcgASgBIqUCCg5GZWVkYmFja0FuY2hvchI2CgZ0YXJnZXQYASABKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrQW5jaG9yVGFyZ2V0Eh0KFXNvdXJjZV9ib2FyZF9yZXZpc2lvbhgCIAEoBBI1Cgxmcm96ZW5fcG9pbnQYAyABKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrUG9pbnQSPQoNZnJvemVuX29iamVjdBgEIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tGcm96ZW5PYmplY3QSFgoOdGFyZ2V0X21pc3NpbmcYBSABKAgSGwoOZnJvemVuX2V4Y2VycHQYBiABKAlIAIgBAUIRCg9fZnJvemVuX2V4Y2VycHQiwQEKD0ZlZWRiYWNrTWVzc2FnZRISCgptZXNzYWdlX2lkGAEgASgJEhcKD2F1dGhvcl9hY3Rvcl9pZBgCIAEoCRIaChJhdXRob3JlZF9ieV92aWV3ZXIYAyABKAgSDAoEdGV4dBgEIAEoCRIZChFjcmVhdGVkX2F0X21pbGxpcxgFIAEoBBIZChF1cGRhdGVkX2F0X21pbGxpcxgGIAEoBBIPCgd2ZXJzaW9uGAcgASgEEhAKCGNhbl9lZGl0GAggASgIIqkCCg5GZWVkYmFja1RocmVhZBIRCgl0aHJlYWRfaWQYASABKAkSNgoGc3RhdHVzGAIgASgOMiYubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1RocmVhZFN0YXR1cxIwCgZhbmNob3IYAyABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrQW5jaG9yEjAKBWZpcnN0GAQgASgLMiEubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja01lc3NhZ2USDwoHdmVyc2lvbhgFIAEoBBIZChF1cGRhdGVkX2F0X21pbGxpcxgGIAEoBBITCgtyZXBseV9jb3VudBgHIAEoDRITCgtjYW5fcmVzb2x2ZRgIIAEoCBISCgpjYW5fZGVsZXRlGAkgASgIIsMBChJMaXN0VGhyZWFkc1JlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEQoJcGFnZV9zaXplGAIgASgNEhMKBmN1cnNvchgDIAEoCUgAiAEBEjYKBnN0YXR1cxgEIAEoDjImLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tUaHJlYWRTdGF0dXMSHAoPYXV0aG9yX2FjdG9yX2lkGAUgASgJSAGIAQFCCQoHX2N1cnNvckISChBfYXV0aG9yX2FjdG9yX2lkIoUBChNMaXN0VGhyZWFkc1Jlc3BvbnNlEjEKB3RocmVhZHMYASADKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrVGhyZWFkEhgKC25leHRfY3Vyc29yGAIgASgJSACIAQESEQoJY2FuX3dyaXRlGAMgASgIQg4KDF9uZXh0X2N1cnNvciJqChBHZXRUaHJlYWRSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhEKCXRocmVhZF9pZBgCIAEoCRIRCglwYWdlX3NpemUYAyABKA0SEwoGY3Vyc29yGAQgASgJSACIAQFCCQoHX2N1cnNvciK2AQoRR2V0VGhyZWFkUmVzcG9uc2USMAoGdGhyZWFkGAEgASgLMiAubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1RocmVhZBIyCgdyZXBsaWVzGAIgAygLMiEubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja01lc3NhZ2USGAoLbmV4dF9jdXJzb3IYAyABKAlIAIgBARIRCgljYW5fd3JpdGUYBCABKAhCDgoMX25leHRfY3Vyc29yIlYKDkZlZWRiYWNrQ3JlYXRlEjYKBmFuY2hvchgBIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tBbmNob3JUYXJnZXQSDAoEdGV4dBgCIAEoCSIwCg1GZWVkYmFja1JlcGx5EhEKCXRocmVhZF9pZBgBIAEoCRIMCgR0ZXh0GAIgASgJIocBCgxGZWVkYmFja0VkaXQSEQoJdGhyZWFkX2lkGAEgASgJEhIKCm1lc3NhZ2VfaWQYAiABKAkSJQoYZXhwZWN0ZWRfbWVzc2FnZV92ZXJzaW9uGAMgASgESACIAQESDAoEdGV4dBgEIAEoCUIbChlfZXhwZWN0ZWRfbWVzc2FnZV92ZXJzaW9uImsKFEZlZWRiYWNrVGhyZWFkQ2hhbmdlEhEKCXRocmVhZF9pZBgBIAEoCRIkChdleHBlY3RlZF90aHJlYWRfdmVyc2lvbhgCIAEoBEgAiAEBQhoKGF9leHBlY3RlZF90aHJlYWRfdmVyc2lvbiKOAwoUQXBwbHlGZWVkYmFja1JlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCRIyCgZjcmVhdGUYAyABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrQ3JlYXRlSAASMAoFcmVwbHkYBCABKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrUmVwbHlIABIuCgRlZGl0GAUgASgLMh4ubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja0VkaXRIABI5CgdyZXNvbHZlGAYgASgLMiYubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1RocmVhZENoYW5nZUgAEjgKBnJlb3BlbhgHIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tUaHJlYWRDaGFuZ2VIABI4CgZkZWxldGUYCCABKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrVGhyZWFkQ2hhbmdlSABCCwoJb3BlcmF0aW9uIksKFUFwcGx5RmVlZGJhY2tSZXNwb25zZRIyCgdyZWNlaXB0GAEgASgLMiEubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1JlY2VpcHQipwEKD0ZlZWRiYWNrQXBwbGllZBIRCgl0aHJlYWRfaWQYASABKAkSFgoOdGhyZWFkX3ZlcnNpb24YAiABKAQSFwoKbWVzc2FnZV9pZBgDIAEoCUgAiAEBEhwKD21lc3NhZ2VfdmVyc2lvbhgEIAEoBEgBiAEBEg8KB2RlbGV0ZWQYBSABKAhCDQoLX21lc3NhZ2VfaWRCEgoQX21lc3NhZ2VfdmVyc2lvbiJ/ChBGZWVkYmFja1JlamVjdGVkEjkKBnJlYXNvbhgBIAEoDjIpLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tSZWplY3Rpb25SZWFzb24SHAoPY3VycmVudF92ZXJzaW9uGAIgASgESACIAQFCEgoQX2N1cnJlbnRfdmVyc2lvbiKwAQoPRmVlZGJhY2tSZWNlaXB0EhAKCGJvYXJkX2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkSNAoHYXBwbGllZBgDIAEoCzIhLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tBcHBsaWVkSAASNgoIcmVqZWN0ZWQYBCABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrUmVqZWN0ZWRIAEIJCgdvdXRjb21lIkEKGUdldEZlZWRiYWNrUmVjZWlwdFJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCSIwChpGZWVkYmFja1JlY2VpcHROb3RSZWNvcmRlZBISCgpjb21tYW5kX2lkGAEgASgJIqIBChpHZXRGZWVkYmFja1JlY2VpcHRSZXNwb25zZRI0CgdyZWNlaXB0GAEgASgLMiEubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1JlY2VpcHRIABJECgxub3RfcmVjb3JkZWQYAiABKAsyLC5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrUmVjZWlwdE5vdFJlY29yZGVkSABCCAoGcmVzdWx0KoQBChRGZWVkYmFja1RocmVhZFN0YXR1cxImCiJGRUVEQkFDS19USFJFQURfU1RBVFVTX1VOU1BFQ0lGSUVEEAASHwobRkVFREJBQ0tfVEhSRUFEX1NUQVRVU19PUEVOEAESIwofRkVFREJBQ0tfVEhSRUFEX1NUQVRVU19SRVNPTFZFRBACKv0CChdGZWVkYmFja1JlamVjdGlvblJlYXNvbhIpCiVGRUVEQkFDS19SRUpFQ1RJT05fUkVBU09OX1VOU1BFQ0lGSUVEEAASKgomRkVFREJBQ0tfUkVKRUNUSU9OX1JFQVNPTl9JTlZBTElEX1RFWFQQARIsCihGRUVEQkFDS19SRUpFQ1RJT05fUkVBU09OX0lOVkFMSURfQU5DSE9SEAISLAooRkVFREJBQ0tfUkVKRUNUSU9OX1JFQVNPTl9UQVJHRVRfQ0hBTkdFRBADEicKI0ZFRURCQUNLX1JFSkVDVElPTl9SRUFTT05fTk9UX0ZPVU5EEAQSJwojRkVFREJBQ0tfUkVKRUNUSU9OX1JFQVNPTl9GT1JCSURERU4QBRItCilGRUVEQkFDS19SRUpFQ1RJT05fUkVBU09OX1ZFUlNJT05fQ0hBTkdFRBAGEi4KKkZFRURCQUNLX1JFSkVDVElPTl9SRUFTT05fQ09NTUFORF9JRF9SRVVTRRAHMpYDCg9GZWVkYmFja1NlcnZpY2USWgoLTGlzdFRocmVhZHMSJC5sdW1pbmcuc3R1ZGlvLnYxLkxpc3RUaHJlYWRzUmVxdWVzdBolLmx1bWluZy5zdHVkaW8udjEuTGlzdFRocmVhZHNSZXNwb25zZRJUCglHZXRUaHJlYWQSIi5sdW1pbmcuc3R1ZGlvLnYxLkdldFRocmVhZFJlcXVlc3QaIy5sdW1pbmcuc3R1ZGlvLnYxLkdldFRocmVhZFJlc3BvbnNlEmAKDUFwcGx5RmVlZGJhY2sSJi5sdW1pbmcuc3R1ZGlvLnYxLkFwcGx5RmVlZGJhY2tSZXF1ZXN0GicubHVtaW5nLnN0dWRpby52MS5BcHBseUZlZWRiYWNrUmVzcG9uc2USbwoSR2V0RmVlZGJhY2tSZWNlaXB0EisubHVtaW5nLnN0dWRpby52MS5HZXRGZWVkYmFja1JlY2VpcHRSZXF1ZXN0GiwubHVtaW5nLnN0dWRpby52MS5HZXRGZWVkYmFja1JlY2VpcHRSZXNwb25zZWIGcHJvdG8z");
+var file_luming_studio_v1_feedback_service = /* @__PURE__ */ fileDesc("CidsdW1pbmcvc3R1ZGlvL3YxL2ZlZWRiYWNrX3NlcnZpY2UucHJvdG8SEGx1bWluZy5zdHVkaW8udjEiJQoNRmVlZGJhY2tQb2ludBIJCgF4GAEgASgBEgkKAXkYAiABKAEicgoTRmVlZGJhY2tPYmplY3RQb2ludBIRCglvYmplY3RfaWQYASABKAkSCQoBdRgCIAEoARIJCgF2GAMgASgBEh0KEGdlb21ldHJ5X3ZlcnNpb24YBCABKARIAIgBAUITChFfZ2VvbWV0cnlfdmVyc2lvbiIrChZGZWVkYmFja0RvY3VtZW50QW5jaG9yEhEKCWJsb2NrX2lkcxgBIAMoCSJYChJGZWVkYmFja0h0bWxBbmNob3ISEAoIbm9kZV9pZHMYASADKAkSHAoPc291cmNlX3JldmlzaW9uGAIgASgESACIAQFCEgoQX3NvdXJjZV9yZXZpc2lvbiK8AgoURmVlZGJhY2tDb250ZW50UG9pbnQSEQoJb2JqZWN0X2lkGAEgASgJEgkKAXUYAiABKAESCQoBdhgDIAEoARIdChBnZW9tZXRyeV92ZXJzaW9uGAQgASgESAGIAQESHAoPcGF5bG9hZF92ZXJzaW9uGAUgASgESAKIAQESPAoIZG9jdW1lbnQYBiABKAsyKC5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrRG9jdW1lbnRBbmNob3JIABIWCgx0b2RvX2l0ZW1faWQYByABKAlIABI0CgRodG1sGAggASgLMiQubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja0h0bWxBbmNob3JIAEIJCgdjb250ZW50QhMKEV9nZW9tZXRyeV92ZXJzaW9uQhIKEF9wYXlsb2FkX3ZlcnNpb24i2AEKFEZlZWRiYWNrQW5jaG9yVGFyZ2V0EjYKC2JvYXJkX3BvaW50GAEgASgLMh8ubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1BvaW50SAASPQoMb2JqZWN0X3BvaW50GAIgASgLMiUubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja09iamVjdFBvaW50SAASPwoNY29udGVudF9wb2ludBgDIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tDb250ZW50UG9pbnRIAEIICgZ0YXJnZXQiegoURmVlZGJhY2tGcm96ZW5PYmplY3QSDAoEa2luZBgBIAEoCRINCgVsYWJlbBgCIAEoCRIJCgF4GAMgASgBEgkKAXkYBCABKAESDQoFd2lkdGgYBSABKAESDgoGaGVpZ2h0GAYgASgBEhAKCHJvdGF0aW9uGAcgASgBIqUCCg5GZWVkYmFja0FuY2hvchI2CgZ0YXJnZXQYASABKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrQW5jaG9yVGFyZ2V0Eh0KFXNvdXJjZV9ib2FyZF9yZXZpc2lvbhgCIAEoBBI1Cgxmcm96ZW5fcG9pbnQYAyABKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrUG9pbnQSPQoNZnJvemVuX29iamVjdBgEIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tGcm96ZW5PYmplY3QSFgoOdGFyZ2V0X21pc3NpbmcYBSABKAgSGwoOZnJvemVuX2V4Y2VycHQYBiABKAlIAIgBAUIRCg9fZnJvemVuX2V4Y2VycHQi6wEKD0ZlZWRiYWNrTWVzc2FnZRISCgptZXNzYWdlX2lkGAEgASgJEhcKD2F1dGhvcl9hY3Rvcl9pZBgCIAEoCRIaChJhdXRob3JlZF9ieV92aWV3ZXIYAyABKAgSDAoEdGV4dBgEIAEoCRIZChFjcmVhdGVkX2F0X21pbGxpcxgFIAEoBBIZChF1cGRhdGVkX2F0X21pbGxpcxgGIAEoBBIPCgd2ZXJzaW9uGAcgASgEEhAKCGNhbl9lZGl0GAggASgIEhgKC2F1dGhvcl9uYW1lGAkgASgJSACIAQFCDgoMX2F1dGhvcl9uYW1lIqkCCg5GZWVkYmFja1RocmVhZBIRCgl0aHJlYWRfaWQYASABKAkSNgoGc3RhdHVzGAIgASgOMiYubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1RocmVhZFN0YXR1cxIwCgZhbmNob3IYAyABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrQW5jaG9yEjAKBWZpcnN0GAQgASgLMiEubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja01lc3NhZ2USDwoHdmVyc2lvbhgFIAEoBBIZChF1cGRhdGVkX2F0X21pbGxpcxgGIAEoBBITCgtyZXBseV9jb3VudBgHIAEoDRITCgtjYW5fcmVzb2x2ZRgIIAEoCBISCgpjYW5fZGVsZXRlGAkgASgIIsMBChJMaXN0VGhyZWFkc1JlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEQoJcGFnZV9zaXplGAIgASgNEhMKBmN1cnNvchgDIAEoCUgAiAEBEjYKBnN0YXR1cxgEIAEoDjImLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tUaHJlYWRTdGF0dXMSHAoPYXV0aG9yX2FjdG9yX2lkGAUgASgJSAGIAQFCCQoHX2N1cnNvckISChBfYXV0aG9yX2FjdG9yX2lkIoUBChNMaXN0VGhyZWFkc1Jlc3BvbnNlEjEKB3RocmVhZHMYASADKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrVGhyZWFkEhgKC25leHRfY3Vyc29yGAIgASgJSACIAQESEQoJY2FuX3dyaXRlGAMgASgIQg4KDF9uZXh0X2N1cnNvciJqChBHZXRUaHJlYWRSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhEKCXRocmVhZF9pZBgCIAEoCRIRCglwYWdlX3NpemUYAyABKA0SEwoGY3Vyc29yGAQgASgJSACIAQFCCQoHX2N1cnNvciK2AQoRR2V0VGhyZWFkUmVzcG9uc2USMAoGdGhyZWFkGAEgASgLMiAubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1RocmVhZBIyCgdyZXBsaWVzGAIgAygLMiEubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja01lc3NhZ2USGAoLbmV4dF9jdXJzb3IYAyABKAlIAIgBARIRCgljYW5fd3JpdGUYBCABKAhCDgoMX25leHRfY3Vyc29yIlYKDkZlZWRiYWNrQ3JlYXRlEjYKBmFuY2hvchgBIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tBbmNob3JUYXJnZXQSDAoEdGV4dBgCIAEoCSIwCg1GZWVkYmFja1JlcGx5EhEKCXRocmVhZF9pZBgBIAEoCRIMCgR0ZXh0GAIgASgJIocBCgxGZWVkYmFja0VkaXQSEQoJdGhyZWFkX2lkGAEgASgJEhIKCm1lc3NhZ2VfaWQYAiABKAkSJQoYZXhwZWN0ZWRfbWVzc2FnZV92ZXJzaW9uGAMgASgESACIAQESDAoEdGV4dBgEIAEoCUIbChlfZXhwZWN0ZWRfbWVzc2FnZV92ZXJzaW9uImsKFEZlZWRiYWNrVGhyZWFkQ2hhbmdlEhEKCXRocmVhZF9pZBgBIAEoCRIkChdleHBlY3RlZF90aHJlYWRfdmVyc2lvbhgCIAEoBEgAiAEBQhoKGF9leHBlY3RlZF90aHJlYWRfdmVyc2lvbiKOAwoUQXBwbHlGZWVkYmFja1JlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCRIyCgZjcmVhdGUYAyABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrQ3JlYXRlSAASMAoFcmVwbHkYBCABKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrUmVwbHlIABIuCgRlZGl0GAUgASgLMh4ubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja0VkaXRIABI5CgdyZXNvbHZlGAYgASgLMiYubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1RocmVhZENoYW5nZUgAEjgKBnJlb3BlbhgHIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tUaHJlYWRDaGFuZ2VIABI4CgZkZWxldGUYCCABKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrVGhyZWFkQ2hhbmdlSABCCwoJb3BlcmF0aW9uIksKFUFwcGx5RmVlZGJhY2tSZXNwb25zZRIyCgdyZWNlaXB0GAEgASgLMiEubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1JlY2VpcHQipwEKD0ZlZWRiYWNrQXBwbGllZBIRCgl0aHJlYWRfaWQYASABKAkSFgoOdGhyZWFkX3ZlcnNpb24YAiABKAQSFwoKbWVzc2FnZV9pZBgDIAEoCUgAiAEBEhwKD21lc3NhZ2VfdmVyc2lvbhgEIAEoBEgBiAEBEg8KB2RlbGV0ZWQYBSABKAhCDQoLX21lc3NhZ2VfaWRCEgoQX21lc3NhZ2VfdmVyc2lvbiJ/ChBGZWVkYmFja1JlamVjdGVkEjkKBnJlYXNvbhgBIAEoDjIpLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tSZWplY3Rpb25SZWFzb24SHAoPY3VycmVudF92ZXJzaW9uGAIgASgESACIAQFCEgoQX2N1cnJlbnRfdmVyc2lvbiKwAQoPRmVlZGJhY2tSZWNlaXB0EhAKCGJvYXJkX2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkSNAoHYXBwbGllZBgDIAEoCzIhLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tBcHBsaWVkSAASNgoIcmVqZWN0ZWQYBCABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrUmVqZWN0ZWRIAEIJCgdvdXRjb21lIkEKGUdldEZlZWRiYWNrUmVjZWlwdFJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCSIwChpGZWVkYmFja1JlY2VpcHROb3RSZWNvcmRlZBISCgpjb21tYW5kX2lkGAEgASgJIqIBChpHZXRGZWVkYmFja1JlY2VpcHRSZXNwb25zZRI0CgdyZWNlaXB0GAEgASgLMiEubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1JlY2VpcHRIABJECgxub3RfcmVjb3JkZWQYAiABKAsyLC5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrUmVjZWlwdE5vdFJlY29yZGVkSABCCAoGcmVzdWx0KoQBChRGZWVkYmFja1RocmVhZFN0YXR1cxImCiJGRUVEQkFDS19USFJFQURfU1RBVFVTX1VOU1BFQ0lGSUVEEAASHwobRkVFREJBQ0tfVEhSRUFEX1NUQVRVU19PUEVOEAESIwofRkVFREJBQ0tfVEhSRUFEX1NUQVRVU19SRVNPTFZFRBACKv0CChdGZWVkYmFja1JlamVjdGlvblJlYXNvbhIpCiVGRUVEQkFDS19SRUpFQ1RJT05fUkVBU09OX1VOU1BFQ0lGSUVEEAASKgomRkVFREJBQ0tfUkVKRUNUSU9OX1JFQVNPTl9JTlZBTElEX1RFWFQQARIsCihGRUVEQkFDS19SRUpFQ1RJT05fUkVBU09OX0lOVkFMSURfQU5DSE9SEAISLAooRkVFREJBQ0tfUkVKRUNUSU9OX1JFQVNPTl9UQVJHRVRfQ0hBTkdFRBADEicKI0ZFRURCQUNLX1JFSkVDVElPTl9SRUFTT05fTk9UX0ZPVU5EEAQSJwojRkVFREJBQ0tfUkVKRUNUSU9OX1JFQVNPTl9GT1JCSURERU4QBRItCilGRUVEQkFDS19SRUpFQ1RJT05fUkVBU09OX1ZFUlNJT05fQ0hBTkdFRBAGEi4KKkZFRURCQUNLX1JFSkVDVElPTl9SRUFTT05fQ09NTUFORF9JRF9SRVVTRRAHMpYDCg9GZWVkYmFja1NlcnZpY2USWgoLTGlzdFRocmVhZHMSJC5sdW1pbmcuc3R1ZGlvLnYxLkxpc3RUaHJlYWRzUmVxdWVzdBolLmx1bWluZy5zdHVkaW8udjEuTGlzdFRocmVhZHNSZXNwb25zZRJUCglHZXRUaHJlYWQSIi5sdW1pbmcuc3R1ZGlvLnYxLkdldFRocmVhZFJlcXVlc3QaIy5sdW1pbmcuc3R1ZGlvLnYxLkdldFRocmVhZFJlc3BvbnNlEmAKDUFwcGx5RmVlZGJhY2sSJi5sdW1pbmcuc3R1ZGlvLnYxLkFwcGx5RmVlZGJhY2tSZXF1ZXN0GicubHVtaW5nLnN0dWRpby52MS5BcHBseUZlZWRiYWNrUmVzcG9uc2USbwoSR2V0RmVlZGJhY2tSZWNlaXB0EisubHVtaW5nLnN0dWRpby52MS5HZXRGZWVkYmFja1JlY2VpcHRSZXF1ZXN0GiwubHVtaW5nLnN0dWRpby52MS5HZXRGZWVkYmFja1JlY2VpcHRSZXNwb25zZWIGcHJvdG8z");
 var FeedbackThreadStatusSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_feedback_service, 0);
 var FeedbackThreadStatus = /* @__PURE__ */ tsEnum(FeedbackThreadStatusSchema);
 var FeedbackRejectionReasonSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_feedback_service, 1);
@@ -18238,11 +19356,11 @@ var rejections = {
   versionChanged: FeedbackRejectionReason.VERSION_CHANGED,
   commandIdReuse: FeedbackRejectionReason.COMMAND_ID_REUSE
 };
-function requireVersion(version) {
-  if (version === void 0) {
+function requireVersion(version2) {
+  if (version2 === void 0) {
     throw new HttpRequestError(400, "Feedback expected version is required.");
   }
-  return version;
+  return version2;
 }
 function readContent(content) {
   switch (content.case) {
@@ -18260,8 +19378,8 @@ function readContent(content) {
       throw new HttpRequestError(400, "Feedback content anchor unit is required.");
   }
 }
-function readTarget2(anchor) {
-  const target2 = anchor?.target;
+function readTarget2(anchor2) {
+  const target2 = anchor2?.target;
   switch (target2?.case) {
     case "boardPoint":
       return {
@@ -18353,8 +19471,8 @@ function writeContent(unit) {
       };
   }
 }
-function writeAnchor(anchor) {
-  const { target: target2, ...source } = anchor;
+function writeAnchor(anchor2) {
+  const { target: target2, ...source } = anchor2;
   if (target2.kind === "board") {
     return {
       ...source,
@@ -18559,8 +19677,8 @@ function requirePayloadIds(ids) {
   }
   return ids.map(requireId);
 }
-function toVersionSummary(version) {
-  const { kind, savedAtMillis, ...summary } = version;
+function toVersionSummary(version2) {
+  const { kind, savedAtMillis, ...summary } = version2;
   return {
     ...summary,
     kind: versionKind[kind],
@@ -18650,8 +19768,9 @@ function createBoardHistoryRoutes(application, digest2, observe) {
 }
 
 // ../../packages/contracts/dist/proto/luming/studio/v1/board_room_service_pb.js
-var file_luming_studio_v1_board_room_service = /* @__PURE__ */ fileDesc("CilsdW1pbmcvc3R1ZGlvL3YxL2JvYXJkX3Jvb21fc2VydmljZS5wcm90bxIQbHVtaW5nLnN0dWRpby52MSInChNHZXRCb2FyZFJvb21SZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJIkcKFEdldEJvYXJkUm9vbVJlc3BvbnNlEi8KBWV2ZW50GAEgASgLMiAubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21FdmVudCJkChFCb2FyZFJvb21WaWV3cG9ydBIQCghjZW50ZXJfeBgBIAEoARIQCghjZW50ZXJfeRgCIAEoARIMCgR6b29tGAMgASgBEg0KBXdpZHRoGAQgASgBEg4KBmhlaWdodBgFIAEoASI8ChdCb2FyZFJvb21QYXJ0aWNpcGFudEtleRIQCghhY3Rvcl9pZBgBIAEoCRIPCgd2aWV3X2lkGAIgASgJIqEBChhCb2FyZFJvb21HZXN0dXJlR2VvbWV0cnkSEQoJb2JqZWN0X2lkGAEgASgJEiYKGWV4cGVjdGVkX2dlb21ldHJ5X3ZlcnNpb24YAiABKARIAIgBARIsCghnZW9tZXRyeRgDIAEoCzIaLmx1bWluZy5zdHVkaW8udjEuR2VvbWV0cnlCHAoaX2V4cGVjdGVkX2dlb21ldHJ5X3ZlcnNpb24ijAEKF0JvYXJkUm9vbUdlc3R1cmVQcmV2aWV3EjQKBGtpbmQYASABKA4yJi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbUdlc3R1cmVLaW5kEjsKB2NoYW5nZXMYAiADKAsyKi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbUdlc3R1cmVHZW9tZXRyeSLFAwoUQm9hcmRSb29tUGFydGljaXBhbnQSNgoDa2V5GAEgASgLMikubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21QYXJ0aWNpcGFudEtleRIUCgxkaXNwbGF5X25hbWUYAiABKAkSDAoEcm9sZRgDIAEoCRIVCghzZXF1ZW5jZRgEIAEoBEgAiAEBEh8KEmV4cGlyZXNfYXRfdW5peF9tcxgFIAEoBEgBiAEBEicKBmN1cnNvchgGIAEoCzIXLmx1bWluZy5zdHVkaW8udjEuUG9pbnQSNQoIdmlld3BvcnQYByABKAsyIy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVZpZXdwb3J0EhEKCWZvbGxvd2luZxgIIAEoCBI6CgdnZXN0dXJlGAkgASgLMikubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21HZXN0dXJlUHJldmlldxInChpnZXN0dXJlX2V4cGlyZXNfYXRfdW5peF9tcxgKIAEoBEgCiAEBQgsKCV9zZXF1ZW5jZUIVChNfZXhwaXJlc19hdF91bml4X21zQh0KG19nZXN0dXJlX2V4cGlyZXNfYXRfdW5peF9tcyKSAgoaVXBkYXRlQm9hcmRQcmVzZW5jZVJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSDwoHdmlld19pZBgCIAEoCRIVCghzZXF1ZW5jZRgDIAEoBEgAiAEBEicKBmN1cnNvchgEIAEoCzIXLmx1bWluZy5zdHVkaW8udjEuUG9pbnQSNQoIdmlld3BvcnQYBSABKAsyIy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVZpZXdwb3J0EhEKCWZvbGxvd2luZxgGIAEoCBI6CgdnZXN0dXJlGAcgASgLMikubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21HZXN0dXJlUHJldmlld0ILCglfc2VxdWVuY2UiLwobVXBkYXRlQm9hcmRQcmVzZW5jZVJlc3BvbnNlEhAKCGFjY2VwdGVkGAEgASgIImIKGUxlYXZlQm9hcmRQcmVzZW5jZVJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSDwoHdmlld19pZBgCIAEoCRIVCghzZXF1ZW5jZRgDIAEoBEgAiAEBQgsKCV9zZXF1ZW5jZSIuChpMZWF2ZUJvYXJkUHJlc2VuY2VSZXNwb25zZRIQCghhY2NlcHRlZBgBIAEoCCK6AgoRQm9hcmRSb29tU25hcHNob3QSEAoIYWN0b3JfaWQYASABKAkSEAoIY2FuX2VkaXQYAiABKAgSGwoOYm9hcmRfcmV2aXNpb24YAyABKARIAIgBARI8CgxwYXJ0aWNpcGFudHMYBCADKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVBhcnRpY2lwYW50Ei8KBXRpbWVyGAUgASgLMiAubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21UaW1lchI+ChBhZ2VudF93b3Jrc3BhY2VzGAYgAygLMiQubHVtaW5nLnN0dWRpby52MS5Sb29tQWdlbnRXb3Jrc3BhY2USIgoaY2FuX3JlbGVhc2VfYWdlbnRfYWN0aXZpdHkYByABKAhCEQoPX2JvYXJkX3JldmlzaW9uIo0BChVCb2FyZFJvb21QYXJ0aWNpcGFudHMSNwoHdXBzZXJ0cxgBIAMoCzImLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tUGFydGljaXBhbnQSOwoIcmVtb3ZhbHMYAiADKAsyKS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVBhcnRpY2lwYW50S2V5ItMBChdCb2FyZFJvb21Db250ZW50Q2hhbmdlZBIbCg5ib2FyZF9yZXZpc2lvbhgBIAEoBEgAiAEBEhoKEmNoYW5nZWRfb2JqZWN0X2lkcxgCIAMoCRIaChJyZW1vdmVkX29iamVjdF9pZHMYAyADKAkSFQoNcmVmcmVzaF9zY2VuZRgEIAEoCBI5Cg9jaGFuZ2VkX29iamVjdHMYBSADKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLk9iamVjdE1ldGFkYXRhQhEKD19ib2FyZF9yZXZpc2lvbiIVChNCb2FyZFJvb21BY2Nlc3NMb3N0IpwECg5Cb2FyZFJvb21FdmVudBIQCghib2FyZF9pZBgBIAEoCRIYChByb29tX2luc3RhbmNlX2lkGAIgASgJEhUKCHNlcXVlbmNlGAMgASgESAGIAQESIAoTc2VydmVyX3RpbWVfdW5peF9tcxgEIAEoBEgCiAEBEjcKCHNuYXBzaG90GAUgASgLMiMubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21TbmFwc2hvdEgAEj8KDHBhcnRpY2lwYW50cxgGIAEoCzInLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tUGFydGljaXBhbnRzSAASMQoFdGltZXIYByABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVRpbWVySAASRAoPY29udGVudF9jaGFuZ2VkGAggASgLMikubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21Db250ZW50Q2hhbmdlZEgAEjwKC2FjY2Vzc19sb3N0GAkgASgLMiUubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21BY2Nlc3NMb3N0SAASRAoQYWdlbnRfd29ya3NwYWNlcxgKIAEoCzIoLmx1bWluZy5zdHVkaW8udjEuUm9vbUFnZW50V29ya3NwYWNlTGlzdEgAQgkKB3BheWxvYWRCCwoJX3NlcXVlbmNlQhYKFF9zZXJ2ZXJfdGltZV91bml4X21zIscBCg5Cb2FyZFJvb21UaW1lchIUCgd2ZXJzaW9uGAEgASgESACIAQESNAoFcGhhc2UYAiABKA4yJS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVRpbWVyUGhhc2USEwoLZHVyYXRpb25fbXMYAyABKA0SHQoQZGVhZGxpbmVfdW5peF9tcxgEIAEoBEgBiAEBEhQKDHJlbWFpbmluZ19tcxgFIAEoDUIKCghfdmVyc2lvbkITChFfZGVhZGxpbmVfdW5peF9tcyISChBCb2FyZFRpbWVyQWN0aW9uIosDChdDaGFuZ2VCb2FyZFRpbWVyUmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJEh0KEGV4cGVjdGVkX3ZlcnNpb24YAyABKARIAYgBARIzCgVzdGFydBgEIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuQm9hcmRUaW1lckFjdGlvbkgAEjMKBXBhdXNlGAUgASgLMiIubHVtaW5nLnN0dWRpby52MS5Cb2FyZFRpbWVyQWN0aW9uSAASNAoGcmVzdW1lGAYgASgLMiIubHVtaW5nLnN0dWRpby52MS5Cb2FyZFRpbWVyQWN0aW9uSAASMwoFcmVzZXQYByABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkVGltZXJBY3Rpb25IABIZCg9zZXRfZHVyYXRpb25fbXMYCCABKA1IABIcChJhZGp1c3RfZHVyYXRpb25fbXMYCSABKBFIAEIICgZhY3Rpb25CEwoRX2V4cGVjdGVkX3ZlcnNpb24iRAoRQm9hcmRUaW1lckFwcGxpZWQSLwoFdGltZXIYASABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVRpbWVyIkUKEkJvYXJkVGltZXJDb25mbGljdBIvCgV0aW1lchgBIAEoCzIgLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tVGltZXIiSwoSQm9hcmRUaW1lclJlamVjdGVkEjUKBnJlYXNvbhgBIAEoDjIlLmx1bWluZy5zdHVkaW8udjEuQm9hcmRUaW1lclJlamVjdGlvbiLwAQoRQm9hcmRUaW1lclJlY2VpcHQSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCRI2CgdhcHBsaWVkGAMgASgLMiMubHVtaW5nLnN0dWRpby52MS5Cb2FyZFRpbWVyQXBwbGllZEgAEjgKCGNvbmZsaWN0GAQgASgLMiQubHVtaW5nLnN0dWRpby52MS5Cb2FyZFRpbWVyQ29uZmxpY3RIABI4CghyZWplY3RlZBgFIAEoCzIkLmx1bWluZy5zdHVkaW8udjEuQm9hcmRUaW1lclJlamVjdGVkSABCCQoHb3V0Y29tZSKKAQoYQ2hhbmdlQm9hcmRUaW1lclJlc3BvbnNlEjQKB3JlY2VpcHQYASABKAsyIy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkVGltZXJSZWNlaXB0EiAKE3NlcnZlcl90aW1lX3VuaXhfbXMYAiABKARIAIgBAUIWChRfc2VydmVyX3RpbWVfdW5peF9tcyJDChtHZXRCb2FyZFRpbWVyUmVjZWlwdFJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCSKOAQocR2V0Qm9hcmRUaW1lclJlY2VpcHRSZXNwb25zZRI0CgdyZWNlaXB0GAEgASgLMiMubHVtaW5nLnN0dWRpby52MS5Cb2FyZFRpbWVyUmVjZWlwdBIgChNzZXJ2ZXJfdGltZV91bml4X21zGAIgASgESACIAQFCFgoUX3NlcnZlcl90aW1lX3VuaXhfbXMiSgoTQWdlbnRBY3Rpdml0eUJvdW5kcxIJCgF4GAEgASgBEgkKAXkYAiABKAESDQoFd2lkdGgYAyABKAESDgoGaGVpZ2h0GAQgASgBIi4KGEFnZW50QWN0aXZpdHlPYmplY3RTY29wZRISCgpvYmplY3RfaWRzGAEgAygJIpQBChJBZ2VudEFjdGl2aXR5U2NvcGUSPQoHb2JqZWN0cxgBIAEoCzIqLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eU9iamVjdFNjb3BlSAASNQoEYXJlYRgCIAEoCzIlLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eUJvdW5kc0gAQggKBnRhcmdldCJ1ChJBZ2VudEFjdGl2aXR5QmVnaW4SMwoFc2NvcGUYASABKAsyJC5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlTY29wZRINCgVsYWJlbBgCIAEoCRIbChNwcmV2aW91c19nZW5lcmF0aW9uGAMgASgJInkKE0FnZW50QWN0aXZpdHlVcGRhdGUSEgoKZ2VuZXJhdGlvbhgBIAEoCRIzCgVwaGFzZRgCIAEoDjIkLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eVBoYXNlEhkKEWFjdGl2ZV9vYmplY3RfaWRzGAMgAygJIiYKEEFnZW50QWN0aXZpdHlFbmQSEgoKZ2VuZXJhdGlvbhgBIAEoCSIVChNBZ2VudEFjdGl2aXR5U3RhdHVzIioKFEFnZW50QWN0aXZpdHlSZWxlYXNlEhIKCmdlbmVyYXRpb24YASABKAki8gIKGkNoYW5nZUFnZW50QWN0aXZpdHlSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJEg8KB3Rhc2tfaWQYAyABKAkSNQoFYmVnaW4YBCABKAsyJC5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlCZWdpbkgAEjcKBnVwZGF0ZRgFIAEoCzIlLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eVVwZGF0ZUgAEjEKA2VuZBgGIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eUVuZEgAEjcKBnN0YXR1cxgHIAEoCzIlLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eVN0YXR1c0gAEjkKB3JlbGVhc2UYCCABKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlSZWxlYXNlSABCCAoGYWN0aW9uImsKFlJvb21BZ2VudFdvcmtzcGFjZUFyZWESCgoCaWQYASABKAkSNQoGYm91bmRzGAIgASgLMiUubHVtaW5nLnN0dWRpby52MS5BZ2VudEFjdGl2aXR5Qm91bmRzEg4KBmFjdGl2ZRgDIAEoCCK1AgoSUm9vbUFnZW50V29ya3NwYWNlEhAKCGFnZW50X2lkGAEgASgJEg8KB3Rhc2tfaWQYAiABKAkSEgoKZ2VuZXJhdGlvbhgDIAEoCRINCgVsYWJlbBgEIAEoCRIzCgVwaGFzZRgFIAEoDjIkLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eVBoYXNlEjcKBWFyZWFzGAYgAygLMigubHVtaW5nLnN0dWRpby52MS5Sb29tQWdlbnRXb3Jrc3BhY2VBcmVhEh8KEmV4cGlyZXNfYXRfdW5peF9tcxgHIAEoBEgAiAEBEjMKBXNjb3BlGAggASgLMiQubHVtaW5nLnN0dWRpby52MS5BZ2VudEFjdGl2aXR5U2NvcGVCFQoTX2V4cGlyZXNfYXRfdW5peF9tcyJSChZSb29tQWdlbnRXb3Jrc3BhY2VMaXN0EjgKCndvcmtzcGFjZXMYASADKAsyJC5sdW1pbmcuc3R1ZGlvLnYxLlJvb21BZ2VudFdvcmtzcGFjZSJiChJBZ2VudEFjdGl2aXR5RW5kZWQSEgoKZ2VuZXJhdGlvbhgBIAEoCRI4CgZyZWFzb24YAiABKA4yKC5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlFbmRSZWFzb24i1wEKG0NoYW5nZUFnZW50QWN0aXZpdHlSZXNwb25zZRI5Cgl3b3Jrc3BhY2UYASABKAsyJC5sdW1pbmcuc3R1ZGlvLnYxLlJvb21BZ2VudFdvcmtzcGFjZUgAEjUKBWVuZGVkGAIgASgLMiQubHVtaW5nLnN0dWRpby52MS5BZ2VudEFjdGl2aXR5RW5kZWRIABI8CghyZWplY3RlZBgDIAEoDjIoLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eVJlamVjdGlvbkgAQggKBnJlc3VsdCqpAQoUQm9hcmRSb29tR2VzdHVyZUtpbmQSJwojQk9BUkRfUk9PTV9HRVNUVVJFX0tJTkRfVU5TUEVDSUZJRUQQABIgChxCT0FSRF9ST09NX0dFU1RVUkVfS0lORF9NT1ZFEAESIgoeQk9BUkRfUk9PTV9HRVNUVVJFX0tJTkRfUkVTSVpFEAISIgoeQk9BUkRfUk9PTV9HRVNUVVJFX0tJTkRfUk9UQVRFEAMqxwEKE0JvYXJkUm9vbVRpbWVyUGhhc2USJgoiQk9BUkRfUk9PTV9USU1FUl9QSEFTRV9VTlNQRUNJRklFRBAAEh8KG0JPQVJEX1JPT01fVElNRVJfUEhBU0VfSURMRRABEiIKHkJPQVJEX1JPT01fVElNRVJfUEhBU0VfUlVOTklORxACEiEKHUJPQVJEX1JPT01fVElNRVJfUEhBU0VfUEFVU0VEEAMSIAocQk9BUkRfUk9PTV9USU1FUl9QSEFTRV9FTkRFRBAEKrcBChNCb2FyZFRpbWVyUmVqZWN0aW9uEiUKIUJPQVJEX1RJTUVSX1JFSkVDVElPTl9VTlNQRUNJRklFRBAAEiMKH0JPQVJEX1RJTUVSX1JFSkVDVElPTl9GT1JCSURERU4QARIoCiRCT0FSRF9USU1FUl9SRUpFQ1RJT05fSU5WQUxJRF9BQ1RJT04QAhIqCiZCT0FSRF9USU1FUl9SRUpFQ1RJT05fQ09NTUFORF9JRF9SRVVTRRADKqQBChJBZ2VudEFjdGl2aXR5UGhhc2USJAogQUdFTlRfQUNUSVZJVFlfUEhBU0VfVU5TUEVDSUZJRUQQABIiCh5BR0VOVF9BQ1RJVklUWV9QSEFTRV9QUkVQQVJJTkcQARIgChxBR0VOVF9BQ1RJVklUWV9QSEFTRV9XUklUSU5HEAISIgoeQUdFTlRfQUNUSVZJVFlfUEhBU0VfVkVSSUZZSU5HEAMqvwIKFkFnZW50QWN0aXZpdHlSZWplY3Rpb24SKAokQUdFTlRfQUNUSVZJVFlfUkVKRUNUSU9OX1VOU1BFQ0lGSUVEEAASJAogQUdFTlRfQUNUSVZJVFlfUkVKRUNUSU9OX0lOVkFMSUQQARIkCiBBR0VOVF9BQ1RJVklUWV9SRUpFQ1RJT05fT1ZFUkxBUBACEiUKIUFHRU5UX0FDVElWSVRZX1JFSkVDVElPTl9DQVBBQ0lUWRADEiYKIkFHRU5UX0FDVElWSVRZX1JFSkVDVElPTl9OT1RfRk9VTkQQBBIvCitBR0VOVF9BQ1RJVklUWV9SRUpFQ1RJT05fR0VORVJBVElPTl9DSEFOR0VEEAUSLworQUdFTlRfQUNUSVZJVFlfUkVKRUNUSU9OX1dPUktTUEFDRV9SRUxFQVNFRBAGKrsBChZBZ2VudEFjdGl2aXR5RW5kUmVhc29uEikKJUFHRU5UX0FDVElWSVRZX0VORF9SRUFTT05fVU5TUEVDSUZJRUQQABInCiNBR0VOVF9BQ1RJVklUWV9FTkRfUkVBU09OX0NPTVBMRVRFRBABEiYKIkFHRU5UX0FDVElWSVRZX0VORF9SRUFTT05fUkVMRUFTRUQQAhIlCiFBR0VOVF9BQ1RJVklUWV9FTkRfUkVBU09OX0VYUElSRUQQAzKsBQoQQm9hcmRSb29tU2VydmljZRJdCgxHZXRCb2FyZFJvb20SJS5sdW1pbmcuc3R1ZGlvLnYxLkdldEJvYXJkUm9vbVJlcXVlc3QaJi5sdW1pbmcuc3R1ZGlvLnYxLkdldEJvYXJkUm9vbVJlc3BvbnNlEnIKE1VwZGF0ZUJvYXJkUHJlc2VuY2USLC5sdW1pbmcuc3R1ZGlvLnYxLlVwZGF0ZUJvYXJkUHJlc2VuY2VSZXF1ZXN0Gi0ubHVtaW5nLnN0dWRpby52MS5VcGRhdGVCb2FyZFByZXNlbmNlUmVzcG9uc2USbwoSTGVhdmVCb2FyZFByZXNlbmNlEisubHVtaW5nLnN0dWRpby52MS5MZWF2ZUJvYXJkUHJlc2VuY2VSZXF1ZXN0GiwubHVtaW5nLnN0dWRpby52MS5MZWF2ZUJvYXJkUHJlc2VuY2VSZXNwb25zZRJpChBDaGFuZ2VCb2FyZFRpbWVyEikubHVtaW5nLnN0dWRpby52MS5DaGFuZ2VCb2FyZFRpbWVyUmVxdWVzdBoqLmx1bWluZy5zdHVkaW8udjEuQ2hhbmdlQm9hcmRUaW1lclJlc3BvbnNlEnUKFEdldEJvYXJkVGltZXJSZWNlaXB0Ei0ubHVtaW5nLnN0dWRpby52MS5HZXRCb2FyZFRpbWVyUmVjZWlwdFJlcXVlc3QaLi5sdW1pbmcuc3R1ZGlvLnYxLkdldEJvYXJkVGltZXJSZWNlaXB0UmVzcG9uc2UScgoTQ2hhbmdlQWdlbnRBY3Rpdml0eRIsLmx1bWluZy5zdHVkaW8udjEuQ2hhbmdlQWdlbnRBY3Rpdml0eVJlcXVlc3QaLS5sdW1pbmcuc3R1ZGlvLnYxLkNoYW5nZUFnZW50QWN0aXZpdHlSZXNwb25zZWIGcHJvdG8z", [file_luming_studio_v1_whiteboard_scene]);
-var BoardRoomEventSchema = /* @__PURE__ */ messageDesc(file_luming_studio_v1_board_room_service, 15);
+var file_luming_studio_v1_board_room_service = /* @__PURE__ */ fileDesc("CilsdW1pbmcvc3R1ZGlvL3YxL2JvYXJkX3Jvb21fc2VydmljZS5wcm90bxIQbHVtaW5nLnN0dWRpby52MSInChNHZXRCb2FyZFJvb21SZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJIkcKFEdldEJvYXJkUm9vbVJlc3BvbnNlEi8KBWV2ZW50GAEgASgLMiAubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21FdmVudCJPCg9Cb2FyZFJvb21DdXJzb3ISGAoQcm9vbV9pbnN0YW5jZV9pZBgBIAEoCRIVCghzZXF1ZW5jZRgCIAEoBEgAiAEBQgsKCV9zZXF1ZW5jZSJxChpXYWl0Qm9hcmRSb29tRXZlbnRzUmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRIPCgd2aWV3X2lkGAIgASgJEjAKBWFmdGVyGAMgASgLMiEubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21DdXJzb3IiTwobV2FpdEJvYXJkUm9vbUV2ZW50c1Jlc3BvbnNlEjAKBmV2ZW50cxgBIAMoCzIgLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tRXZlbnQicwocU3RyZWFtQm9hcmRSb29tRXZlbnRzUmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRIPCgd2aWV3X2lkGAIgASgJEjAKBWFmdGVyGAMgASgLMiEubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21DdXJzb3IiUAodU3RyZWFtQm9hcmRSb29tRXZlbnRzUmVzcG9uc2USLwoFZXZlbnQYASABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbUV2ZW50ImQKEUJvYXJkUm9vbVZpZXdwb3J0EhAKCGNlbnRlcl94GAEgASgBEhAKCGNlbnRlcl95GAIgASgBEgwKBHpvb20YAyABKAESDQoFd2lkdGgYBCABKAESDgoGaGVpZ2h0GAUgASgBIjwKF0JvYXJkUm9vbVBhcnRpY2lwYW50S2V5EhAKCGFjdG9yX2lkGAEgASgJEg8KB3ZpZXdfaWQYAiABKAkioQEKGEJvYXJkUm9vbUdlc3R1cmVHZW9tZXRyeRIRCglvYmplY3RfaWQYASABKAkSJgoZZXhwZWN0ZWRfZ2VvbWV0cnlfdmVyc2lvbhgCIAEoBEgAiAEBEiwKCGdlb21ldHJ5GAMgASgLMhoubHVtaW5nLnN0dWRpby52MS5HZW9tZXRyeUIcChpfZXhwZWN0ZWRfZ2VvbWV0cnlfdmVyc2lvbiKMAQoXQm9hcmRSb29tR2VzdHVyZVByZXZpZXcSNAoEa2luZBgBIAEoDjImLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tR2VzdHVyZUtpbmQSOwoHY2hhbmdlcxgCIAMoCzIqLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tR2VzdHVyZUdlb21ldHJ5Iv8DChRCb2FyZFJvb21QYXJ0aWNpcGFudBI2CgNrZXkYASABKAsyKS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVBhcnRpY2lwYW50S2V5EhQKDGRpc3BsYXlfbmFtZRgCIAEoCRIMCgRyb2xlGAMgASgJEhUKCHNlcXVlbmNlGAQgASgESACIAQESHwoSZXhwaXJlc19hdF91bml4X21zGAUgASgESAGIAQESJwoGY3Vyc29yGAYgASgLMhcubHVtaW5nLnN0dWRpby52MS5Qb2ludBI1Cgh2aWV3cG9ydBgHIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tVmlld3BvcnQSEQoJZm9sbG93aW5nGAggASgIEjoKB2dlc3R1cmUYCSABKAsyKS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbUdlc3R1cmVQcmV2aWV3EicKGmdlc3R1cmVfZXhwaXJlc19hdF91bml4X21zGAogASgESAKIAQESIAoTYWN0aXZpdHlfYXRfdW5peF9tcxgLIAEoBEgDiAEBQgsKCV9zZXF1ZW5jZUIVChNfZXhwaXJlc19hdF91bml4X21zQh0KG19nZXN0dXJlX2V4cGlyZXNfYXRfdW5peF9tc0IWChRfYWN0aXZpdHlfYXRfdW5peF9tcyKSAgoaVXBkYXRlQm9hcmRQcmVzZW5jZVJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSDwoHdmlld19pZBgCIAEoCRIVCghzZXF1ZW5jZRgDIAEoBEgAiAEBEicKBmN1cnNvchgEIAEoCzIXLmx1bWluZy5zdHVkaW8udjEuUG9pbnQSNQoIdmlld3BvcnQYBSABKAsyIy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVZpZXdwb3J0EhEKCWZvbGxvd2luZxgGIAEoCBI6CgdnZXN0dXJlGAcgASgLMikubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21HZXN0dXJlUHJldmlld0ILCglfc2VxdWVuY2UiLwobVXBkYXRlQm9hcmRQcmVzZW5jZVJlc3BvbnNlEhAKCGFjY2VwdGVkGAEgASgIImIKGUxlYXZlQm9hcmRQcmVzZW5jZVJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSDwoHdmlld19pZBgCIAEoCRIVCghzZXF1ZW5jZRgDIAEoBEgAiAEBQgsKCV9zZXF1ZW5jZSIuChpMZWF2ZUJvYXJkUHJlc2VuY2VSZXNwb25zZRIQCghhY2NlcHRlZBgBIAEoCCKoAwoRQm9hcmRSb29tU25hcHNob3QSEAoIYWN0b3JfaWQYASABKAkSEAoIY2FuX2VkaXQYAiABKAgSGwoOYm9hcmRfcmV2aXNpb24YAyABKARIAIgBARI8CgxwYXJ0aWNpcGFudHMYBCADKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVBhcnRpY2lwYW50Ei8KBXRpbWVyGAUgASgLMiAubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21UaW1lchI+ChBhZ2VudF93b3Jrc3BhY2VzGAYgAygLMiQubHVtaW5nLnN0dWRpby52MS5Sb29tQWdlbnRXb3Jrc3BhY2USIgoaY2FuX3JlbGVhc2VfYWdlbnRfYWN0aXZpdHkYByABKAgSHQoQZmVlZGJhY2tfdmVyc2lvbhgIIAEoBEgBiAEBEiAKE3N1Z2dlc3Rpb25zX3ZlcnNpb24YCSABKARIAogBAUIRCg9fYm9hcmRfcmV2aXNpb25CEwoRX2ZlZWRiYWNrX3ZlcnNpb25CFgoUX3N1Z2dlc3Rpb25zX3ZlcnNpb24ijQEKFUJvYXJkUm9vbVBhcnRpY2lwYW50cxI3Cgd1cHNlcnRzGAEgAygLMiYubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21QYXJ0aWNpcGFudBI7CghyZW1vdmFscxgCIAMoCzIpLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tUGFydGljaXBhbnRLZXki0wEKF0JvYXJkUm9vbUNvbnRlbnRDaGFuZ2VkEhsKDmJvYXJkX3JldmlzaW9uGAEgASgESACIAQESGgoSY2hhbmdlZF9vYmplY3RfaWRzGAIgAygJEhoKEnJlbW92ZWRfb2JqZWN0X2lkcxgDIAMoCRIVCg1yZWZyZXNoX3NjZW5lGAQgASgIEjkKD2NoYW5nZWRfb2JqZWN0cxgFIAMoCzIgLmx1bWluZy5zdHVkaW8udjEuT2JqZWN0TWV0YWRhdGFCEQoPX2JvYXJkX3JldmlzaW9uIhUKE0JvYXJkUm9vbUFjY2Vzc0xvc3QiPgoaQm9hcmRSb29tRGlzY3Vzc2lvbkNoYW5nZWQSFAoHdmVyc2lvbhgBIAEoBEgAiAEBQgoKCF92ZXJzaW9uIrMFCg5Cb2FyZFJvb21FdmVudBIQCghib2FyZF9pZBgBIAEoCRIYChByb29tX2luc3RhbmNlX2lkGAIgASgJEhUKCHNlcXVlbmNlGAMgASgESAGIAQESIAoTc2VydmVyX3RpbWVfdW5peF9tcxgEIAEoBEgCiAEBEjcKCHNuYXBzaG90GAUgASgLMiMubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21TbmFwc2hvdEgAEj8KDHBhcnRpY2lwYW50cxgGIAEoCzInLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tUGFydGljaXBhbnRzSAASMQoFdGltZXIYByABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVRpbWVySAASRAoPY29udGVudF9jaGFuZ2VkGAggASgLMikubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21Db250ZW50Q2hhbmdlZEgAEjwKC2FjY2Vzc19sb3N0GAkgASgLMiUubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21BY2Nlc3NMb3N0SAASRAoQYWdlbnRfd29ya3NwYWNlcxgKIAEoCzIoLmx1bWluZy5zdHVkaW8udjEuUm9vbUFnZW50V29ya3NwYWNlTGlzdEgAEkgKEGZlZWRiYWNrX2NoYW5nZWQYCyABKAsyLC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbURpc2N1c3Npb25DaGFuZ2VkSAASSwoTc3VnZ2VzdGlvbnNfY2hhbmdlZBgMIAEoCzIsLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tRGlzY3Vzc2lvbkNoYW5nZWRIAEIJCgdwYXlsb2FkQgsKCV9zZXF1ZW5jZUIWChRfc2VydmVyX3RpbWVfdW5peF9tcyLHAQoOQm9hcmRSb29tVGltZXISFAoHdmVyc2lvbhgBIAEoBEgAiAEBEjQKBXBoYXNlGAIgASgOMiUubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21UaW1lclBoYXNlEhMKC2R1cmF0aW9uX21zGAMgASgNEh0KEGRlYWRsaW5lX3VuaXhfbXMYBCABKARIAYgBARIUCgxyZW1haW5pbmdfbXMYBSABKA1CCgoIX3ZlcnNpb25CEwoRX2RlYWRsaW5lX3VuaXhfbXMiEgoQQm9hcmRUaW1lckFjdGlvbiKLAwoXQ2hhbmdlQm9hcmRUaW1lclJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCRIdChBleHBlY3RlZF92ZXJzaW9uGAMgASgESAGIAQESMwoFc3RhcnQYBCABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkVGltZXJBY3Rpb25IABIzCgVwYXVzZRgFIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuQm9hcmRUaW1lckFjdGlvbkgAEjQKBnJlc3VtZRgGIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuQm9hcmRUaW1lckFjdGlvbkgAEjMKBXJlc2V0GAcgASgLMiIubHVtaW5nLnN0dWRpby52MS5Cb2FyZFRpbWVyQWN0aW9uSAASGQoPc2V0X2R1cmF0aW9uX21zGAggASgNSAASHAoSYWRqdXN0X2R1cmF0aW9uX21zGAkgASgRSABCCAoGYWN0aW9uQhMKEV9leHBlY3RlZF92ZXJzaW9uIkQKEUJvYXJkVGltZXJBcHBsaWVkEi8KBXRpbWVyGAEgASgLMiAubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21UaW1lciJFChJCb2FyZFRpbWVyQ29uZmxpY3QSLwoFdGltZXIYASABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVRpbWVyIksKEkJvYXJkVGltZXJSZWplY3RlZBI1CgZyZWFzb24YASABKA4yJS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkVGltZXJSZWplY3Rpb24i8AEKEUJvYXJkVGltZXJSZWNlaXB0EhAKCGJvYXJkX2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkSNgoHYXBwbGllZBgDIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQm9hcmRUaW1lckFwcGxpZWRIABI4Cghjb25mbGljdBgEIAEoCzIkLmx1bWluZy5zdHVkaW8udjEuQm9hcmRUaW1lckNvbmZsaWN0SAASOAoIcmVqZWN0ZWQYBSABKAsyJC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkVGltZXJSZWplY3RlZEgAQgkKB291dGNvbWUiigEKGENoYW5nZUJvYXJkVGltZXJSZXNwb25zZRI0CgdyZWNlaXB0GAEgASgLMiMubHVtaW5nLnN0dWRpby52MS5Cb2FyZFRpbWVyUmVjZWlwdBIgChNzZXJ2ZXJfdGltZV91bml4X21zGAIgASgESACIAQFCFgoUX3NlcnZlcl90aW1lX3VuaXhfbXMiQwobR2V0Qm9hcmRUaW1lclJlY2VpcHRSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkijgEKHEdldEJvYXJkVGltZXJSZWNlaXB0UmVzcG9uc2USNAoHcmVjZWlwdBgBIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQm9hcmRUaW1lclJlY2VpcHQSIAoTc2VydmVyX3RpbWVfdW5peF9tcxgCIAEoBEgAiAEBQhYKFF9zZXJ2ZXJfdGltZV91bml4X21zIkoKE0FnZW50QWN0aXZpdHlCb3VuZHMSCQoBeBgBIAEoARIJCgF5GAIgASgBEg0KBXdpZHRoGAMgASgBEg4KBmhlaWdodBgEIAEoASIuChhBZ2VudEFjdGl2aXR5T2JqZWN0U2NvcGUSEgoKb2JqZWN0X2lkcxgBIAMoCSKUAQoSQWdlbnRBY3Rpdml0eVNjb3BlEj0KB29iamVjdHMYASABKAsyKi5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlPYmplY3RTY29wZUgAEjUKBGFyZWEYAiABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlCb3VuZHNIAEIICgZ0YXJnZXQidQoSQWdlbnRBY3Rpdml0eUJlZ2luEjMKBXNjb3BlGAEgASgLMiQubHVtaW5nLnN0dWRpby52MS5BZ2VudEFjdGl2aXR5U2NvcGUSDQoFbGFiZWwYAiABKAkSGwoTcHJldmlvdXNfZ2VuZXJhdGlvbhgDIAEoCSJ5ChNBZ2VudEFjdGl2aXR5VXBkYXRlEhIKCmdlbmVyYXRpb24YASABKAkSMwoFcGhhc2UYAiABKA4yJC5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlQaGFzZRIZChFhY3RpdmVfb2JqZWN0X2lkcxgDIAMoCSImChBBZ2VudEFjdGl2aXR5RW5kEhIKCmdlbmVyYXRpb24YASABKAkiFQoTQWdlbnRBY3Rpdml0eVN0YXR1cyIqChRBZ2VudEFjdGl2aXR5UmVsZWFzZRISCgpnZW5lcmF0aW9uGAEgASgJIvICChpDaGFuZ2VBZ2VudEFjdGl2aXR5UmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRIQCghhZ2VudF9pZBgCIAEoCRIPCgd0YXNrX2lkGAMgASgJEjUKBWJlZ2luGAQgASgLMiQubHVtaW5nLnN0dWRpby52MS5BZ2VudEFjdGl2aXR5QmVnaW5IABI3CgZ1cGRhdGUYBSABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlVcGRhdGVIABIxCgNlbmQYBiABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlFbmRIABI3CgZzdGF0dXMYByABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlTdGF0dXNIABI5CgdyZWxlYXNlGAggASgLMiYubHVtaW5nLnN0dWRpby52MS5BZ2VudEFjdGl2aXR5UmVsZWFzZUgAQggKBmFjdGlvbiJrChZSb29tQWdlbnRXb3Jrc3BhY2VBcmVhEgoKAmlkGAEgASgJEjUKBmJvdW5kcxgCIAEoCzIlLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eUJvdW5kcxIOCgZhY3RpdmUYAyABKAgitQIKElJvb21BZ2VudFdvcmtzcGFjZRIQCghhZ2VudF9pZBgBIAEoCRIPCgd0YXNrX2lkGAIgASgJEhIKCmdlbmVyYXRpb24YAyABKAkSDQoFbGFiZWwYBCABKAkSMwoFcGhhc2UYBSABKA4yJC5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlQaGFzZRI3CgVhcmVhcxgGIAMoCzIoLmx1bWluZy5zdHVkaW8udjEuUm9vbUFnZW50V29ya3NwYWNlQXJlYRIfChJleHBpcmVzX2F0X3VuaXhfbXMYByABKARIAIgBARIzCgVzY29wZRgIIAEoCzIkLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eVNjb3BlQhUKE19leHBpcmVzX2F0X3VuaXhfbXMiUgoWUm9vbUFnZW50V29ya3NwYWNlTGlzdBI4Cgp3b3Jrc3BhY2VzGAEgAygLMiQubHVtaW5nLnN0dWRpby52MS5Sb29tQWdlbnRXb3Jrc3BhY2UiYgoSQWdlbnRBY3Rpdml0eUVuZGVkEhIKCmdlbmVyYXRpb24YASABKAkSOAoGcmVhc29uGAIgASgOMigubHVtaW5nLnN0dWRpby52MS5BZ2VudEFjdGl2aXR5RW5kUmVhc29uItcBChtDaGFuZ2VBZ2VudEFjdGl2aXR5UmVzcG9uc2USOQoJd29ya3NwYWNlGAEgASgLMiQubHVtaW5nLnN0dWRpby52MS5Sb29tQWdlbnRXb3Jrc3BhY2VIABI1CgVlbmRlZBgCIAEoCzIkLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eUVuZGVkSAASPAoIcmVqZWN0ZWQYAyABKA4yKC5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlSZWplY3Rpb25IAEIICgZyZXN1bHQqqQEKFEJvYXJkUm9vbUdlc3R1cmVLaW5kEicKI0JPQVJEX1JPT01fR0VTVFVSRV9LSU5EX1VOU1BFQ0lGSUVEEAASIAocQk9BUkRfUk9PTV9HRVNUVVJFX0tJTkRfTU9WRRABEiIKHkJPQVJEX1JPT01fR0VTVFVSRV9LSU5EX1JFU0laRRACEiIKHkJPQVJEX1JPT01fR0VTVFVSRV9LSU5EX1JPVEFURRADKscBChNCb2FyZFJvb21UaW1lclBoYXNlEiYKIkJPQVJEX1JPT01fVElNRVJfUEhBU0VfVU5TUEVDSUZJRUQQABIfChtCT0FSRF9ST09NX1RJTUVSX1BIQVNFX0lETEUQARIiCh5CT0FSRF9ST09NX1RJTUVSX1BIQVNFX1JVTk5JTkcQAhIhCh1CT0FSRF9ST09NX1RJTUVSX1BIQVNFX1BBVVNFRBADEiAKHEJPQVJEX1JPT01fVElNRVJfUEhBU0VfRU5ERUQQBCq3AQoTQm9hcmRUaW1lclJlamVjdGlvbhIlCiFCT0FSRF9USU1FUl9SRUpFQ1RJT05fVU5TUEVDSUZJRUQQABIjCh9CT0FSRF9USU1FUl9SRUpFQ1RJT05fRk9SQklEREVOEAESKAokQk9BUkRfVElNRVJfUkVKRUNUSU9OX0lOVkFMSURfQUNUSU9OEAISKgomQk9BUkRfVElNRVJfUkVKRUNUSU9OX0NPTU1BTkRfSURfUkVVU0UQAyqkAQoSQWdlbnRBY3Rpdml0eVBoYXNlEiQKIEFHRU5UX0FDVElWSVRZX1BIQVNFX1VOU1BFQ0lGSUVEEAASIgoeQUdFTlRfQUNUSVZJVFlfUEhBU0VfUFJFUEFSSU5HEAESIAocQUdFTlRfQUNUSVZJVFlfUEhBU0VfV1JJVElORxACEiIKHkFHRU5UX0FDVElWSVRZX1BIQVNFX1ZFUklGWUlORxADKr8CChZBZ2VudEFjdGl2aXR5UmVqZWN0aW9uEigKJEFHRU5UX0FDVElWSVRZX1JFSkVDVElPTl9VTlNQRUNJRklFRBAAEiQKIEFHRU5UX0FDVElWSVRZX1JFSkVDVElPTl9JTlZBTElEEAESJAogQUdFTlRfQUNUSVZJVFlfUkVKRUNUSU9OX09WRVJMQVAQAhIlCiFBR0VOVF9BQ1RJVklUWV9SRUpFQ1RJT05fQ0FQQUNJVFkQAxImCiJBR0VOVF9BQ1RJVklUWV9SRUpFQ1RJT05fTk9UX0ZPVU5EEAQSLworQUdFTlRfQUNUSVZJVFlfUkVKRUNUSU9OX0dFTkVSQVRJT05fQ0hBTkdFRBAFEi8KK0FHRU5UX0FDVElWSVRZX1JFSkVDVElPTl9XT1JLU1BBQ0VfUkVMRUFTRUQQBiq7AQoWQWdlbnRBY3Rpdml0eUVuZFJlYXNvbhIpCiVBR0VOVF9BQ1RJVklUWV9FTkRfUkVBU09OX1VOU1BFQ0lGSUVEEAASJwojQUdFTlRfQUNUSVZJVFlfRU5EX1JFQVNPTl9DT01QTEVURUQQARImCiJBR0VOVF9BQ1RJVklUWV9FTkRfUkVBU09OX1JFTEVBU0VEEAISJQohQUdFTlRfQUNUSVZJVFlfRU5EX1JFQVNPTl9FWFBJUkVEEAMynAcKEEJvYXJkUm9vbVNlcnZpY2USXQoMR2V0Qm9hcmRSb29tEiUubHVtaW5nLnN0dWRpby52MS5HZXRCb2FyZFJvb21SZXF1ZXN0GiYubHVtaW5nLnN0dWRpby52MS5HZXRCb2FyZFJvb21SZXNwb25zZRJyChNXYWl0Qm9hcmRSb29tRXZlbnRzEiwubHVtaW5nLnN0dWRpby52MS5XYWl0Qm9hcmRSb29tRXZlbnRzUmVxdWVzdBotLmx1bWluZy5zdHVkaW8udjEuV2FpdEJvYXJkUm9vbUV2ZW50c1Jlc3BvbnNlEnoKFVN0cmVhbUJvYXJkUm9vbUV2ZW50cxIuLmx1bWluZy5zdHVkaW8udjEuU3RyZWFtQm9hcmRSb29tRXZlbnRzUmVxdWVzdBovLmx1bWluZy5zdHVkaW8udjEuU3RyZWFtQm9hcmRSb29tRXZlbnRzUmVzcG9uc2UwARJyChNVcGRhdGVCb2FyZFByZXNlbmNlEiwubHVtaW5nLnN0dWRpby52MS5VcGRhdGVCb2FyZFByZXNlbmNlUmVxdWVzdBotLmx1bWluZy5zdHVkaW8udjEuVXBkYXRlQm9hcmRQcmVzZW5jZVJlc3BvbnNlEm8KEkxlYXZlQm9hcmRQcmVzZW5jZRIrLmx1bWluZy5zdHVkaW8udjEuTGVhdmVCb2FyZFByZXNlbmNlUmVxdWVzdBosLmx1bWluZy5zdHVkaW8udjEuTGVhdmVCb2FyZFByZXNlbmNlUmVzcG9uc2USaQoQQ2hhbmdlQm9hcmRUaW1lchIpLmx1bWluZy5zdHVkaW8udjEuQ2hhbmdlQm9hcmRUaW1lclJlcXVlc3QaKi5sdW1pbmcuc3R1ZGlvLnYxLkNoYW5nZUJvYXJkVGltZXJSZXNwb25zZRJ1ChRHZXRCb2FyZFRpbWVyUmVjZWlwdBItLmx1bWluZy5zdHVkaW8udjEuR2V0Qm9hcmRUaW1lclJlY2VpcHRSZXF1ZXN0Gi4ubHVtaW5nLnN0dWRpby52MS5HZXRCb2FyZFRpbWVyUmVjZWlwdFJlc3BvbnNlEnIKE0NoYW5nZUFnZW50QWN0aXZpdHkSLC5sdW1pbmcuc3R1ZGlvLnYxLkNoYW5nZUFnZW50QWN0aXZpdHlSZXF1ZXN0Gi0ubHVtaW5nLnN0dWRpby52MS5DaGFuZ2VBZ2VudEFjdGl2aXR5UmVzcG9uc2ViBnByb3RvMw", [file_luming_studio_v1_whiteboard_scene]);
+var WaitBoardRoomEventsResponseSchema = /* @__PURE__ */ messageDesc(file_luming_studio_v1_board_room_service, 4);
+var BoardRoomEventSchema = /* @__PURE__ */ messageDesc(file_luming_studio_v1_board_room_service, 21);
 var BoardRoomGestureKindSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_board_room_service, 0);
 var BoardRoomGestureKind = /* @__PURE__ */ tsEnum(BoardRoomGestureKindSchema);
 var BoardRoomTimerPhaseSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_board_room_service, 1);
@@ -18667,7 +19786,7 @@ var AgentActivityEndReason = /* @__PURE__ */ tsEnum(AgentActivityEndReasonSchema
 var BoardRoomService = /* @__PURE__ */ serviceDesc(file_luming_studio_v1_board_room_service, 0);
 
 // ../../packages/contracts/dist/proto/luming/studio/v1/board_sharing_service_pb.js
-var file_luming_studio_v1_board_sharing_service = /* @__PURE__ */ fileDesc("CixsdW1pbmcvc3R1ZGlvL3YxL2JvYXJkX3NoYXJpbmdfc2VydmljZS5wcm90bxIQbHVtaW5nLnN0dWRpby52MSIqChZHZXRCb2FyZFNoYXJpbmdSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJIkoKF0dldEJvYXJkU2hhcmluZ1Jlc3BvbnNlEi8KB3NoYXJpbmcYASABKAsyHi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU2hhcmluZyKCAwoMQm9hcmRTaGFyaW5nEhAKCGJvYXJkX2lkGAEgASgJEg8KB2VuYWJsZWQYAiABKAgSLQoFc2NvcGUYAyABKA4yHi5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdTY29wZRIUCgd2ZXJzaW9uGAQgASgESACIAQESKwoEcm9sZRgFIAEoDjIdLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ1JvbGUSEAoIY2FuX2VkaXQYBiABKAgSEwoLY2FuX2NvbW1lbnQYByABKAgSLAoFbGlua3MYCCADKAsyHS5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdMaW5rEjAKB21lbWJlcnMYCSADKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdNZW1iZXISEgoKbWVtYmVyX3VybBgKIAEoCRIfChJvd25lcl9kaXNwbGF5X25hbWUYCyABKAlIAYgBAUIKCghfdmVyc2lvbkIVChNfb3duZXJfZGlzcGxheV9uYW1lIlgKC1NoYXJpbmdMaW5rEisKBHJvbGUYASABKA4yHS5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdSb2xlEg8KB2VuYWJsZWQYAiABKAgSCwoDdXJsGAMgASgJIp0BCg1TaGFyaW5nTWVtYmVyEhAKCGFjdG9yX2lkGAEgASgJEgwKBG5hbWUYAiABKAkSKwoEcm9sZRgDIAEoDjIdLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ1JvbGUSDwoHcmVtb3ZlZBgEIAEoCBIOCgZhY3RpdmUYBSABKAgSEwoGb25saW5lGAYgASgISACIAQFCCQoHX29ubGluZSKEBQoZVXBkYXRlQm9hcmRTaGFyaW5nUmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJEh0KEGV4cGVjdGVkX3ZlcnNpb24YAyABKARIAYgBARI2CglzZXRfc2NvcGUYBCABKAsyIS5sdW1pbmcuc3R1ZGlvLnYxLlNldFNoYXJpbmdTY29wZUgAEjIKBHN0b3AYBSABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLlN0b3BCb2FyZFNoYXJpbmdIABJACg5zZXRfaW52aXRhdGlvbhgGIAEoCzImLmx1bWluZy5zdHVkaW8udjEuU2V0U2hhcmluZ0ludml0YXRpb25IABJEChByZXNldF9pbnZpdGF0aW9uGAcgASgLMigubHVtaW5nLnN0dWRpby52MS5SZXNldFNoYXJpbmdJbnZpdGF0aW9uSAASRwoSY2hhbmdlX21lbWJlcl9yb2xlGAggASgLMikubHVtaW5nLnN0dWRpby52MS5DaGFuZ2VTaGFyaW5nTWVtYmVyUm9sZUgAEj4KDXJlbW92ZV9tZW1iZXIYCSABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdNZW1iZXJUYXJnZXRIABJDCg5yZXN0b3JlX21lbWJlchgKIAEoCzIpLmx1bWluZy5zdHVkaW8udjEuQ2hhbmdlU2hhcmluZ01lbWJlclJvbGVIABI+Cg1mb3JnZXRfbWVtYmVyGAsgASgLMiUubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nTWVtYmVyVGFyZ2V0SABCCwoJb3BlcmF0aW9uQhMKEV9leHBlY3RlZF92ZXJzaW9uIkAKD1NldFNoYXJpbmdTY29wZRItCgVzY29wZRgBIAEoDjIeLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ1Njb3BlIhIKEFN0b3BCb2FyZFNoYXJpbmciVAoUU2V0U2hhcmluZ0ludml0YXRpb24SKwoEcm9sZRgBIAEoDjIdLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ1JvbGUSDwoHZW5hYmxlZBgCIAEoCCJFChZSZXNldFNoYXJpbmdJbnZpdGF0aW9uEisKBHJvbGUYASABKA4yHS5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdSb2xlIlgKF0NoYW5nZVNoYXJpbmdNZW1iZXJSb2xlEhAKCGFjdG9yX2lkGAEgASgJEisKBHJvbGUYAiABKA4yHS5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdSb2xlIicKE1NoYXJpbmdNZW1iZXJUYXJnZXQSEAoIYWN0b3JfaWQYASABKAkiVgoaVXBkYXRlQm9hcmRTaGFyaW5nUmVzcG9uc2USOAoHcmVjZWlwdBgBIAEoCzInLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ0NvbW1hbmRSZWNlaXB0IkUKHUdldEJvYXJkU2hhcmluZ1JlY2VpcHRSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkiWgoeR2V0Qm9hcmRTaGFyaW5nUmVjZWlwdFJlc3BvbnNlEjgKB3JlY2VpcHQYASABKAsyJy5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdDb21tYW5kUmVjZWlwdCLCAQoVU2hhcmluZ0NvbW1hbmRSZWNlaXB0EhAKCGJvYXJkX2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkSOgoHYXBwbGllZBgDIAEoCzInLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ0NvbW1hbmRBcHBsaWVkSAASPAoIcmVqZWN0ZWQYBCABKAsyKC5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdDb21tYW5kUmVqZWN0ZWRIAEIJCgdvdXRjb21lIjkKFVNoYXJpbmdDb21tYW5kQXBwbGllZBIUCgd2ZXJzaW9uGAEgASgESACIAQFCCgoIX3ZlcnNpb24iUgoWU2hhcmluZ0NvbW1hbmRSZWplY3RlZBI4CgZyZWFzb24YASABKA4yKC5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdSZWplY3Rpb25SZWFzb24iSwodSW5zcGVjdEJvYXJkSW52aXRhdGlvblJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSGAoQaW52aXRhdGlvbl90b2tlbhgCIAEoCSLMAQoeSW5zcGVjdEJvYXJkSW52aXRhdGlvblJlc3BvbnNlEjUKCmludml0YXRpb24YASABKAsyIS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkSW52aXRhdGlvbhI7CglyZWplY3Rpb24YAiABKA4yKC5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdSZWplY3Rpb25SZWFzb24SNgoHc2Vzc2lvbhgDIAEoCzIlLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ0d1ZXN0U2Vzc2lvbiJfCg9Cb2FyZEludml0YXRpb24SEAoIYm9hcmRfaWQYASABKAkSDQoFdGl0bGUYAiABKAkSKwoEcm9sZRgDIAEoDjIdLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ1JvbGUiVgoaSm9pbkJvYXJkSW52aXRhdGlvblJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSGAoQaW52aXRhdGlvbl90b2tlbhgCIAEoCRIMCgRuYW1lGAMgASgJIpIBChtKb2luQm9hcmRJbnZpdGF0aW9uUmVzcG9uc2USNgoHc2Vzc2lvbhgBIAEoCzIlLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ0d1ZXN0U2Vzc2lvbhI7CglyZWplY3Rpb24YAiABKA4yKC5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdSZWplY3Rpb25SZWFzb24ivQEKE1NoYXJpbmdHdWVzdFNlc3Npb24SEAoIYm9hcmRfaWQYASABKAkSEAoIYWN0b3JfaWQYAiABKAkSDAoEbmFtZRgDIAEoCRIrCgRyb2xlGAQgASgOMh0ubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nUm9sZRIUCgd2ZXJzaW9uGAUgASgESACIAQESEAoIY2FuX2VkaXQYBiABKAgSEwoLY2FuX2NvbW1lbnQYByABKAhCCgoIX3ZlcnNpb24qkQEKC1NoYXJpbmdSb2xlEhwKGFNIQVJJTkdfUk9MRV9VTlNQRUNJRklFRBAAEhYKElNIQVJJTkdfUk9MRV9PV05FUhABEhcKE1NIQVJJTkdfUk9MRV9FRElUT1IQAhIaChZTSEFSSU5HX1JPTEVfQ09NTUVOVEVSEAMSFwoTU0hBUklOR19ST0xFX1ZJRVdFUhAEKl0KDFNoYXJpbmdTY29wZRIdChlTSEFSSU5HX1NDT1BFX1VOU1BFQ0lGSUVEEAASFwoTU0hBUklOR19TQ09QRV9MT0NBTBABEhUKEVNIQVJJTkdfU0NPUEVfTEFOEAIq3gMKFlNoYXJpbmdSZWplY3Rpb25SZWFzb24SKAokU0hBUklOR19SRUpFQ1RJT05fUkVBU09OX1VOU1BFQ0lGSUVEEAASJgoiU0hBUklOR19SRUpFQ1RJT05fUkVBU09OX0ZPUkJJRERFThABEiwKKFNIQVJJTkdfUkVKRUNUSU9OX1JFQVNPTl9WRVJTSU9OX0NIQU5HRUQQAhItCilTSEFSSU5HX1JFSkVDVElPTl9SRUFTT05fQ09NTUFORF9JRF9SRVVTRRADEiwKKFNIQVJJTkdfUkVKRUNUSU9OX1JFQVNPTl9JTlZBTElEX0NPTU1BTkQQBBIsCihTSEFSSU5HX1JFSkVDVElPTl9SRUFTT05fTEFOX1VOQVZBSUxBQkxFEAUSMwovU0hBUklOR19SRUpFQ1RJT05fUkVBU09OX0lOVklUQVRJT05fVU5BVkFJTEFCTEUQBhInCiNTSEFSSU5HX1JFSkVDVElPTl9SRUFTT05fTkFNRV9UQUtFThAHEi8KK1NIQVJJTkdfUkVKRUNUSU9OX1JFQVNPTl9NRU1CRVJfVU5BVkFJTEFCTEUQCBIqCiZTSEFSSU5HX1JFSkVDVElPTl9SRUFTT05fUk9MRV9ESVNBQkxFRBAJMtwEChNCb2FyZFNoYXJpbmdTZXJ2aWNlEmYKD0dldEJvYXJkU2hhcmluZxIoLmx1bWluZy5zdHVkaW8udjEuR2V0Qm9hcmRTaGFyaW5nUmVxdWVzdBopLmx1bWluZy5zdHVkaW8udjEuR2V0Qm9hcmRTaGFyaW5nUmVzcG9uc2USbwoSVXBkYXRlQm9hcmRTaGFyaW5nEisubHVtaW5nLnN0dWRpby52MS5VcGRhdGVCb2FyZFNoYXJpbmdSZXF1ZXN0GiwubHVtaW5nLnN0dWRpby52MS5VcGRhdGVCb2FyZFNoYXJpbmdSZXNwb25zZRJ7ChZHZXRCb2FyZFNoYXJpbmdSZWNlaXB0Ei8ubHVtaW5nLnN0dWRpby52MS5HZXRCb2FyZFNoYXJpbmdSZWNlaXB0UmVxdWVzdBowLmx1bWluZy5zdHVkaW8udjEuR2V0Qm9hcmRTaGFyaW5nUmVjZWlwdFJlc3BvbnNlEnsKFkluc3BlY3RCb2FyZEludml0YXRpb24SLy5sdW1pbmcuc3R1ZGlvLnYxLkluc3BlY3RCb2FyZEludml0YXRpb25SZXF1ZXN0GjAubHVtaW5nLnN0dWRpby52MS5JbnNwZWN0Qm9hcmRJbnZpdGF0aW9uUmVzcG9uc2UScgoTSm9pbkJvYXJkSW52aXRhdGlvbhIsLmx1bWluZy5zdHVkaW8udjEuSm9pbkJvYXJkSW52aXRhdGlvblJlcXVlc3QaLS5sdW1pbmcuc3R1ZGlvLnYxLkpvaW5Cb2FyZEludml0YXRpb25SZXNwb25zZWIGcHJvdG8z");
+var file_luming_studio_v1_board_sharing_service = /* @__PURE__ */ fileDesc("CixsdW1pbmcvc3R1ZGlvL3YxL2JvYXJkX3NoYXJpbmdfc2VydmljZS5wcm90bxIQbHVtaW5nLnN0dWRpby52MSIqChZHZXRCb2FyZFNoYXJpbmdSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJIkoKF0dldEJvYXJkU2hhcmluZ1Jlc3BvbnNlEi8KB3NoYXJpbmcYASABKAsyHi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU2hhcmluZyKCAwoMQm9hcmRTaGFyaW5nEhAKCGJvYXJkX2lkGAEgASgJEg8KB2VuYWJsZWQYAiABKAgSLQoFc2NvcGUYAyABKA4yHi5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdTY29wZRIUCgd2ZXJzaW9uGAQgASgESACIAQESKwoEcm9sZRgFIAEoDjIdLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ1JvbGUSEAoIY2FuX2VkaXQYBiABKAgSEwoLY2FuX2NvbW1lbnQYByABKAgSLAoFbGlua3MYCCADKAsyHS5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdMaW5rEjAKB21lbWJlcnMYCSADKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdNZW1iZXISEgoKbWVtYmVyX3VybBgKIAEoCRIfChJvd25lcl9kaXNwbGF5X25hbWUYCyABKAlIAYgBAUIKCghfdmVyc2lvbkIVChNfb3duZXJfZGlzcGxheV9uYW1lIlgKC1NoYXJpbmdMaW5rEisKBHJvbGUYASABKA4yHS5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdSb2xlEg8KB2VuYWJsZWQYAiABKAgSCwoDdXJsGAMgASgJItcBCg1TaGFyaW5nTWVtYmVyEhAKCGFjdG9yX2lkGAEgASgJEgwKBG5hbWUYAiABKAkSKwoEcm9sZRgDIAEoDjIdLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ1JvbGUSDwoHcmVtb3ZlZBgEIAEoCBIOCgZhY3RpdmUYBSABKAgSEwoGb25saW5lGAYgASgISACIAQESIAoTbGFzdF9zZWVuX2F0X21pbGxpcxgHIAEoBEgBiAEBQgkKB19vbmxpbmVCFgoUX2xhc3Rfc2Vlbl9hdF9taWxsaXMihAUKGVVwZGF0ZUJvYXJkU2hhcmluZ1JlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCRIdChBleHBlY3RlZF92ZXJzaW9uGAMgASgESAGIAQESNgoJc2V0X3Njb3BlGAQgASgLMiEubHVtaW5nLnN0dWRpby52MS5TZXRTaGFyaW5nU2NvcGVIABIyCgRzdG9wGAUgASgLMiIubHVtaW5nLnN0dWRpby52MS5TdG9wQm9hcmRTaGFyaW5nSAASQAoOc2V0X2ludml0YXRpb24YBiABKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLlNldFNoYXJpbmdJbnZpdGF0aW9uSAASRAoQcmVzZXRfaW52aXRhdGlvbhgHIAEoCzIoLmx1bWluZy5zdHVkaW8udjEuUmVzZXRTaGFyaW5nSW52aXRhdGlvbkgAEkcKEmNoYW5nZV9tZW1iZXJfcm9sZRgIIAEoCzIpLmx1bWluZy5zdHVkaW8udjEuQ2hhbmdlU2hhcmluZ01lbWJlclJvbGVIABI+Cg1yZW1vdmVfbWVtYmVyGAkgASgLMiUubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nTWVtYmVyVGFyZ2V0SAASQwoOcmVzdG9yZV9tZW1iZXIYCiABKAsyKS5sdW1pbmcuc3R1ZGlvLnYxLkNoYW5nZVNoYXJpbmdNZW1iZXJSb2xlSAASPgoNZm9yZ2V0X21lbWJlchgLIAEoCzIlLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ01lbWJlclRhcmdldEgAQgsKCW9wZXJhdGlvbkITChFfZXhwZWN0ZWRfdmVyc2lvbiJACg9TZXRTaGFyaW5nU2NvcGUSLQoFc2NvcGUYASABKA4yHi5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdTY29wZSISChBTdG9wQm9hcmRTaGFyaW5nIlQKFFNldFNoYXJpbmdJbnZpdGF0aW9uEisKBHJvbGUYASABKA4yHS5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdSb2xlEg8KB2VuYWJsZWQYAiABKAgiRQoWUmVzZXRTaGFyaW5nSW52aXRhdGlvbhIrCgRyb2xlGAEgASgOMh0ubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nUm9sZSJYChdDaGFuZ2VTaGFyaW5nTWVtYmVyUm9sZRIQCghhY3Rvcl9pZBgBIAEoCRIrCgRyb2xlGAIgASgOMh0ubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nUm9sZSInChNTaGFyaW5nTWVtYmVyVGFyZ2V0EhAKCGFjdG9yX2lkGAEgASgJIlYKGlVwZGF0ZUJvYXJkU2hhcmluZ1Jlc3BvbnNlEjgKB3JlY2VpcHQYASABKAsyJy5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdDb21tYW5kUmVjZWlwdCJFCh1HZXRCb2FyZFNoYXJpbmdSZWNlaXB0UmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJIloKHkdldEJvYXJkU2hhcmluZ1JlY2VpcHRSZXNwb25zZRI4CgdyZWNlaXB0GAEgASgLMicubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nQ29tbWFuZFJlY2VpcHQiwgEKFVNoYXJpbmdDb21tYW5kUmVjZWlwdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJEjoKB2FwcGxpZWQYAyABKAsyJy5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdDb21tYW5kQXBwbGllZEgAEjwKCHJlamVjdGVkGAQgASgLMigubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nQ29tbWFuZFJlamVjdGVkSABCCQoHb3V0Y29tZSI5ChVTaGFyaW5nQ29tbWFuZEFwcGxpZWQSFAoHdmVyc2lvbhgBIAEoBEgAiAEBQgoKCF92ZXJzaW9uIlIKFlNoYXJpbmdDb21tYW5kUmVqZWN0ZWQSOAoGcmVhc29uGAEgASgOMigubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nUmVqZWN0aW9uUmVhc29uIksKHUluc3BlY3RCb2FyZEludml0YXRpb25SZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhgKEGludml0YXRpb25fdG9rZW4YAiABKAkizAEKHkluc3BlY3RCb2FyZEludml0YXRpb25SZXNwb25zZRI1CgppbnZpdGF0aW9uGAEgASgLMiEubHVtaW5nLnN0dWRpby52MS5Cb2FyZEludml0YXRpb24SOwoJcmVqZWN0aW9uGAIgASgOMigubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nUmVqZWN0aW9uUmVhc29uEjYKB3Nlc3Npb24YAyABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdHdWVzdFNlc3Npb24iXwoPQm9hcmRJbnZpdGF0aW9uEhAKCGJvYXJkX2lkGAEgASgJEg0KBXRpdGxlGAIgASgJEisKBHJvbGUYAyABKA4yHS5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdSb2xlIlYKGkpvaW5Cb2FyZEludml0YXRpb25SZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhgKEGludml0YXRpb25fdG9rZW4YAiABKAkSDAoEbmFtZRgDIAEoCSKSAQobSm9pbkJvYXJkSW52aXRhdGlvblJlc3BvbnNlEjYKB3Nlc3Npb24YASABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdHdWVzdFNlc3Npb24SOwoJcmVqZWN0aW9uGAIgASgOMigubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nUmVqZWN0aW9uUmVhc29uIr0BChNTaGFyaW5nR3Vlc3RTZXNzaW9uEhAKCGJvYXJkX2lkGAEgASgJEhAKCGFjdG9yX2lkGAIgASgJEgwKBG5hbWUYAyABKAkSKwoEcm9sZRgEIAEoDjIdLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ1JvbGUSFAoHdmVyc2lvbhgFIAEoBEgAiAEBEhAKCGNhbl9lZGl0GAYgASgIEhMKC2Nhbl9jb21tZW50GAcgASgIQgoKCF92ZXJzaW9uKpEBCgtTaGFyaW5nUm9sZRIcChhTSEFSSU5HX1JPTEVfVU5TUEVDSUZJRUQQABIWChJTSEFSSU5HX1JPTEVfT1dORVIQARIXChNTSEFSSU5HX1JPTEVfRURJVE9SEAISGgoWU0hBUklOR19ST0xFX0NPTU1FTlRFUhADEhcKE1NIQVJJTkdfUk9MRV9WSUVXRVIQBCpdCgxTaGFyaW5nU2NvcGUSHQoZU0hBUklOR19TQ09QRV9VTlNQRUNJRklFRBAAEhcKE1NIQVJJTkdfU0NPUEVfTE9DQUwQARIVChFTSEFSSU5HX1NDT1BFX0xBThACKt4DChZTaGFyaW5nUmVqZWN0aW9uUmVhc29uEigKJFNIQVJJTkdfUkVKRUNUSU9OX1JFQVNPTl9VTlNQRUNJRklFRBAAEiYKIlNIQVJJTkdfUkVKRUNUSU9OX1JFQVNPTl9GT1JCSURERU4QARIsCihTSEFSSU5HX1JFSkVDVElPTl9SRUFTT05fVkVSU0lPTl9DSEFOR0VEEAISLQopU0hBUklOR19SRUpFQ1RJT05fUkVBU09OX0NPTU1BTkRfSURfUkVVU0UQAxIsCihTSEFSSU5HX1JFSkVDVElPTl9SRUFTT05fSU5WQUxJRF9DT01NQU5EEAQSLAooU0hBUklOR19SRUpFQ1RJT05fUkVBU09OX0xBTl9VTkFWQUlMQUJMRRAFEjMKL1NIQVJJTkdfUkVKRUNUSU9OX1JFQVNPTl9JTlZJVEFUSU9OX1VOQVZBSUxBQkxFEAYSJwojU0hBUklOR19SRUpFQ1RJT05fUkVBU09OX05BTUVfVEFLRU4QBxIvCitTSEFSSU5HX1JFSkVDVElPTl9SRUFTT05fTUVNQkVSX1VOQVZBSUxBQkxFEAgSKgomU0hBUklOR19SRUpFQ1RJT05fUkVBU09OX1JPTEVfRElTQUJMRUQQCTLcBAoTQm9hcmRTaGFyaW5nU2VydmljZRJmCg9HZXRCb2FyZFNoYXJpbmcSKC5sdW1pbmcuc3R1ZGlvLnYxLkdldEJvYXJkU2hhcmluZ1JlcXVlc3QaKS5sdW1pbmcuc3R1ZGlvLnYxLkdldEJvYXJkU2hhcmluZ1Jlc3BvbnNlEm8KElVwZGF0ZUJvYXJkU2hhcmluZxIrLmx1bWluZy5zdHVkaW8udjEuVXBkYXRlQm9hcmRTaGFyaW5nUmVxdWVzdBosLmx1bWluZy5zdHVkaW8udjEuVXBkYXRlQm9hcmRTaGFyaW5nUmVzcG9uc2USewoWR2V0Qm9hcmRTaGFyaW5nUmVjZWlwdBIvLmx1bWluZy5zdHVkaW8udjEuR2V0Qm9hcmRTaGFyaW5nUmVjZWlwdFJlcXVlc3QaMC5sdW1pbmcuc3R1ZGlvLnYxLkdldEJvYXJkU2hhcmluZ1JlY2VpcHRSZXNwb25zZRJ7ChZJbnNwZWN0Qm9hcmRJbnZpdGF0aW9uEi8ubHVtaW5nLnN0dWRpby52MS5JbnNwZWN0Qm9hcmRJbnZpdGF0aW9uUmVxdWVzdBowLmx1bWluZy5zdHVkaW8udjEuSW5zcGVjdEJvYXJkSW52aXRhdGlvblJlc3BvbnNlEnIKE0pvaW5Cb2FyZEludml0YXRpb24SLC5sdW1pbmcuc3R1ZGlvLnYxLkpvaW5Cb2FyZEludml0YXRpb25SZXF1ZXN0Gi0ubHVtaW5nLnN0dWRpby52MS5Kb2luQm9hcmRJbnZpdGF0aW9uUmVzcG9uc2ViBnByb3RvMw");
 var SharingRoleSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_board_sharing_service, 0);
 var SharingRole = /* @__PURE__ */ tsEnum(SharingRoleSchema);
 var SharingScopeSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_board_sharing_service, 1);
@@ -18819,14 +19938,14 @@ var rejections3 = {
 var encodedFrames = /* @__PURE__ */ new WeakMap();
 var maximumFrameCharacters = 128 * 1024;
 function timerWire({
-  version,
+  version: version2,
   phase,
   durationMs,
   deadlineUnixMs,
   remainingMs
 }) {
   return {
-    version,
+    version: version2,
     phase: phases3[phase],
     durationMs,
     deadlineUnixMs: deadlineUnixMs === void 0 ? void 0 : BigInt(deadlineUnixMs),
@@ -18840,6 +19959,7 @@ var gestureKinds = {
 };
 function participantWire({
   expiresAtUnixMs,
+  activityAtUnixMs,
   gesture,
   gestureExpiresAtUnixMs,
   ...participant
@@ -18847,6 +19967,7 @@ function participantWire({
   return {
     ...participant,
     expiresAtUnixMs: BigInt(expiresAtUnixMs),
+    activityAtUnixMs: activityAtUnixMs === void 0 ? void 0 : BigInt(activityAtUnixMs),
     gesture: gesture && { kind: gestureKinds[gesture.kind], changes: [...gesture.changes] },
     gestureExpiresAtUnixMs: gestureExpiresAtUnixMs === void 0 ? void 0 : BigInt(gestureExpiresAtUnixMs)
   };
@@ -18861,7 +19982,9 @@ function payloadWire(payload) {
         participants,
         timer,
         agentWorkspaces,
-        canReleaseAgentActivity
+        canReleaseAgentActivity,
+        feedbackVersion,
+        suggestionsVersion
       } = payload.snapshot;
       return {
         case: "snapshot",
@@ -18872,7 +19995,9 @@ function payloadWire(payload) {
           participants: participants.map(participantWire),
           timer: timerWire(timer),
           agentWorkspaces: agentWorkspaces.map(agentWorkspaceWire),
-          canReleaseAgentActivity
+          canReleaseAgentActivity,
+          feedbackVersion,
+          suggestionsVersion
         }
       };
     }
@@ -18891,12 +20016,12 @@ function payloadWire(payload) {
         value: { workspaces: payload.workspaces.map(agentWorkspaceWire) }
       };
     case "contentChanged": {
-      const { boardRevision, changedObjectIds, removedObjectIds, changedObjects, refreshScene } = payload.change;
+      const { boardRevision, changedObjectIds: changedObjectIds2, removedObjectIds, changedObjects, refreshScene } = payload.change;
       return {
         case: "contentChanged",
         value: {
           boardRevision,
-          changedObjectIds: [...changedObjectIds ?? []],
+          changedObjectIds: [...changedObjectIds2 ?? []],
           removedObjectIds: [...removedObjectIds ?? []],
           changedObjects: changedObjects?.map((object3) => fromBinary(ObjectMetadataSchema, object3)),
           refreshScene
@@ -18905,6 +20030,10 @@ function payloadWire(payload) {
     }
     case "accessLost":
       return { case: "accessLost", value: {} };
+    case "feedbackChanged":
+      return { case: "feedbackChanged", value: { version: payload.version } };
+    case "suggestionsChanged":
+      return { case: "suggestionsChanged", value: { version: payload.version } };
   }
 }
 function eventWire(event) {
@@ -19397,6 +20526,7 @@ function writeSharing(sharing, options) {
     links: sharing.links.map((link) => ({ ...link, role: wireRoles[link.role] })),
     members: sharing.members.map((member) => ({
       ...member,
+      lastSeenAtMillis: member.lastSeenAtMillis === void 0 ? void 0 : BigInt(member.lastSeenAtMillis),
       role: wireRoles[member.role],
       online: online && member.active && online.has(member.actorId)
     })),
@@ -19462,41 +20592,42 @@ function createSharingRoutes(options) {
 var cookieName = "luming-studio-ii-guest";
 var cookieLifetimeSeconds = 31536e3;
 var invitationBodyLimit = 16 * 1024;
-function path(method2) {
-  return "/" + method2.parent.typeName + "/" + method2.name;
+function path2(method4) {
+  return "/" + method4.parent.typeName + "/" + method4.name;
 }
 var paths = /* @__PURE__ */ new Map([
-  [path(WhiteboardService.method.getBoardScene), "read"],
-  [path(WhiteboardService.method.getObjectPayloads), "read"],
-  [path(WhiteboardService.method.exportBoard), "read"],
-  [path(WhiteboardService.method.moveObjects), "edit"],
-  [path(WhiteboardService.method.getCommandReceipt), "edit"],
-  [path(BoardEditService.method.editBoardGeometry), "edit"],
-  [path(BoardEditService.method.editObjectContent), "edit"],
-  [path(BoardEditService.method.attachBoardImage), "edit"],
-  [path(BoardEditService.method.attachBoardVideo), "edit"],
-  [path(BoardEditService.method.uploadBoardDocumentImage), "edit"],
-  [path(BoardEditService.method.reverseBoardEdit), "edit"],
-  [path(BoardEditService.method.getBoardEditReceipt), "edit"],
-  [path(BoardHistoryService.method.listBoardVersions), "read"],
-  [path(BoardHistoryService.method.getBoardVersionScene), "read"],
-  [path(BoardHistoryService.method.getBoardVersionPayloads), "read"],
-  [path(BoardHistoryService.method.exportBoardVersion), "read"],
-  [path(BoardHistoryService.method.restoreBoardVersion), "edit"],
-  [path(FeedbackService.method.listThreads), "read"],
-  [path(FeedbackService.method.getThread), "read"],
-  [path(FeedbackService.method.applyFeedback), "comment"],
-  [path(FeedbackService.method.getFeedbackReceipt), "comment"],
-  [path(BoardSharingService.method.getBoardSharing), "read"],
-  [path(BoardRoomService.method.getBoardRoom), "read"],
-  [path(BoardRoomService.method.updateBoardPresence), "read"],
-  [path(BoardRoomService.method.leaveBoardPresence), "read"],
-  [path(BoardRoomService.method.changeBoardTimer), "edit"],
-  [path(BoardRoomService.method.getBoardTimerReceipt), "edit"]
+  [path2(WhiteboardService.method.getBoardScene), "read"],
+  [path2(WhiteboardService.method.getObjectPayloads), "read"],
+  [path2(WhiteboardService.method.exportBoard), "read"],
+  [path2(WhiteboardService.method.moveObjects), "edit"],
+  [path2(WhiteboardService.method.getCommandReceipt), "edit"],
+  [path2(BoardEditService.method.editBoardGeometry), "edit"],
+  [path2(BoardEditService.method.editObjectContent), "edit"],
+  [path2(BoardEditService.method.attachBoardImage), "edit"],
+  [path2(BoardEditService.method.attachBoardVideo), "edit"],
+  [path2(BoardEditService.method.uploadBoardDocumentImage), "edit"],
+  [path2(BoardEditService.method.reverseBoardEdit), "edit"],
+  [path2(BoardEditService.method.getBoardEditReceipt), "edit"],
+  [path2(BoardHistoryService.method.listBoardVersions), "read"],
+  [path2(BoardHistoryService.method.getBoardVersionScene), "read"],
+  [path2(BoardHistoryService.method.getBoardVersionPayloads), "read"],
+  [path2(BoardHistoryService.method.exportBoardVersion), "read"],
+  [path2(BoardHistoryService.method.restoreBoardVersion), "edit"],
+  [path2(FeedbackService.method.listThreads), "read"],
+  [path2(FeedbackService.method.getThread), "read"],
+  [path2(FeedbackService.method.applyFeedback), "comment"],
+  [path2(FeedbackService.method.getFeedbackReceipt), "comment"],
+  [path2(BoardSharingService.method.getBoardSharing), "read"],
+  [path2(BoardRoomService.method.getBoardRoom), "read"],
+  [path2(BoardRoomService.method.streamBoardRoomEvents), "read"],
+  [path2(BoardRoomService.method.updateBoardPresence), "read"],
+  [path2(BoardRoomService.method.leaveBoardPresence), "read"],
+  [path2(BoardRoomService.method.changeBoardTimer), "edit"],
+  [path2(BoardRoomService.method.getBoardTimerReceipt), "edit"]
 ]);
 var { inspectBoardInvitation, joinBoardInvitation } = BoardSharingService.method;
-var inspectPath = path(inspectBoardInvitation);
-var joinPath = path(joinBoardInvitation);
+var inspectPath = path2(inspectBoardInvitation);
+var joinPath = path2(joinBoardInvitation);
 function isGuestInvitationPath(value) {
   return value === inspectPath || value === joinPath;
 }
@@ -19668,6 +20799,3192 @@ function observeRoomChange(rooms, reportError) {
   return rooms ? publish : void 0;
 }
 
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/code.js
+var Code;
+(function(Code2) {
+  Code2[Code2["Canceled"] = 1] = "Canceled";
+  Code2[Code2["Unknown"] = 2] = "Unknown";
+  Code2[Code2["InvalidArgument"] = 3] = "InvalidArgument";
+  Code2[Code2["DeadlineExceeded"] = 4] = "DeadlineExceeded";
+  Code2[Code2["NotFound"] = 5] = "NotFound";
+  Code2[Code2["AlreadyExists"] = 6] = "AlreadyExists";
+  Code2[Code2["PermissionDenied"] = 7] = "PermissionDenied";
+  Code2[Code2["ResourceExhausted"] = 8] = "ResourceExhausted";
+  Code2[Code2["FailedPrecondition"] = 9] = "FailedPrecondition";
+  Code2[Code2["Aborted"] = 10] = "Aborted";
+  Code2[Code2["OutOfRange"] = 11] = "OutOfRange";
+  Code2[Code2["Unimplemented"] = 12] = "Unimplemented";
+  Code2[Code2["Internal"] = 13] = "Internal";
+  Code2[Code2["Unavailable"] = 14] = "Unavailable";
+  Code2[Code2["DataLoss"] = 15] = "DataLoss";
+  Code2[Code2["Unauthenticated"] = 16] = "Unauthenticated";
+})(Code || (Code = {}));
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/protocol-connect/code-string.js
+function codeToString(value) {
+  const name = Code[value];
+  if (typeof name != "string") {
+    return value.toString();
+  }
+  return name[0].toLowerCase() + name.substring(1).replace(/[A-Z]/g, (c) => "_" + c.toLowerCase());
+}
+var stringToCode;
+function codeFromString(value) {
+  if (!stringToCode) {
+    stringToCode = {};
+    for (const value2 of Object.values(Code)) {
+      if (typeof value2 == "string") {
+        continue;
+      }
+      stringToCode[codeToString(value2)] = value2;
+    }
+  }
+  return stringToCode[value];
+}
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/connect-error.js
+var ConnectError = class _ConnectError extends Error {
+  /**
+   * Create a new ConnectError.
+   * If no code is provided, code "unknown" is used.
+   * Outgoing details are only relevant for the server side - a service may
+   * raise an error with details, and it is up to the protocol implementation
+   * to encode and send the details along with the error.
+   */
+  constructor(message, code = Code.Unknown, metadata, outgoingDetails, cause) {
+    super(createMessage(message, code));
+    this.name = "ConnectError";
+    this.isWireError = false;
+    Object.setPrototypeOf(this, new.target.prototype);
+    this.rawMessage = message;
+    this.code = code;
+    this.metadata = new Headers(metadata !== null && metadata !== void 0 ? metadata : {});
+    this.details = outgoingDetails !== null && outgoingDetails !== void 0 ? outgoingDetails : [];
+    this.cause = cause;
+  }
+  /**
+   * Convert any value - typically a caught error into a ConnectError,
+   * following these rules:
+   * - If the value is already a ConnectError, return it as is.
+   * - If the value is an AbortError or TimeoutError from the fetch API, return
+   *   the message of the error with code Canceled.
+   * - For other Errors, return the error message with code Unknown by default.
+   * - For other values, return the values String representation as a message,
+   *   with the code Unknown by default.
+   * The original value will be used for the "cause" property for the new
+   * ConnectError.
+   */
+  static from(reason, code = Code.Unknown) {
+    if (reason instanceof _ConnectError) {
+      return reason;
+    }
+    if (reason instanceof Error) {
+      if (reason.name == "AbortError" || reason.name == "TimeoutError") {
+        return new _ConnectError(reason.message, Code.Canceled);
+      }
+      return new _ConnectError(reason.message, code, void 0, void 0, reason);
+    }
+    return new _ConnectError(String(reason), code, void 0, void 0, reason);
+  }
+  static [Symbol.hasInstance](v) {
+    if (!(v instanceof Error)) {
+      return false;
+    }
+    if (Object.getPrototypeOf(v) === _ConnectError.prototype) {
+      return true;
+    }
+    return v.name === "ConnectError" && "code" in v && typeof v.code === "number" && "metadata" in v && "details" in v && Array.isArray(v.details) && "rawMessage" in v && typeof v.rawMessage == "string" && "cause" in v;
+  }
+  findDetails(typeOrRegistry) {
+    const registry = typeOrRegistry.kind === "message" ? {
+      getMessage: (typeName) => typeName === typeOrRegistry.typeName ? typeOrRegistry : void 0
+    } : typeOrRegistry;
+    const details = [];
+    for (const data of this.details) {
+      if ("desc" in data) {
+        if (registry.getMessage(data.desc.typeName)) {
+          details.push(create(data.desc, data.value));
+        }
+        continue;
+      }
+      const desc = registry.getMessage(data.type);
+      if (desc) {
+        try {
+          details.push(fromBinary(desc, data.value));
+        } catch (_) {
+        }
+      }
+    }
+    return details;
+  }
+};
+function createMessage(message, code) {
+  return message.length ? `[${codeToString(code)}] ${message}` : `[${codeToString(code)}]`;
+}
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/http-headers.js
+function encodeBinaryHeader(value, desc) {
+  let bytes;
+  if (desc !== void 0) {
+    bytes = toBinary(desc, value);
+  } else if (typeof value == "string") {
+    bytes = new TextEncoder().encode(value);
+  } else {
+    bytes = value instanceof Uint8Array ? value : new Uint8Array(value);
+  }
+  return base64Encode(bytes, "std_raw");
+}
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/protocol/compression.js
+var compressedFlag = 1;
+function compressionNegotiate(available, requested, accepted, headerNameAcceptEncoding) {
+  let request = null;
+  let response = null;
+  let error = void 0;
+  if (requested !== null && requested !== "identity") {
+    const found = available.find((c) => c.name === requested);
+    if (found) {
+      request = found;
+    } else {
+      const acceptable = available.map((c) => c.name).join(",");
+      error = new ConnectError(`unknown compression "${requested}": supported encodings are ${acceptable}`, Code.Unimplemented, {
+        [headerNameAcceptEncoding]: acceptable
+      });
+    }
+  }
+  if (accepted === null || accepted === "") {
+    response = request;
+  } else {
+    const acceptNames = accepted.split(",").map((n) => n.trim());
+    for (const name of acceptNames) {
+      const found = available.find((c) => c.name === name);
+      if (found) {
+        response = found;
+        break;
+      }
+    }
+  }
+  return { request, response, error };
+}
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/protocol/limit-io.js
+var maxReadMaxBytes = 4294967295;
+var maxWriteMaxBytes = maxReadMaxBytes;
+var defaultCompressMinBytes = 1024;
+function validateReadWriteMaxBytes(readMaxBytes, writeMaxBytes, compressMinBytes) {
+  writeMaxBytes !== null && writeMaxBytes !== void 0 ? writeMaxBytes : writeMaxBytes = maxWriteMaxBytes;
+  readMaxBytes !== null && readMaxBytes !== void 0 ? readMaxBytes : readMaxBytes = maxReadMaxBytes;
+  compressMinBytes !== null && compressMinBytes !== void 0 ? compressMinBytes : compressMinBytes = defaultCompressMinBytes;
+  if (writeMaxBytes < 1 || writeMaxBytes > maxWriteMaxBytes) {
+    throw new ConnectError(`writeMaxBytes ${writeMaxBytes} must be >= 1 and <= ${maxWriteMaxBytes}`, Code.Internal);
+  }
+  if (readMaxBytes < 1 || readMaxBytes > maxReadMaxBytes) {
+    throw new ConnectError(`readMaxBytes ${readMaxBytes} must be >= 1 and <= ${maxReadMaxBytes}`, Code.Internal);
+  }
+  return {
+    readMaxBytes,
+    writeMaxBytes,
+    compressMinBytes
+  };
+}
+function assertWriteMaxBytes(writeMaxBytes, bytesWritten) {
+  if (bytesWritten > writeMaxBytes) {
+    throw new ConnectError(`message size ${bytesWritten} is larger than configured writeMaxBytes ${writeMaxBytes}`, Code.ResourceExhausted);
+  }
+}
+function assertReadMaxBytes(readMaxBytes, bytesRead, totalSizeKnown = false) {
+  if (bytesRead > readMaxBytes) {
+    let message = `message size is larger than configured readMaxBytes ${readMaxBytes}`;
+    if (totalSizeKnown) {
+      message = `message size ${bytesRead} is larger than configured readMaxBytes ${readMaxBytes}`;
+    }
+    throw new ConnectError(message, Code.ResourceExhausted);
+  }
+}
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/protocol/envelope.js
+function createEnvelopeDecoder(readMaxBytes) {
+  return new EnvelopeDecoderImpl(readMaxBytes);
+}
+var EnvelopeDecoderImpl = class {
+  constructor(readMaxBytes) {
+    this.readMaxBytes = readMaxBytes;
+    this.header = new Uint8Array(5);
+    this.headerView = new DataView(this.header.buffer);
+    this.buf = [];
+  }
+  get byteLength() {
+    return this.buf.reduce((a, b) => a + b.byteLength, 0);
+  }
+  decode(chunk) {
+    this.buf.push(chunk);
+    const envs = [];
+    for (; ; ) {
+      let env = this.pop();
+      if (!env) {
+        break;
+      }
+      envs.push(env);
+    }
+    return envs;
+  }
+  // consume an enveloped message
+  pop() {
+    if (!this.env) {
+      this.env = this.head();
+      if (!this.env) {
+        return void 0;
+      }
+    }
+    if (this.cons(this.env.data)) {
+      const env = this.env;
+      this.env = void 0;
+      return env;
+    }
+    return void 0;
+  }
+  // consume header
+  head() {
+    if (!this.cons(this.header)) {
+      return void 0;
+    }
+    const flags = this.headerView.getUint8(0);
+    const length = this.headerView.getUint32(1);
+    assertReadMaxBytes(this.readMaxBytes, length, true);
+    return {
+      flags,
+      data: new Uint8Array(length)
+    };
+  }
+  // consume from buffer, fill target
+  cons(target2) {
+    const wantLength = target2.byteLength;
+    if (this.byteLength < wantLength) {
+      return false;
+    }
+    let offset = 0;
+    while (offset < wantLength) {
+      const chunk = this.buf.shift();
+      if (chunk.byteLength > wantLength - offset) {
+        target2.set(chunk.subarray(0, wantLength - offset), offset);
+        this.buf.unshift(chunk.subarray(wantLength - offset));
+        offset += wantLength - offset;
+      } else {
+        target2.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+    }
+    return true;
+  }
+};
+async function envelopeCompress(envelope, compression, compressMinBytes) {
+  let { flags, data } = envelope;
+  if ((flags & compressedFlag) === compressedFlag) {
+    throw new ConnectError("invalid envelope, already compressed", Code.Internal);
+  }
+  if (compression && data.byteLength >= compressMinBytes) {
+    data = await compression.compress(data);
+    flags = flags | compressedFlag;
+  }
+  return { data, flags };
+}
+async function envelopeDecompress(envelope, compression, readMaxBytes) {
+  let { flags, data } = envelope;
+  if ((flags & compressedFlag) === compressedFlag) {
+    if (!compression) {
+      throw new ConnectError("received compressed envelope, but do not know how to decompress", Code.Internal);
+    }
+    data = await compression.decompress(data, readMaxBytes);
+    flags = flags ^ compressedFlag;
+  }
+  return { data, flags };
+}
+function encodeEnvelope(flags, data) {
+  const bytes = new Uint8Array(data.length + 5);
+  bytes.set(data, 5);
+  const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  v.setUint8(0, flags);
+  v.setUint32(1, data.length);
+  return bytes;
+}
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/protocol/async-iterable.js
+var __asyncValues = function(o) {
+  if (!Symbol.asyncIterator) throw new TypeError("Symbol.asyncIterator is not defined.");
+  var m = o[Symbol.asyncIterator], i;
+  return m ? m.call(o) : (o = typeof __values === "function" ? __values(o) : o[Symbol.iterator](), i = {}, verb("next"), verb("throw"), verb("return"), i[Symbol.asyncIterator] = function() {
+    return this;
+  }, i);
+  function verb(n) {
+    i[n] = o[n] && function(v) {
+      return new Promise(function(resolve, reject2) {
+        v = o[n](v), settle(resolve, reject2, v.done, v.value);
+      });
+    };
+  }
+  function settle(resolve, reject2, d, v) {
+    Promise.resolve(v).then(function(v2) {
+      resolve({ value: v2, done: d });
+    }, reject2);
+  }
+};
+var __await = function(v) {
+  return this instanceof __await ? (this.v = v, this) : new __await(v);
+};
+var __asyncGenerator = function(thisArg, _arguments, generator) {
+  if (!Symbol.asyncIterator) throw new TypeError("Symbol.asyncIterator is not defined.");
+  var g = generator.apply(thisArg, _arguments || []), i, q = [];
+  return i = Object.create((typeof AsyncIterator === "function" ? AsyncIterator : Object).prototype), verb("next"), verb("throw"), verb("return", awaitReturn), i[Symbol.asyncIterator] = function() {
+    return this;
+  }, i;
+  function awaitReturn(f) {
+    return function(v) {
+      return Promise.resolve(v).then(f, reject2);
+    };
+  }
+  function verb(n, f) {
+    if (g[n]) {
+      i[n] = function(v) {
+        return new Promise(function(a, b) {
+          q.push([n, v, a, b]) > 1 || resume(n, v);
+        });
+      };
+      if (f) i[n] = f(i[n]);
+    }
+  }
+  function resume(n, v) {
+    try {
+      step2(g[n](v));
+    } catch (e) {
+      settle(q[0][3], e);
+    }
+  }
+  function step2(r) {
+    r.value instanceof __await ? Promise.resolve(r.value.v).then(fulfill, reject2) : settle(q[0][2], r);
+  }
+  function fulfill(value) {
+    resume("next", value);
+  }
+  function reject2(value) {
+    resume("throw", value);
+  }
+  function settle(f, v) {
+    if (f(v), q.shift(), q.length) resume(q[0][0], q[0][1]);
+  }
+};
+var __asyncDelegator = function(o) {
+  var i, p;
+  return i = {}, verb("next"), verb("throw", function(e) {
+    throw e;
+  }), verb("return"), i[Symbol.iterator] = function() {
+    return this;
+  }, i;
+  function verb(n, f) {
+    i[n] = o[n] ? function(v) {
+      return (p = !p) ? { value: __await(o[n](v)), done: false } : f ? f(v) : v;
+    } : f;
+  }
+};
+function pipe(source, ...rest) {
+  return __asyncGenerator(this, arguments, function* pipe_1() {
+    var _a;
+    const [transforms, opt] = pickTransforms(rest);
+    let abortable;
+    const sourceIt = source[Symbol.asyncIterator]();
+    const cachedSource = {
+      [Symbol.asyncIterator]() {
+        return sourceIt;
+      }
+    };
+    let iterable = cachedSource;
+    if ((opt === null || opt === void 0 ? void 0 : opt.propagateDownStreamError) === true) {
+      iterable = abortable = makeIterableAbortable(iterable);
+    }
+    for (const t of transforms) {
+      iterable = t(iterable);
+    }
+    const it = iterable[Symbol.asyncIterator]();
+    try {
+      for (; ; ) {
+        const r = yield __await(it.next());
+        if (r.done === true) {
+          break;
+        }
+        if (!abortable) {
+          yield yield __await(r.value);
+          continue;
+        }
+        try {
+          yield yield __await(r.value);
+        } catch (e) {
+          yield __await(abortable.abort(e));
+          throw e;
+        }
+      }
+    } finally {
+      if ((opt === null || opt === void 0 ? void 0 : opt.propagateDownStreamError) === true) {
+        (_a = sourceIt.return) === null || _a === void 0 ? void 0 : _a.call(sourceIt).catch(() => {
+        });
+      }
+    }
+  });
+}
+function pickTransforms(rest) {
+  let opt;
+  if (typeof rest[rest.length - 1] != "function") {
+    opt = rest.pop();
+  }
+  return [rest, opt];
+}
+function transformCatchFinally(catchFinally) {
+  return function(iterable) {
+    return __asyncGenerator(this, arguments, function* () {
+      let err;
+      const it = iterable[Symbol.asyncIterator]();
+      for (; ; ) {
+        let r;
+        try {
+          r = yield __await(it.next());
+        } catch (e) {
+          err = e;
+          break;
+        }
+        if (r.done === true) {
+          break;
+        }
+        yield yield __await(r.value);
+      }
+      const caught = yield __await(catchFinally(err));
+      if (caught !== void 0) {
+        yield yield __await(caught);
+      }
+    });
+  };
+}
+function transformPrepend(provide) {
+  return function(iterable) {
+    return __asyncGenerator(this, arguments, function* () {
+      var _a, e_3, _b, _c;
+      const prepend = yield __await(provide());
+      if (prepend !== void 0) {
+        yield yield __await(prepend);
+      }
+      try {
+        for (var _d = true, iterable_3 = __asyncValues(iterable), iterable_3_1; iterable_3_1 = yield __await(iterable_3.next()), _a = iterable_3_1.done, !_a; _d = true) {
+          _c = iterable_3_1.value;
+          _d = false;
+          const chunk = _c;
+          yield yield __await(chunk);
+        }
+      } catch (e_3_1) {
+        e_3 = { error: e_3_1 };
+      } finally {
+        try {
+          if (!_d && !_a && (_b = iterable_3.return)) yield __await(_b.call(iterable_3));
+        } finally {
+          if (e_3) throw e_3.error;
+        }
+      }
+    });
+  };
+}
+function transformSerializeEnvelope(serialization, endStreamFlag2, endSerialization) {
+  if (endStreamFlag2 === void 0 || endSerialization === void 0) {
+    return function(iterable) {
+      return __asyncGenerator(this, arguments, function* () {
+        var _a, e_4, _b, _c;
+        try {
+          for (var _d = true, iterable_4 = __asyncValues(iterable), iterable_4_1; iterable_4_1 = yield __await(iterable_4.next()), _a = iterable_4_1.done, !_a; _d = true) {
+            _c = iterable_4_1.value;
+            _d = false;
+            const chunk = _c;
+            const data = serialization.serialize(chunk);
+            yield yield __await({ flags: 0, data });
+          }
+        } catch (e_4_1) {
+          e_4 = { error: e_4_1 };
+        } finally {
+          try {
+            if (!_d && !_a && (_b = iterable_4.return)) yield __await(_b.call(iterable_4));
+          } finally {
+            if (e_4) throw e_4.error;
+          }
+        }
+      });
+    };
+  }
+  return function(iterable) {
+    return __asyncGenerator(this, arguments, function* () {
+      var _a, e_5, _b, _c;
+      try {
+        for (var _d = true, iterable_5 = __asyncValues(iterable), iterable_5_1; iterable_5_1 = yield __await(iterable_5.next()), _a = iterable_5_1.done, !_a; _d = true) {
+          _c = iterable_5_1.value;
+          _d = false;
+          const chunk = _c;
+          let data;
+          let flags = 0;
+          if (chunk.end) {
+            flags = flags | endStreamFlag2;
+            data = endSerialization.serialize(chunk.value);
+          } else {
+            data = serialization.serialize(chunk.value);
+          }
+          yield yield __await({ flags, data });
+        }
+      } catch (e_5_1) {
+        e_5 = { error: e_5_1 };
+      } finally {
+        try {
+          if (!_d && !_a && (_b = iterable_5.return)) yield __await(_b.call(iterable_5));
+        } finally {
+          if (e_5) throw e_5.error;
+        }
+      }
+    });
+  };
+}
+function transformParseEnvelope(serialization, endStreamFlag2, endSerialization) {
+  if (endSerialization && endStreamFlag2 !== void 0) {
+    return function(iterable) {
+      return __asyncGenerator(this, arguments, function* () {
+        var _a, e_6, _b, _c;
+        try {
+          for (var _d = true, iterable_6 = __asyncValues(iterable), iterable_6_1; iterable_6_1 = yield __await(iterable_6.next()), _a = iterable_6_1.done, !_a; _d = true) {
+            _c = iterable_6_1.value;
+            _d = false;
+            const { flags, data } = _c;
+            if ((flags & endStreamFlag2) === endStreamFlag2) {
+              yield yield __await({ value: endSerialization.parse(data), end: true });
+            } else {
+              yield yield __await({ value: serialization.parse(data), end: false });
+            }
+          }
+        } catch (e_6_1) {
+          e_6 = { error: e_6_1 };
+        } finally {
+          try {
+            if (!_d && !_a && (_b = iterable_6.return)) yield __await(_b.call(iterable_6));
+          } finally {
+            if (e_6) throw e_6.error;
+          }
+        }
+      });
+    };
+  }
+  return function(iterable) {
+    return __asyncGenerator(this, arguments, function* () {
+      var _a, e_7, _b, _c;
+      try {
+        for (var _d = true, iterable_7 = __asyncValues(iterable), iterable_7_1; iterable_7_1 = yield __await(iterable_7.next()), _a = iterable_7_1.done, !_a; _d = true) {
+          _c = iterable_7_1.value;
+          _d = false;
+          const { flags, data } = _c;
+          if (endStreamFlag2 !== void 0 && (flags & endStreamFlag2) === endStreamFlag2) {
+            if (endSerialization === null) {
+              throw new ConnectError("unexpected end flag", Code.InvalidArgument);
+            }
+            continue;
+          }
+          yield yield __await(serialization.parse(data));
+        }
+      } catch (e_7_1) {
+        e_7 = { error: e_7_1 };
+      } finally {
+        try {
+          if (!_d && !_a && (_b = iterable_7.return)) yield __await(_b.call(iterable_7));
+        } finally {
+          if (e_7) throw e_7.error;
+        }
+      }
+    });
+  };
+}
+function transformCompressEnvelope(compression, compressMinBytes) {
+  return function(iterable) {
+    return __asyncGenerator(this, arguments, function* () {
+      var _a, e_8, _b, _c;
+      try {
+        for (var _d = true, iterable_8 = __asyncValues(iterable), iterable_8_1; iterable_8_1 = yield __await(iterable_8.next()), _a = iterable_8_1.done, !_a; _d = true) {
+          _c = iterable_8_1.value;
+          _d = false;
+          const env = _c;
+          yield yield __await(yield __await(envelopeCompress(env, compression, compressMinBytes)));
+        }
+      } catch (e_8_1) {
+        e_8 = { error: e_8_1 };
+      } finally {
+        try {
+          if (!_d && !_a && (_b = iterable_8.return)) yield __await(_b.call(iterable_8));
+        } finally {
+          if (e_8) throw e_8.error;
+        }
+      }
+    });
+  };
+}
+function transformDecompressEnvelope(compression, readMaxBytes) {
+  return function(iterable) {
+    return __asyncGenerator(this, arguments, function* () {
+      var _a, e_9, _b, _c;
+      try {
+        for (var _d = true, iterable_9 = __asyncValues(iterable), iterable_9_1; iterable_9_1 = yield __await(iterable_9.next()), _a = iterable_9_1.done, !_a; _d = true) {
+          _c = iterable_9_1.value;
+          _d = false;
+          const env = _c;
+          yield yield __await(yield __await(envelopeDecompress(env, compression, readMaxBytes)));
+        }
+      } catch (e_9_1) {
+        e_9 = { error: e_9_1 };
+      } finally {
+        try {
+          if (!_d && !_a && (_b = iterable_9.return)) yield __await(_b.call(iterable_9));
+        } finally {
+          if (e_9) throw e_9.error;
+        }
+      }
+    });
+  };
+}
+function transformJoinEnvelopes() {
+  return function(iterable) {
+    return __asyncGenerator(this, arguments, function* () {
+      var _a, e_10, _b, _c;
+      try {
+        for (var _d = true, iterable_10 = __asyncValues(iterable), iterable_10_1; iterable_10_1 = yield __await(iterable_10.next()), _a = iterable_10_1.done, !_a; _d = true) {
+          _c = iterable_10_1.value;
+          _d = false;
+          const { flags, data } = _c;
+          yield yield __await(encodeEnvelope(flags, data));
+        }
+      } catch (e_10_1) {
+        e_10 = { error: e_10_1 };
+      } finally {
+        try {
+          if (!_d && !_a && (_b = iterable_10.return)) yield __await(_b.call(iterable_10));
+        } finally {
+          if (e_10) throw e_10.error;
+        }
+      }
+    });
+  };
+}
+function transformSplitEnvelope(readMaxBytes) {
+  return function(iterable) {
+    return __asyncGenerator(this, arguments, function* () {
+      var _a, e_11, _b, _c;
+      const buffer = createEnvelopeDecoder(readMaxBytes);
+      try {
+        for (var _d = true, iterable_11 = __asyncValues(iterable), iterable_11_1; iterable_11_1 = yield __await(iterable_11.next()), _a = iterable_11_1.done, !_a; _d = true) {
+          _c = iterable_11_1.value;
+          _d = false;
+          const chunk = _c;
+          for (const env of buffer.decode(chunk)) {
+            yield yield __await(env);
+          }
+        }
+      } catch (e_11_1) {
+        e_11 = { error: e_11_1 };
+      } finally {
+        try {
+          if (!_d && !_a && (_b = iterable_11.return)) yield __await(_b.call(iterable_11));
+        } finally {
+          if (e_11) throw e_11.error;
+        }
+      }
+      if (buffer.byteLength > 0) {
+        throw new ConnectError("protocol error: incomplete envelope", Code.InvalidArgument);
+      }
+    });
+  };
+}
+async function readAllBytes(iterable, readMaxBytes, lengthHint) {
+  var _a, e_12, _b, _c, _d, e_13, _e, _f;
+  const [ok, hint] = parseLengthHint(lengthHint);
+  if (ok) {
+    if (hint > readMaxBytes) {
+      assertReadMaxBytes(readMaxBytes, hint, true);
+    }
+    const buffer = new Uint8Array(hint);
+    let offset2 = 0;
+    try {
+      for (var _g = true, iterable_12 = __asyncValues(iterable), iterable_12_1; iterable_12_1 = await iterable_12.next(), _a = iterable_12_1.done, !_a; _g = true) {
+        _c = iterable_12_1.value;
+        _g = false;
+        const chunk = _c;
+        if (offset2 + chunk.byteLength > hint) {
+          throw new ConnectError(`protocol error: promised ${hint} bytes, received ${offset2 + chunk.byteLength}`, Code.InvalidArgument);
+        }
+        buffer.set(chunk, offset2);
+        offset2 += chunk.byteLength;
+      }
+    } catch (e_12_1) {
+      e_12 = { error: e_12_1 };
+    } finally {
+      try {
+        if (!_g && !_a && (_b = iterable_12.return)) await _b.call(iterable_12);
+      } finally {
+        if (e_12) throw e_12.error;
+      }
+    }
+    if (offset2 < hint) {
+      throw new ConnectError(`protocol error: promised ${hint} bytes, received ${offset2}`, Code.InvalidArgument);
+    }
+    return buffer;
+  }
+  const chunks = [];
+  let count = 0;
+  try {
+    for (var _h = true, iterable_13 = __asyncValues(iterable), iterable_13_1; iterable_13_1 = await iterable_13.next(), _d = iterable_13_1.done, !_d; _h = true) {
+      _f = iterable_13_1.value;
+      _h = false;
+      const chunk = _f;
+      count += chunk.byteLength;
+      assertReadMaxBytes(readMaxBytes, count);
+      chunks.push(chunk);
+    }
+  } catch (e_13_1) {
+    e_13 = { error: e_13_1 };
+  } finally {
+    try {
+      if (!_h && !_d && (_e = iterable_13.return)) await _e.call(iterable_13);
+    } finally {
+      if (e_13) throw e_13.error;
+    }
+  }
+  const all = new Uint8Array(count);
+  let offset = 0;
+  for (let chunk = chunks.shift(); chunk; chunk = chunks.shift()) {
+    all.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return all;
+}
+function parseLengthHint(lengthHint) {
+  if (lengthHint === void 0 || lengthHint === null) {
+    return [false, 0];
+  }
+  const n = typeof lengthHint == "string" ? parseInt(lengthHint, 10) : lengthHint;
+  if (!Number.isSafeInteger(n) || n < 0) {
+    return [false, n];
+  }
+  return [true, n];
+}
+async function untilFirst(iterable) {
+  const it = iterable[Symbol.asyncIterator]();
+  let first = await it.next();
+  return {
+    [Symbol.asyncIterator]() {
+      const w = {
+        async next() {
+          if (first !== null) {
+            const n = first;
+            first = null;
+            return n;
+          }
+          return await it.next();
+        }
+      };
+      if (it.throw !== void 0) {
+        w.throw = (e) => it.throw(e);
+      }
+      if (it.return !== void 0) {
+        w.return = (value) => it.return(value);
+      }
+      return w;
+    }
+  };
+}
+function makeIterableAbortable(iterable) {
+  const innerCandidate = iterable[Symbol.asyncIterator]();
+  if (innerCandidate.throw === void 0) {
+    throw new Error("AsyncIterable does not implement throw");
+  }
+  const inner = innerCandidate;
+  let aborted;
+  let resultPromise;
+  let it = {
+    next() {
+      resultPromise = inner.next().finally(() => {
+        resultPromise = void 0;
+      });
+      return resultPromise;
+    },
+    throw(e) {
+      return inner.throw(e);
+    }
+  };
+  if (innerCandidate.return !== void 0) {
+    it = Object.assign(Object.assign({}, it), { return(value) {
+      return inner.return(value);
+    } });
+  }
+  let used = false;
+  return {
+    abort(reason) {
+      if (aborted) {
+        return aborted.state;
+      }
+      const f = () => {
+        return inner.throw(reason).then((r) => r.done === true ? "completed" : "caught", () => "rethrown");
+      };
+      if (resultPromise) {
+        aborted = { reason, state: resultPromise.then(f, f) };
+        return aborted.state;
+      }
+      aborted = { reason, state: f() };
+      return aborted.state;
+    },
+    [Symbol.asyncIterator]() {
+      if (used) {
+        throw new Error("AsyncIterable cannot be re-used");
+      }
+      used = true;
+      return it;
+    }
+  };
+}
+function createAsyncIterable(items) {
+  return __asyncGenerator(this, arguments, function* createAsyncIterable_1() {
+    yield __await(yield* __asyncDelegator(__asyncValues(items)));
+  });
+}
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/protocol/signals.js
+function createLinkedAbortController(...signals) {
+  const controller = new AbortController();
+  const sa = signals.filter((s) => s !== void 0).concat(controller.signal);
+  for (const signal of sa) {
+    if (signal.aborted) {
+      onAbort.apply(signal);
+      break;
+    }
+    signal.addEventListener("abort", onAbort);
+  }
+  function onAbort() {
+    if (!controller.signal.aborted) {
+      controller.abort(getAbortSignalReason(this));
+    }
+    for (const signal of sa) {
+      signal.removeEventListener("abort", onAbort);
+    }
+  }
+  return controller;
+}
+function createDeadlineSignal(timeoutMs) {
+  const controller = new AbortController();
+  const listener2 = () => {
+    controller.abort(new ConnectError("the operation timed out", Code.DeadlineExceeded));
+  };
+  let timeoutId;
+  if (timeoutMs !== void 0) {
+    if (timeoutMs <= 0)
+      listener2();
+    else
+      timeoutId = setTimeout(listener2, timeoutMs);
+  }
+  return {
+    signal: controller.signal,
+    cleanup: () => clearTimeout(timeoutId)
+  };
+}
+function getAbortSignalReason(signal) {
+  if (!signal.aborted) {
+    return void 0;
+  }
+  if (signal.reason !== void 0) {
+    return signal.reason;
+  }
+  const e = new Error("This operation was aborted");
+  e.name = "AbortError";
+  return e;
+}
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/context-values.js
+function createContextValues() {
+  return {
+    get(key) {
+      return key.id in this ? this[key.id] : key.defaultValue;
+    },
+    set(key, value) {
+      this[key.id] = value;
+      return this;
+    },
+    delete(key) {
+      delete this[key.id];
+      return this;
+    }
+  };
+}
+function createContextKey(defaultValue, options) {
+  return { id: Symbol(options === null || options === void 0 ? void 0 : options.description), defaultValue };
+}
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/implementation.js
+function createHandlerContext(init) {
+  var _a;
+  let timeoutMs;
+  if (init.timeoutMs !== void 0) {
+    const date2 = new Date(Date.now() + init.timeoutMs);
+    timeoutMs = () => date2.getTime() - Date.now();
+  } else {
+    timeoutMs = () => void 0;
+  }
+  const deadline = createDeadlineSignal(init.timeoutMs);
+  const abortController = createLinkedAbortController(deadline.signal, init.requestSignal, init.shutdownSignal);
+  return Object.assign(Object.assign({}, init), { signal: abortController.signal, timeoutMs, requestHeader: new Headers(init.requestHeader), responseHeader: new Headers(init.responseHeader), responseTrailer: new Headers(init.responseTrailer), abort(reason) {
+    deadline.cleanup();
+    abortController.abort(reason);
+  }, values: (_a = init.contextValues) !== null && _a !== void 0 ? _a : createContextValues() });
+}
+function createMethodImplSpec(method4, impl) {
+  return {
+    kind: method4.methodKind,
+    method: method4,
+    impl
+  };
+}
+function createServiceImplSpec(service, impl) {
+  const s = { service, methods: {} };
+  for (const method4 of service.methods) {
+    let fn = impl[method4.localName];
+    if (typeof fn == "function") {
+      fn = fn.bind(impl);
+    } else {
+      const message = `${service.typeName}.${method4.name} is not implemented`;
+      fn = function unimplemented() {
+        throw new ConnectError(message, Code.Unimplemented);
+      };
+    }
+    s.methods[method4.localName] = createMethodImplSpec(method4, fn);
+  }
+  return s;
+}
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/protocol-grpc-web/trailer.js
+var trailerFlag = 128;
+function trailerParse(data) {
+  const headers3 = new Headers();
+  const lines = new TextDecoder().decode(data).split("\r\n");
+  for (const line of lines) {
+    if (line === "") {
+      continue;
+    }
+    const i = line.indexOf(":");
+    if (i > 0) {
+      const name = line.substring(0, i).trim();
+      const value = line.substring(i + 1).trim();
+      headers3.append(name, value);
+    }
+  }
+  return headers3;
+}
+function trailerSerialize(trailer2) {
+  const lines = [];
+  trailer2.forEach((value, key) => {
+    lines.push(`${key}: ${value}\r
+`);
+  });
+  return new TextEncoder().encode(lines.join(""));
+}
+function createTrailerSerialization() {
+  return {
+    serialize: trailerSerialize,
+    parse: trailerParse
+  };
+}
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/protocol-grpc/headers.js
+var headerContentType = "Content-Type";
+var headerEncoding = "Grpc-Encoding";
+var headerAcceptEncoding = "Grpc-Accept-Encoding";
+var headerTimeout = "Grpc-Timeout";
+var headerGrpcStatus = "Grpc-Status";
+var headerGrpcMessage = "Grpc-Message";
+var headerGrpcDetails = "Grpc-Status-Details-Bin";
+var headerStatusDetailsBin = "Grpc-Status-Details-Bin";
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/protocol-grpc-web/content-type.js
+var contentTypeRegExp = /^application\/grpc-web(-text)?(?:\+(?:(json)(?:; ?charset=utf-?8)?|proto))?$/i;
+var contentTypeProto = "application/grpc-web+proto";
+var contentTypeJson = "application/grpc-web+json";
+function parseContentType(contentType) {
+  const match = contentType === null || contentType === void 0 ? void 0 : contentType.match(contentTypeRegExp);
+  if (!match) {
+    return void 0;
+  }
+  const text3 = !!match[1];
+  const binary = !match[2];
+  return { text: text3, binary };
+}
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/protocol-grpc/parse-timeout.js
+function parseTimeout(value, maxTimeoutMs) {
+  if (value === null) {
+    return {};
+  }
+  const results = /^(\d{1,8})([HMSmun])$/.exec(value);
+  if (results === null) {
+    return {
+      error: new ConnectError(`protocol error: invalid grpc timeout value: ${value}`, Code.InvalidArgument)
+    };
+  }
+  const unitToMultiplicand = {
+    H: 60 * 60 * 1e3,
+    // hour
+    M: 60 * 1e3,
+    // minute
+    S: 1e3,
+    // second
+    m: 1,
+    // millisecond
+    u: 1e-3,
+    // microsecond
+    n: 1e-6
+    // nanosecond
+  };
+  const timeoutMs = unitToMultiplicand[results[2]] * parseInt(results[1]);
+  if (timeoutMs > maxTimeoutMs) {
+    return {
+      timeoutMs,
+      error: new ConnectError(`timeout ${timeoutMs}ms must be <= ${maxTimeoutMs}`, Code.InvalidArgument)
+    };
+  }
+  return {
+    timeoutMs
+  };
+}
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/protocol-grpc/gen/status_pb.js
+var file_status = /* @__PURE__ */ fileDesc("CgxzdGF0dXMucHJvdG8SCmdvb2dsZS5ycGMiTgoGU3RhdHVzEgwKBGNvZGUYASABKAUSDwoHbWVzc2FnZRgCIAEoCRIlCgdkZXRhaWxzGAMgAygLMhQuZ29vZ2xlLnByb3RvYnVmLkFueUJeCg5jb20uZ29vZ2xlLnJwY0ILU3RhdHVzUHJvdG9QAVo3Z29vZ2xlLmdvbGFuZy5vcmcvZ2VucHJvdG8vZ29vZ2xlYXBpcy9ycGMvc3RhdHVzO3N0YXR1c6ICA1JQQ2IGcHJvdG8z", [file_google_protobuf_any]);
+var StatusSchema = /* @__PURE__ */ messageDesc(file_status, 0);
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/protocol-connect/headers.js
+var headerContentType2 = "Content-Type";
+var headerUnaryContentLength = "Content-Length";
+var headerUnaryEncoding = "Content-Encoding";
+var headerStreamEncoding = "Connect-Content-Encoding";
+var headerUnaryAcceptEncoding = "Accept-Encoding";
+var headerStreamAcceptEncoding = "Connect-Accept-Encoding";
+var headerTimeout2 = "Connect-Timeout-Ms";
+var headerProtocolVersion = "Connect-Protocol-Version";
+var headerDate = "Date";
+var headerHost = "Host";
+var headerTrailer = "Trailer";
+var headerUserAgent2 = "User-Agent";
+var headerUnaryTrailerPrefix = "Trailer-";
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/protocol/protocol-headers.js
+var protocolHeaders = new Set([
+  // HTTP headers.
+  headerContentType2,
+  headerUnaryContentLength,
+  headerUnaryEncoding,
+  headerHost,
+  headerUserAgent2,
+  headerTrailer,
+  headerDate,
+  // Connect headers.
+  headerUnaryAcceptEncoding,
+  headerUnaryTrailerPrefix,
+  headerStreamEncoding,
+  headerStreamAcceptEncoding,
+  headerTimeout2,
+  headerProtocolVersion,
+  // gRPC headers.
+  headerEncoding,
+  headerAcceptEncoding,
+  headerTimeout,
+  headerGrpcStatus,
+  headerGrpcMessage,
+  headerGrpcDetails
+].map((name) => name.toLowerCase()));
+function mergeNonProtocolHeaders(into, from) {
+  from.forEach((value, key) => {
+    if (!protocolHeaders.has(key.toLowerCase())) {
+      into.append(key, value);
+    }
+  });
+}
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/protocol-grpc/trailer-status.js
+var grpcStatusOk = "0";
+function setTrailerStatus(target2, error) {
+  if (error) {
+    if (!error.isWireError) {
+      mergeNonProtocolHeaders(target2, error.metadata);
+    }
+    target2.set(headerGrpcStatus, error.code.toString(10));
+    target2.set(headerGrpcMessage, encodeURIComponent(error.rawMessage));
+    if (error.details.length > 0) {
+      const status = create(StatusSchema, {
+        code: error.code,
+        message: error.rawMessage,
+        details: error.details.map((detail) => "desc" in detail ? anyPack(detail.desc, create(detail.desc, detail.value)) : {
+          typeUrl: `type.googleapis.com/${detail.type}`,
+          value: detail.value
+        })
+      });
+      target2.set(headerStatusDetailsBin, encodeBinaryHeader(status, StatusSchema));
+    }
+  } else {
+    target2.set(headerGrpcStatus, grpcStatusOk.toString());
+  }
+  return target2;
+}
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/protocol/content-type-matcher.js
+var contentTypeMatcherCacheSize = 1024;
+function contentTypeMatcher(...supported2) {
+  const cache = /* @__PURE__ */ new Map();
+  const source = supported2.reduce((previousValue, currentValue) => previousValue.concat("supported" in currentValue ? currentValue.supported : currentValue), []);
+  function match(contentType) {
+    if (contentType === null || contentType.length == 0) {
+      return false;
+    }
+    const cached = cache.get(contentType);
+    if (cached !== void 0) {
+      return cached;
+    }
+    const ok = source.some((re) => re.test(contentType));
+    if (cache.size < contentTypeMatcherCacheSize) {
+      cache.set(contentType, ok);
+    }
+    return ok;
+  }
+  match.supported = source;
+  return match;
+}
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/protocol/create-method-url.js
+function createMethodUrl(baseUrl, method4) {
+  return baseUrl.toString().replace(/\/?$/, `/${method4.parent.typeName}/${method4.name}`);
+}
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/protocol/normalize.js
+function normalize(desc, message) {
+  return create(desc, message);
+}
+function normalizeIterable(desc, input) {
+  function transform(result) {
+    if (result.done === true) {
+      return result;
+    }
+    return {
+      done: result.done,
+      value: normalize(desc, result.value)
+    };
+  }
+  return {
+    [Symbol.asyncIterator]() {
+      const it = input[Symbol.asyncIterator]();
+      const res = {
+        next: () => it.next().then(transform)
+      };
+      if (it.throw !== void 0) {
+        res.throw = (e) => it.throw(e).then(transform);
+      }
+      if (it.return !== void 0) {
+        res.return = (v) => it.return(v).then(transform);
+      }
+      return res;
+    }
+  };
+}
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/interceptor.js
+function applyInterceptors(next, interceptors) {
+  if (!interceptors) {
+    return next;
+  }
+  for (const i of interceptors.concat().reverse()) {
+    next = i(next);
+  }
+  return next;
+}
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/protocol/invoke-implementation.js
+var __await2 = function(v) {
+  return this instanceof __await2 ? (this.v = v, this) : new __await2(v);
+};
+var __asyncGenerator2 = function(thisArg, _arguments, generator) {
+  if (!Symbol.asyncIterator) throw new TypeError("Symbol.asyncIterator is not defined.");
+  var g = generator.apply(thisArg, _arguments || []), i, q = [];
+  return i = Object.create((typeof AsyncIterator === "function" ? AsyncIterator : Object).prototype), verb("next"), verb("throw"), verb("return", awaitReturn), i[Symbol.asyncIterator] = function() {
+    return this;
+  }, i;
+  function awaitReturn(f) {
+    return function(v) {
+      return Promise.resolve(v).then(f, reject2);
+    };
+  }
+  function verb(n, f) {
+    if (g[n]) {
+      i[n] = function(v) {
+        return new Promise(function(a, b) {
+          q.push([n, v, a, b]) > 1 || resume(n, v);
+        });
+      };
+      if (f) i[n] = f(i[n]);
+    }
+  }
+  function resume(n, v) {
+    try {
+      step2(g[n](v));
+    } catch (e) {
+      settle(q[0][3], e);
+    }
+  }
+  function step2(r) {
+    r.value instanceof __await2 ? Promise.resolve(r.value.v).then(fulfill, reject2) : settle(q[0][2], r);
+  }
+  function fulfill(value) {
+    resume("next", value);
+  }
+  function reject2(value) {
+    resume("throw", value);
+  }
+  function settle(f, v) {
+    if (f(v), q.shift(), q.length) resume(q[0][0], q[0][1]);
+  }
+};
+var __asyncValues2 = function(o) {
+  if (!Symbol.asyncIterator) throw new TypeError("Symbol.asyncIterator is not defined.");
+  var m = o[Symbol.asyncIterator], i;
+  return m ? m.call(o) : (o = typeof __values === "function" ? __values(o) : o[Symbol.iterator](), i = {}, verb("next"), verb("throw"), verb("return"), i[Symbol.asyncIterator] = function() {
+    return this;
+  }, i);
+  function verb(n) {
+    i[n] = o[n] && function(v) {
+      return new Promise(function(resolve, reject2) {
+        v = o[n](v), settle(resolve, reject2, v.done, v.value);
+      });
+    };
+  }
+  function settle(resolve, reject2, d, v) {
+    Promise.resolve(v).then(function(v2) {
+      resolve({ value: v2, done: d });
+    }, reject2);
+  }
+};
+var __asyncDelegator2 = function(o) {
+  var i, p;
+  return i = {}, verb("next"), verb("throw", function(e) {
+    throw e;
+  }), verb("return"), i[Symbol.iterator] = function() {
+    return this;
+  }, i;
+  function verb(n, f) {
+    i[n] = o[n] ? function(v) {
+      return (p = !p) ? { value: __await2(o[n](v)), done: false } : f ? f(v) : v;
+    } : f;
+  }
+};
+async function applyRequestGate(context, requestGate, invoke) {
+  if (requestGate !== void 0) {
+    try {
+      await requestGate(context);
+    } catch (reason) {
+      return { next: () => Promise.reject(reason) };
+    }
+  }
+  return invoke()[Symbol.asyncIterator]();
+}
+async function invokeUnaryImplementation(spec, context, input, interceptors) {
+  const anyFn = async (req) => {
+    return Object.assign({ message: normalize(spec.method.output, await spec.impl(req.message, mergeRequest(context, req))), stream: false, method: spec.method }, responseCommon(context, spec));
+  };
+  const next = applyInterceptors(anyFn, interceptors);
+  const { message, header, trailer: trailer2 } = await next(Object.assign({ stream: false, message: input, method: spec.method }, requestCommon(context, spec)));
+  copyHeaders(header, context.responseHeader);
+  copyHeaders(trailer2, context.responseTrailer);
+  return message;
+}
+function transformInvokeImplementation(spec, context, interceptors) {
+  switch (spec.kind) {
+    case "unary":
+      return function unary(input) {
+        return __asyncGenerator2(this, arguments, function* unary_1() {
+          yield yield __await2(yield __await2(invokeUnaryImplementation(spec, context, yield __await2(ensureSingle(input, "unary")), interceptors)));
+        });
+      };
+    case "server_streaming": {
+      return function serverStreaming(input) {
+        return invokeStreamImplementation(spec, context, input, interceptors, async (req) => {
+          const output = normalizeIterable(spec.method.output, spec.impl(await ensureSingle(req.message, "server-streaming"), mergeRequest(context, req)));
+          return Object.assign({ stream: true, message: output, method: spec.method }, responseCommon(context, spec));
+        });
+      };
+    }
+    case "client_streaming": {
+      return function clientStreaming(input) {
+        return invokeStreamImplementation(spec, context, input, interceptors, async (req) => {
+          return Object.assign({ message: createAsyncIterable([
+            normalize(spec.method.output, await spec.impl(req.message, mergeRequest(context, req)))
+          ]), stream: true, method: spec.method }, responseCommon(context, spec));
+        });
+      };
+    }
+    case "bidi_streaming":
+      return function biDiStreaming(input) {
+        return invokeStreamImplementation(spec, context, input, interceptors, (req) => {
+          return Promise.resolve(Object.assign({ message: normalizeIterable(spec.method.output, spec.impl(req.message, mergeRequest(context, req))), stream: true, method: spec.method }, responseCommon(context, spec)));
+        });
+      };
+  }
+}
+function invokeStreamImplementation(spec, context, input, interceptors, anyFn) {
+  return __asyncGenerator2(this, arguments, function* invokeStreamImplementation_1() {
+    const next = applyInterceptors(anyFn, interceptors);
+    const { message, header, trailer: trailer2 } = yield __await2(next(Object.assign({ stream: true, message: input, method: spec.method }, requestCommon(context, spec))));
+    copyHeaders(header, context.responseHeader);
+    yield __await2(yield* __asyncDelegator2(__asyncValues2(message)));
+    copyHeaders(trailer2, context.responseTrailer);
+  });
+}
+async function ensureSingle(iterable, method4) {
+  const it = iterable[Symbol.asyncIterator]();
+  const first = await it.next();
+  if (first.done === true) {
+    throw new ConnectError(`protocol error: missing input message for ${method4} method`, Code.Unimplemented);
+  }
+  const second = await it.next();
+  if (second.done !== true) {
+    throw new ConnectError(`protocol error: received extra input message for ${method4} method`, Code.Unimplemented);
+  }
+  return first.value;
+}
+function requestCommon(context, spec) {
+  return {
+    requestMethod: context.requestMethod,
+    url: context.url,
+    signal: context.signal,
+    header: context.requestHeader,
+    service: spec.method.parent,
+    contextValues: context.values
+  };
+}
+function responseCommon(context, spec) {
+  return {
+    service: spec.method.parent,
+    header: context.responseHeader,
+    trailer: context.responseTrailer
+  };
+}
+function mergeRequest(context, req) {
+  return Object.assign(Object.assign({}, context), { service: req.service, requestHeader: req.header, signal: req.signal, values: req.contextValues });
+}
+function copyHeaders(from, to) {
+  if (from === to) {
+    return;
+  }
+  to.forEach((_, key) => {
+    to.delete(key);
+  });
+  from.forEach((value, key) => {
+    to.set(key, value);
+  });
+}
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/protocol/serialization.js
+function getJsonOptions(options) {
+  var _a;
+  const o = Object.assign({}, options);
+  (_a = o.ignoreUnknownFields) !== null && _a !== void 0 ? _a : o.ignoreUnknownFields = true;
+  return o;
+}
+function createMethodSerializationLookup(method4, binaryOptions, jsonOptions, limitOptions) {
+  const inputBinary = limitSerialization(createBinarySerialization(method4.input, binaryOptions), limitOptions);
+  const inputJson = limitSerialization(createJsonSerialization(method4.input, jsonOptions), limitOptions);
+  const outputBinary = limitSerialization(createBinarySerialization(method4.output, binaryOptions), limitOptions);
+  const outputJson = limitSerialization(createJsonSerialization(method4.output, jsonOptions), limitOptions);
+  return {
+    getI(useBinaryFormat) {
+      return useBinaryFormat ? inputBinary : inputJson;
+    },
+    getO(useBinaryFormat) {
+      return useBinaryFormat ? outputBinary : outputJson;
+    }
+  };
+}
+function limitSerialization(serialization, limitOptions) {
+  return {
+    serialize(data) {
+      const bytes = serialization.serialize(data);
+      assertWriteMaxBytes(limitOptions.writeMaxBytes, bytes.byteLength);
+      return bytes;
+    },
+    parse(data) {
+      assertReadMaxBytes(limitOptions.readMaxBytes, data.byteLength, true);
+      return serialization.parse(data);
+    }
+  };
+}
+function createBinarySerialization(desc, options) {
+  return {
+    parse(data) {
+      try {
+        return fromBinary(desc, data, options);
+      } catch (e) {
+        const m = e instanceof Error ? e.message : String(e);
+        throw new ConnectError(`parse binary: ${m}`, Code.Internal);
+      }
+    },
+    serialize(data) {
+      try {
+        return toBinary(desc, data, options);
+      } catch (e) {
+        const m = e instanceof Error ? e.message : String(e);
+        throw new ConnectError(`serialize binary: ${m}`, Code.Internal);
+      }
+    }
+  };
+}
+function createJsonSerialization(desc, options) {
+  var _a, _b;
+  const textEncoder = (_a = options === null || options === void 0 ? void 0 : options.textEncoder) !== null && _a !== void 0 ? _a : new TextEncoder();
+  const textDecoder = (_b = options === null || options === void 0 ? void 0 : options.textDecoder) !== null && _b !== void 0 ? _b : new TextDecoder();
+  const o = getJsonOptions(options);
+  return {
+    parse(data) {
+      try {
+        const json = textDecoder.decode(data);
+        return fromJsonString(desc, json, o);
+      } catch (e) {
+        throw ConnectError.from(e, Code.InvalidArgument);
+      }
+    },
+    serialize(data) {
+      try {
+        const json = toJsonString(desc, data, o);
+        return textEncoder.encode(json);
+      } catch (e) {
+        throw ConnectError.from(e, Code.Internal);
+      }
+    }
+  };
+}
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/protocol/universal.js
+function assertByteStreamRequest(req) {
+  if (typeof req.body == "object" && req.body !== null && Symbol.asyncIterator in req.body) {
+    return;
+  }
+  throw new Error("byte stream required, but received JSON");
+}
+var uResponseOk = {
+  status: 200
+};
+var uResponseNotFound = {
+  status: 404
+};
+var uResponseUnsupportedMediaType = {
+  status: 415
+};
+var uResponseMethodNotAllowed = {
+  status: 405
+};
+var uResponseVersionNotSupported = {
+  status: 505
+};
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/protocol/universal-handler.js
+function validateUniversalHandlerOptions(opt) {
+  var _a, _b, _c;
+  opt !== null && opt !== void 0 ? opt : opt = {};
+  const acceptCompression = opt.acceptCompression ? [...opt.acceptCompression] : [];
+  const requireConnectProtocolHeader = (_a = opt.requireConnectProtocolHeader) !== null && _a !== void 0 ? _a : false;
+  const maxTimeoutMs = (_b = opt.maxTimeoutMs) !== null && _b !== void 0 ? _b : Number.MAX_SAFE_INTEGER;
+  return Object.assign(Object.assign({ acceptCompression }, validateReadWriteMaxBytes(opt.readMaxBytes, opt.writeMaxBytes, opt.compressMinBytes)), { jsonOptions: opt.jsonOptions, binaryOptions: opt.binaryOptions, maxTimeoutMs, shutdownSignal: opt.shutdownSignal, requireConnectProtocolHeader, interceptors: (_c = opt.interceptors) !== null && _c !== void 0 ? _c : [], requestGate: opt.requestGate });
+}
+function createUniversalServiceHandlers(spec, protocols) {
+  return Object.entries(spec.methods).map(([, implSpec]) => createUniversalMethodHandler(implSpec, protocols));
+}
+function createUniversalMethodHandler(spec, protocols) {
+  return negotiateProtocol(protocols.map((f) => f(spec)));
+}
+function negotiateProtocol(protocolHandlers) {
+  if (protocolHandlers.length == 0) {
+    throw new ConnectError("at least one protocol is required", Code.Internal);
+  }
+  const service = protocolHandlers[0].service;
+  const method4 = protocolHandlers[0].method;
+  const requestPath = protocolHandlers[0].requestPath;
+  if (protocolHandlers.some((h) => h.service !== service || h.method !== method4)) {
+    throw new ConnectError("cannot negotiate protocol for different RPCs", Code.Internal);
+  }
+  if (protocolHandlers.some((h) => h.requestPath !== requestPath)) {
+    throw new ConnectError("cannot negotiate protocol for different requestPaths", Code.Internal);
+  }
+  async function protocolNegotiatingHandler(request) {
+    var _a;
+    if (method4.methodKind == "bidi_streaming" && request.httpVersion.startsWith("1.")) {
+      return Object.assign(Object.assign({}, uResponseVersionNotSupported), {
+        // Clients coded to expect full-duplex connections may hang if they've
+        // mistakenly negotiated HTTP/1.1. To unblock them, we must close the
+        // underlying TCP connection.
+        header: new Headers({ Connection: "close" })
+      });
+    }
+    const contentType = (_a = request.header.get("Content-Type")) !== null && _a !== void 0 ? _a : "";
+    const matchingMethod = protocolHandlers.filter((h) => h.allowedMethods.includes(request.method));
+    if (matchingMethod.length == 0) {
+      return uResponseMethodNotAllowed;
+    }
+    if (matchingMethod.length == 1 && contentType === "") {
+      const onlyMatch = matchingMethod[0];
+      return onlyMatch(request);
+    }
+    const matchingContentTypes = matchingMethod.filter((h) => h.supportedContentType(contentType));
+    if (matchingContentTypes.length == 0) {
+      return uResponseUnsupportedMediaType;
+    }
+    const firstMatch = matchingContentTypes[0];
+    return firstMatch(request);
+  }
+  return Object.assign(protocolNegotiatingHandler, {
+    service,
+    method: method4,
+    requestPath,
+    supportedContentType: contentTypeMatcher(...protocolHandlers.map((h) => h.supportedContentType)),
+    protocolNames: protocolHandlers.flatMap((h) => h.protocolNames).filter((value, index, array2) => array2.indexOf(value) === index),
+    allowedMethods: protocolHandlers.flatMap((h) => h.allowedMethods).filter((value, index, array2) => array2.indexOf(value) === index)
+  });
+}
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/protocol-grpc-web/handler-factory.js
+var protocolName = "grpc-web";
+var methodPost = "POST";
+function createHandlerFactory(options) {
+  const opt = validateUniversalHandlerOptions(options);
+  const trailerSerialization = createTrailerSerialization();
+  function fact(spec) {
+    const h = createHandler(opt, trailerSerialization, spec);
+    return Object.assign(h, {
+      protocolNames: [protocolName],
+      allowedMethods: [methodPost],
+      supportedContentType: contentTypeMatcher(contentTypeRegExp),
+      requestPath: createMethodUrl("/", spec.method),
+      service: spec.method.parent,
+      method: spec.method
+    });
+  }
+  fact.protocolName = protocolName;
+  return fact;
+}
+function createHandler(opt, trailerSerialization, spec) {
+  const serialization = createMethodSerializationLookup(spec.method, opt.binaryOptions, opt.jsonOptions, opt);
+  return async function handle(req) {
+    assertByteStreamRequest(req);
+    const type = parseContentType(req.header.get(headerContentType));
+    if (type == void 0 || type.text) {
+      return uResponseUnsupportedMediaType;
+    }
+    if (req.method !== methodPost) {
+      return uResponseMethodNotAllowed;
+    }
+    const timeout = parseTimeout(req.header.get(headerTimeout), opt.maxTimeoutMs);
+    const context = createHandlerContext(Object.assign(Object.assign({}, spec), { service: spec.method.parent, requestMethod: req.method, protocolName, timeoutMs: timeout.timeoutMs, shutdownSignal: opt.shutdownSignal, requestSignal: req.signal, requestHeader: req.header, url: req.url, responseHeader: {
+      [headerContentType]: type.binary ? contentTypeProto : contentTypeJson
+    }, responseTrailer: {
+      [headerGrpcStatus]: grpcStatusOk
+    }, contextValues: req.contextValues }));
+    const compression = compressionNegotiate(opt.acceptCompression, req.header.get(headerEncoding), req.header.get(headerAcceptEncoding), headerAcceptEncoding);
+    if (compression.response) {
+      context.responseHeader.set(headerEncoding, compression.response.name);
+    }
+    const inputIt = pipe(req.body, transformPrepend(() => {
+      if (compression.error)
+        throw compression.error;
+      if (timeout.error)
+        throw timeout.error;
+      return void 0;
+    }), transformSplitEnvelope(opt.readMaxBytes), transformDecompressEnvelope(compression.request, opt.readMaxBytes), transformParseEnvelope(serialization.getI(type.binary), trailerFlag));
+    const it = await applyRequestGate(context, opt.requestGate, () => transformInvokeImplementation(spec, context, opt.interceptors)(inputIt));
+    const outputIt = pipe(
+      // We wrap the iterator in an async iterator to ensure that the
+      // abort signal is aborted when the iterator is done.
+      {
+        [Symbol.asyncIterator]() {
+          return {
+            next: () => it.next(),
+            throw: (e) => {
+              var _a, _b;
+              context.abort(e);
+              return (_b = (_a = it.throw) === null || _a === void 0 ? void 0 : _a.call(it, e)) !== null && _b !== void 0 ? _b : Promise.reject({ done: true });
+            },
+            return: (v) => {
+              var _a, _b;
+              context.abort();
+              return (_b = (_a = it.return) === null || _a === void 0 ? void 0 : _a.call(it, v)) !== null && _b !== void 0 ? _b : Promise.resolve({ done: true, value: v });
+            }
+          };
+        }
+      },
+      transformSerializeEnvelope(serialization.getO(type.binary)),
+      transformCatchFinally((e) => {
+        context.abort(e);
+        if (e instanceof ConnectError) {
+          setTrailerStatus(context.responseTrailer, e);
+        } else if (e !== void 0) {
+          setTrailerStatus(context.responseTrailer, new ConnectError("internal error", Code.Internal, void 0, void 0, e));
+        }
+        return {
+          flags: trailerFlag,
+          data: trailerSerialization.serialize(context.responseTrailer)
+        };
+      }),
+      transformCompressEnvelope(compression.response, opt.compressMinBytes),
+      transformJoinEnvelopes(),
+      { propagateDownStreamError: true }
+    );
+    return Object.assign(Object.assign({}, uResponseOk), {
+      // We wait for the first response body bytes before resolving, so that
+      // implementations have a chance to add headers before an adapter commits
+      // them to the wire.
+      body: await untilFirst(outputIt),
+      header: context.responseHeader
+    });
+  };
+}
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/protocol-grpc/content-type.js
+var contentTypeRegExp2 = /^application\/grpc(?:\+(?:(json)(?:; ?charset=utf-?8)?|proto))?$/i;
+var contentTypeProto2 = "application/grpc+proto";
+var contentTypeJson2 = "application/grpc+json";
+function parseContentType2(contentType) {
+  const match = contentType === null || contentType === void 0 ? void 0 : contentType.match(contentTypeRegExp2);
+  if (!match) {
+    return void 0;
+  }
+  const binary = !match[1];
+  return { binary };
+}
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/protocol-grpc/handler-factory.js
+var protocolName2 = "grpc";
+var methodPost2 = "POST";
+function createHandlerFactory2(options) {
+  const opt = validateUniversalHandlerOptions(options);
+  function fact(spec) {
+    const h = createHandler2(opt, spec);
+    return Object.assign(h, {
+      protocolNames: [protocolName2],
+      allowedMethods: [methodPost2],
+      supportedContentType: contentTypeMatcher(contentTypeRegExp2),
+      requestPath: createMethodUrl("/", spec.method),
+      service: spec.method.parent,
+      method: spec.method
+    });
+  }
+  fact.protocolName = protocolName2;
+  return fact;
+}
+function createHandler2(opt, spec) {
+  const serialization = createMethodSerializationLookup(spec.method, opt.binaryOptions, opt.jsonOptions, opt);
+  return async function handle(req) {
+    assertByteStreamRequest(req);
+    const type = parseContentType2(req.header.get(headerContentType));
+    if (type == void 0) {
+      return uResponseUnsupportedMediaType;
+    }
+    if (req.method !== methodPost2) {
+      return uResponseMethodNotAllowed;
+    }
+    const timeout = parseTimeout(req.header.get(headerTimeout), opt.maxTimeoutMs);
+    const context = createHandlerContext(Object.assign(Object.assign({}, spec), { service: spec.method.parent, requestMethod: req.method, protocolName: protocolName2, timeoutMs: timeout.timeoutMs, shutdownSignal: opt.shutdownSignal, requestSignal: req.signal, requestHeader: req.header, url: req.url, responseHeader: {
+      [headerContentType]: type.binary ? contentTypeProto2 : contentTypeJson2
+    }, responseTrailer: {
+      [headerGrpcStatus]: grpcStatusOk
+    }, contextValues: req.contextValues }));
+    const compression = compressionNegotiate(opt.acceptCompression, req.header.get(headerEncoding), req.header.get(headerAcceptEncoding), headerAcceptEncoding);
+    if (compression.response) {
+      context.responseHeader.set(headerEncoding, compression.response.name);
+    }
+    const inputIt = pipe(req.body, transformPrepend(() => {
+      if (compression.error)
+        throw compression.error;
+      if (timeout.error)
+        throw timeout.error;
+      return void 0;
+    }), transformSplitEnvelope(opt.readMaxBytes), transformDecompressEnvelope(compression.request, opt.readMaxBytes), transformParseEnvelope(serialization.getI(type.binary)));
+    const it = await applyRequestGate(context, opt.requestGate, () => transformInvokeImplementation(spec, context, opt.interceptors)(inputIt));
+    const outputIt = pipe(
+      // We wrap the iterator in an async iterator to ensure that the
+      // abort signal is aborted when the iterator is done.
+      {
+        [Symbol.asyncIterator]() {
+          return {
+            next: () => it.next(),
+            throw: (e) => {
+              var _a, _b;
+              context.abort(e);
+              return (_b = (_a = it.throw) === null || _a === void 0 ? void 0 : _a.call(it, e)) !== null && _b !== void 0 ? _b : Promise.reject({ done: true });
+            },
+            return: (v) => {
+              var _a, _b;
+              context.abort();
+              return (_b = (_a = it.return) === null || _a === void 0 ? void 0 : _a.call(it, v)) !== null && _b !== void 0 ? _b : Promise.resolve({ done: true, value: v });
+            }
+          };
+        }
+      },
+      transformSerializeEnvelope(serialization.getO(type.binary)),
+      transformCompressEnvelope(compression.response, opt.compressMinBytes),
+      transformJoinEnvelopes(),
+      transformCatchFinally((e) => {
+        context.abort(e);
+        if (e instanceof ConnectError) {
+          setTrailerStatus(context.responseTrailer, e);
+        } else if (e !== void 0) {
+          setTrailerStatus(context.responseTrailer, new ConnectError("internal error", Code.Internal, void 0, void 0, e));
+        }
+      }),
+      { propagateDownStreamError: true }
+    );
+    return Object.assign(Object.assign({}, uResponseOk), {
+      // We wait for the first response body bytes before resolving, so that
+      // implementations have a chance to add headers before an adapter commits
+      // them to the wire.
+      body: await untilFirst(outputIt),
+      header: context.responseHeader,
+      trailer: context.responseTrailer
+    });
+  };
+}
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/protocol-connect/content-type.js
+var contentTypeRegExp3 = /^application\/(connect\+)?(?:(json)(?:; ?charset=utf-?8)?|(proto))$/i;
+var contentTypeUnaryRegExp = /^application\/(?:json(?:; ?charset=utf-?8)?|proto)$/i;
+var contentTypeStreamRegExp = /^application\/connect\+?(?:json(?:; ?charset=utf-?8)?|proto)$/i;
+var contentTypeUnaryProto = "application/proto";
+var contentTypeUnaryJson = "application/json";
+var contentTypeStreamProto = "application/connect+proto";
+var contentTypeStreamJson = "application/connect+json";
+var encodingProto = "proto";
+var encodingJson = "json";
+function parseContentType3(contentType) {
+  const match = contentType === null || contentType === void 0 ? void 0 : contentType.match(contentTypeRegExp3);
+  if (!match) {
+    return void 0;
+  }
+  const stream = !!match[1];
+  const binary = !!match[3];
+  return { stream, binary };
+}
+function parseEncodingQuery(encoding) {
+  switch (encoding) {
+    case encodingProto:
+      return { stream: false, binary: true };
+    case encodingJson:
+      return { stream: false, binary: false };
+    default:
+      return void 0;
+  }
+}
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/protocol-connect/error-json.js
+var __rest = function(s, e) {
+  var t = {};
+  for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p) && e.indexOf(p) < 0)
+    t[p] = s[p];
+  if (s != null && typeof Object.getOwnPropertySymbols === "function")
+    for (var i = 0, p = Object.getOwnPropertySymbols(s); i < p.length; i++) {
+      if (e.indexOf(p[i]) < 0 && Object.prototype.propertyIsEnumerable.call(s, p[i]))
+        t[p[i]] = s[p[i]];
+    }
+  return t;
+};
+function errorFromJson(jsonValue, metadata, fallback2) {
+  var _a;
+  if (metadata) {
+    new Headers(metadata).forEach((value, key) => fallback2.metadata.append(key, value));
+  }
+  if (typeof jsonValue !== "object" || jsonValue == null || Array.isArray(jsonValue)) {
+    throw fallback2;
+  }
+  let code = fallback2.code;
+  if ("code" in jsonValue && typeof jsonValue.code === "string") {
+    code = (_a = codeFromString(jsonValue.code)) !== null && _a !== void 0 ? _a : code;
+  }
+  const message = jsonValue.message;
+  if (message != null && typeof message !== "string") {
+    throw fallback2;
+  }
+  const error = new ConnectError(message !== null && message !== void 0 ? message : "", code, metadata);
+  error.isWireError = true;
+  if ("details" in jsonValue && Array.isArray(jsonValue.details)) {
+    for (const detail of jsonValue.details) {
+      if (detail === null || typeof detail != "object" || Array.isArray(detail) || typeof detail.type != "string" || typeof detail.value != "string") {
+        throw fallback2;
+      }
+      try {
+        error.details.push({
+          type: detail.type,
+          value: base64Decode(detail.value),
+          debug: detail.debug
+        });
+      } catch (e) {
+        throw fallback2;
+      }
+    }
+  }
+  return error;
+}
+function errorToJson(error, jsonWriteOptions) {
+  const o = {
+    code: codeToString(error.code)
+  };
+  if (error.rawMessage.length > 0) {
+    o.message = error.rawMessage;
+  }
+  if (error.details.length > 0) {
+    o.details = error.details.map((detail) => {
+      if ("desc" in detail) {
+        const msg = create(detail.desc, detail.value);
+        const i = {
+          type: detail.desc.typeName,
+          value: toBinary(detail.desc, msg)
+        };
+        try {
+          i.debug = toJson(detail.desc, msg, jsonWriteOptions);
+        } catch (e) {
+        }
+        return i;
+      }
+      return detail;
+    }).map((_a) => {
+      var { value } = _a, rest = __rest(_a, ["value"]);
+      return Object.assign(Object.assign({}, rest), { value: base64Encode(value, "std_raw") });
+    });
+  }
+  return o;
+}
+function errorToJsonBytes(error, jsonWriteOptions) {
+  const textEncoder = new TextEncoder();
+  try {
+    const jsonObject = errorToJson(error, jsonWriteOptions);
+    const jsonString = JSON.stringify(jsonObject);
+    return textEncoder.encode(jsonString);
+  } catch (e) {
+    const m = e instanceof Error ? e.message : String(e);
+    throw new ConnectError(`failed to serialize Connect Error: ${m}`, Code.Internal);
+  }
+}
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/protocol-connect/end-stream.js
+var endStreamFlag = 2;
+function endStreamFromJson(data) {
+  const parseErr = new ConnectError("invalid end stream", Code.Unknown);
+  let jsonValue;
+  try {
+    jsonValue = JSON.parse(typeof data == "string" ? data : new TextDecoder().decode(data));
+  } catch (e) {
+    throw parseErr;
+  }
+  if (typeof jsonValue != "object" || jsonValue == null || Array.isArray(jsonValue)) {
+    throw parseErr;
+  }
+  const metadata = new Headers();
+  if ("metadata" in jsonValue) {
+    if (typeof jsonValue.metadata != "object" || jsonValue.metadata == null || Array.isArray(jsonValue.metadata)) {
+      throw parseErr;
+    }
+    for (const [key, values] of Object.entries(jsonValue.metadata)) {
+      if (!Array.isArray(values) || values.some((value) => typeof value != "string")) {
+        throw parseErr;
+      }
+      for (const value of values) {
+        metadata.append(key, value);
+      }
+    }
+  }
+  const error = "error" in jsonValue && jsonValue.error != null ? errorFromJson(jsonValue.error, metadata, parseErr) : void 0;
+  return { metadata, error };
+}
+function endStreamToJson(metadata, error, jsonWriteOptions) {
+  const es = {};
+  if (error !== void 0) {
+    es.error = errorToJson(error, jsonWriteOptions);
+    if (!error.isWireError) {
+      mergeNonProtocolHeaders(metadata, error.metadata);
+    }
+  }
+  let hasMetadata = false;
+  const md = {};
+  metadata.forEach((value, key) => {
+    hasMetadata = true;
+    md[key] = [value];
+  });
+  if (hasMetadata) {
+    es.metadata = md;
+  }
+  return es;
+}
+function createEndStreamSerialization(options) {
+  const textEncoder = new TextEncoder();
+  return {
+    serialize(data) {
+      try {
+        const jsonObject = endStreamToJson(data.metadata, data.error, options);
+        const jsonString = JSON.stringify(jsonObject);
+        return textEncoder.encode(jsonString);
+      } catch (e) {
+        const m = e instanceof Error ? e.message : String(e);
+        throw new ConnectError(`failed to serialize EndStreamResponse: ${m}`, Code.Internal);
+      }
+    },
+    parse(data) {
+      try {
+        return endStreamFromJson(data);
+      } catch (e) {
+        const m = e instanceof Error ? e.message : String(e);
+        throw new ConnectError(`failed to parse EndStreamResponse: ${m}`, Code.InvalidArgument);
+      }
+    }
+  };
+}
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/protocol-connect/http-status.js
+function codeToHttpStatus(code) {
+  switch (code) {
+    case Code.Canceled:
+      return 499;
+    // Client Closed Request
+    case Code.Unknown:
+      return 500;
+    // Internal Server Error
+    case Code.InvalidArgument:
+      return 400;
+    // Bad Request
+    case Code.DeadlineExceeded:
+      return 504;
+    // Gateway Timeout
+    case Code.NotFound:
+      return 404;
+    // Not Found
+    case Code.AlreadyExists:
+      return 409;
+    // Conflict
+    case Code.PermissionDenied:
+      return 403;
+    // Forbidden
+    case Code.ResourceExhausted:
+      return 429;
+    // Too Many Requests
+    case Code.FailedPrecondition:
+      return 400;
+    // Bad Request
+    case Code.Aborted:
+      return 409;
+    // Conflict
+    case Code.OutOfRange:
+      return 400;
+    // Bad Request
+    case Code.Unimplemented:
+      return 501;
+    // Not Implemented
+    case Code.Internal:
+      return 500;
+    // Internal Server Error
+    case Code.Unavailable:
+      return 503;
+    // Service Unavailable
+    case Code.DataLoss:
+      return 500;
+    // Internal Server Error
+    case Code.Unauthenticated:
+      return 401;
+    // Unauthorized
+    default:
+      return 500;
+  }
+}
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/protocol-connect/parse-timeout.js
+function parseTimeout2(value, maxTimeoutMs) {
+  if (value === null) {
+    return {};
+  }
+  const results = /^\d{1,10}$/.exec(value);
+  if (results === null) {
+    return {
+      error: new ConnectError(`protocol error: invalid connect timeout value: ${value}`, Code.InvalidArgument)
+    };
+  }
+  const timeoutMs = parseInt(results[0]);
+  if (timeoutMs > maxTimeoutMs) {
+    return {
+      timeoutMs,
+      error: new ConnectError(`timeout ${timeoutMs}ms must be <= ${maxTimeoutMs}`, Code.InvalidArgument)
+    };
+  }
+  return {
+    timeoutMs: parseInt(results[0])
+  };
+}
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/protocol-connect/query-params.js
+var paramConnectVersion = "connect";
+var paramEncoding = "encoding";
+var paramCompression = "compression";
+var paramBase64 = "base64";
+var paramMessage = "message";
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/protocol-connect/trailer-mux.js
+function trailerMux(header, trailer2) {
+  const h = new Headers(header);
+  trailer2.forEach((value, key) => {
+    h.append(`trailer-${key}`, value);
+  });
+  return h;
+}
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/protocol-connect/version.js
+var protocolVersion = "1";
+function requireProtocolVersionHeader(requestHeader) {
+  const v = requestHeader.get(headerProtocolVersion);
+  if (v === null) {
+    throw new ConnectError(`missing required header: set ${headerProtocolVersion} to "${protocolVersion}"`, Code.InvalidArgument);
+  }
+  if (v !== protocolVersion) {
+    throw new ConnectError(`${headerProtocolVersion} must be "${protocolVersion}": got "${v}"`, Code.InvalidArgument);
+  }
+}
+function requireProtocolVersionParam(queryParams) {
+  const v = queryParams.get(paramConnectVersion);
+  if (v === null) {
+    throw new ConnectError(`missing required parameter: set ${paramConnectVersion} to "v${protocolVersion}"`, Code.InvalidArgument);
+  }
+  if (v !== `v${protocolVersion}`) {
+    throw new ConnectError(`${paramConnectVersion} must be "v${protocolVersion}": got "${v}"`, Code.InvalidArgument);
+  }
+}
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/protocol-connect/handler-factory.js
+var protocolName3 = "connect";
+var methodPost3 = "POST";
+var methodGet = "GET";
+function createHandlerFactory3(options) {
+  const opt = validateUniversalHandlerOptions(options);
+  const endStreamSerialization = createEndStreamSerialization(opt.jsonOptions);
+  function fact(spec) {
+    let h;
+    let contentTypeRegExp4;
+    const serialization = createMethodSerializationLookup(spec.method, opt.binaryOptions, opt.jsonOptions, opt);
+    switch (spec.kind) {
+      case "unary":
+        contentTypeRegExp4 = contentTypeUnaryRegExp;
+        h = createUnaryHandler(opt, spec, serialization);
+        break;
+      default:
+        contentTypeRegExp4 = contentTypeStreamRegExp;
+        h = createStreamHandler(opt, spec, serialization, endStreamSerialization);
+        break;
+    }
+    const allowedMethods = [methodPost3];
+    if (spec.method.idempotency === MethodOptions_IdempotencyLevel.NO_SIDE_EFFECTS) {
+      allowedMethods.push(methodGet);
+    }
+    return Object.assign(h, {
+      protocolNames: [protocolName3],
+      supportedContentType: contentTypeMatcher(contentTypeRegExp4),
+      allowedMethods,
+      requestPath: createMethodUrl("/", spec.method),
+      service: spec.method.parent,
+      method: spec.method
+    });
+  }
+  fact.protocolName = protocolName3;
+  return fact;
+}
+function createUnaryHandler(opt, spec, serialization) {
+  return async function handle(req) {
+    const isGet = req.method == methodGet;
+    if (isGet && spec.method.idempotency != MethodOptions_IdempotencyLevel.NO_SIDE_EFFECTS) {
+      return uResponseMethodNotAllowed;
+    }
+    const queryParams = new URL(req.url).searchParams;
+    const compressionRequested = isGet ? queryParams.get(paramCompression) : req.header.get(headerUnaryEncoding);
+    const type = isGet ? parseEncodingQuery(queryParams.get(paramEncoding)) : parseContentType3(req.header.get(headerContentType2));
+    if (type == void 0 || type.stream) {
+      return uResponseUnsupportedMediaType;
+    }
+    const timeout = parseTimeout2(req.header.get(headerTimeout2), opt.maxTimeoutMs);
+    const context = createHandlerContext(Object.assign(Object.assign({}, spec), { service: spec.method.parent, requestMethod: req.method, protocolName: protocolName3, timeoutMs: timeout.timeoutMs, shutdownSignal: opt.shutdownSignal, requestSignal: req.signal, requestHeader: req.header, url: req.url, responseHeader: {
+      [headerContentType2]: type.binary ? contentTypeUnaryProto : contentTypeUnaryJson
+    }, contextValues: req.contextValues }));
+    const compression = compressionNegotiate(opt.acceptCompression, compressionRequested, req.header.get(headerUnaryAcceptEncoding), headerUnaryAcceptEncoding);
+    let status = uResponseOk.status;
+    let body;
+    try {
+      if (opt.requestGate !== void 0) {
+        await opt.requestGate(context);
+      }
+      if (opt.requireConnectProtocolHeader) {
+        if (isGet) {
+          requireProtocolVersionParam(queryParams);
+        } else {
+          requireProtocolVersionHeader(req.header);
+        }
+      }
+      if (compression.error) {
+        throw compression.error;
+      }
+      if (timeout.error) {
+        throw timeout.error;
+      }
+      let reqBody;
+      if (isGet) {
+        reqBody = await readUnaryMessageFromQuery(opt.readMaxBytes, compression.request, queryParams);
+      } else {
+        reqBody = await readUnaryMessageFromBody(opt.readMaxBytes, compression.request, req);
+      }
+      const input = parseUnaryMessage(spec.method, type.binary, serialization, reqBody);
+      const output = await invokeUnaryImplementation(spec, context, input, opt.interceptors);
+      body = serialization.getO(type.binary).serialize(output);
+    } catch (e) {
+      context.abort(e);
+      let error;
+      if (e instanceof ConnectError) {
+        error = e;
+      } else {
+        error = new ConnectError("internal error", Code.Internal, void 0, void 0, e);
+      }
+      status = codeToHttpStatus(error.code);
+      context.responseHeader.set(headerContentType2, contentTypeUnaryJson);
+      if (!error.isWireError) {
+        mergeNonProtocolHeaders(context.responseHeader, error.metadata);
+      }
+      body = errorToJsonBytes(error, opt.jsonOptions);
+    } finally {
+      context.abort();
+    }
+    if (compression.response && body.byteLength >= opt.compressMinBytes) {
+      body = await compression.response.compress(body);
+      context.responseHeader.set(headerUnaryEncoding, compression.response.name);
+    }
+    const header = trailerMux(context.responseHeader, context.responseTrailer);
+    header.set(headerUnaryContentLength, body.byteLength.toString(10));
+    return {
+      status,
+      body: createAsyncIterable([body]),
+      header
+    };
+  };
+}
+async function readUnaryMessageFromBody(readMaxBytes, compression, request) {
+  if (typeof request.body == "object" && request.body !== null && Symbol.asyncIterator in request.body) {
+    let reqBytes = await readAllBytes(request.body, readMaxBytes, request.header.get(headerUnaryContentLength));
+    if (compression) {
+      reqBytes = await compression.decompress(reqBytes, readMaxBytes);
+    }
+    return reqBytes;
+  }
+  return request.body;
+}
+async function readUnaryMessageFromQuery(readMaxBytes, compression, queryParams) {
+  var _a;
+  const base64 = queryParams.get(paramBase64);
+  const message = (_a = queryParams.get(paramMessage)) !== null && _a !== void 0 ? _a : "";
+  let decoded;
+  if (base64 === "1") {
+    decoded = base64Decode(message);
+  } else {
+    decoded = new TextEncoder().encode(message);
+  }
+  if (compression) {
+    decoded = await compression.decompress(decoded, readMaxBytes);
+  }
+  return decoded;
+}
+function parseUnaryMessage(method4, useBinaryFormat, serialization, input) {
+  if (input instanceof Uint8Array) {
+    return serialization.getI(useBinaryFormat).parse(input);
+  }
+  if (useBinaryFormat) {
+    throw new ConnectError("received parsed JSON request body, but content-type indicates binary format", Code.Internal);
+  }
+  try {
+    return fromJson(method4.input, input);
+  } catch (e) {
+    throw ConnectError.from(e, Code.InvalidArgument);
+  }
+}
+function createStreamHandler(opt, spec, serialization, endStreamSerialization) {
+  return async function handle(req) {
+    assertByteStreamRequest(req);
+    const type = parseContentType3(req.header.get(headerContentType2));
+    if (type == void 0 || !type.stream) {
+      return uResponseUnsupportedMediaType;
+    }
+    if (req.method !== methodPost3) {
+      return uResponseMethodNotAllowed;
+    }
+    const timeout = parseTimeout2(req.header.get(headerTimeout2), opt.maxTimeoutMs);
+    const context = createHandlerContext(Object.assign(Object.assign({}, spec), { service: spec.method.parent, requestMethod: req.method, protocolName: protocolName3, timeoutMs: timeout.timeoutMs, shutdownSignal: opt.shutdownSignal, requestSignal: req.signal, requestHeader: req.header, url: req.url, responseHeader: {
+      [headerContentType2]: type.binary ? contentTypeStreamProto : contentTypeStreamJson
+    }, contextValues: req.contextValues }));
+    const compression = compressionNegotiate(opt.acceptCompression, req.header.get(headerStreamEncoding), req.header.get(headerStreamAcceptEncoding), headerStreamAcceptEncoding);
+    if (compression.response) {
+      context.responseHeader.set(headerStreamEncoding, compression.response.name);
+    }
+    const inputIt = pipe(req.body, transformPrepend(() => {
+      if (opt.requireConnectProtocolHeader) {
+        requireProtocolVersionHeader(req.header);
+      }
+      if (compression.error)
+        throw compression.error;
+      if (timeout.error)
+        throw timeout.error;
+      return void 0;
+    }), transformSplitEnvelope(opt.readMaxBytes), transformDecompressEnvelope(compression.request, opt.readMaxBytes), transformParseEnvelope(serialization.getI(type.binary), endStreamFlag));
+    const it = await applyRequestGate(context, opt.requestGate, () => transformInvokeImplementation(spec, context, opt.interceptors)(inputIt));
+    const outputIt = pipe(
+      // We wrap the iterator in an async iterator to ensure that the
+      // abort signal is aborted when the iterator is done.
+      {
+        [Symbol.asyncIterator]() {
+          return {
+            next: () => it.next(),
+            throw: (e) => {
+              var _a, _b;
+              context.abort(e);
+              return (_b = (_a = it.throw) === null || _a === void 0 ? void 0 : _a.call(it, e)) !== null && _b !== void 0 ? _b : Promise.reject({ done: true });
+            },
+            return: (v) => {
+              var _a, _b;
+              context.abort();
+              return (_b = (_a = it.return) === null || _a === void 0 ? void 0 : _a.call(it, v)) !== null && _b !== void 0 ? _b : Promise.resolve({ done: true, value: v });
+            }
+          };
+        }
+      },
+      transformSerializeEnvelope(serialization.getO(type.binary)),
+      transformCatchFinally((e) => {
+        context.abort(e);
+        const end2 = {
+          metadata: context.responseTrailer
+        };
+        if (e instanceof ConnectError) {
+          end2.error = e;
+        } else if (e !== void 0) {
+          end2.error = new ConnectError("internal error", Code.Internal, void 0, void 0, e);
+        }
+        return {
+          flags: endStreamFlag,
+          data: endStreamSerialization.serialize(end2)
+        };
+      }),
+      transformCompressEnvelope(compression.response, opt.compressMinBytes),
+      transformJoinEnvelopes(),
+      { propagateDownStreamError: true }
+    );
+    return Object.assign(Object.assign({}, uResponseOk), {
+      // We wait for the first response body bytes before resolving, so that
+      // implementations have a chance to add headers before an adapter commits
+      // them to the wire.
+      body: await untilFirst(outputIt),
+      header: context.responseHeader
+    });
+  };
+}
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/router.js
+function createConnectRouter(routerOptions) {
+  const base = whichProtocols(routerOptions);
+  const handlers = [];
+  const router = {
+    handlers,
+    service: (service, implementation, options) => {
+      const { protocols } = whichProtocols(options, base);
+      handlers.push(...createUniversalServiceHandlers(createServiceImplSpec(service, implementation), protocols));
+      return router;
+    },
+    rpc: (method4, impl, opt) => {
+      const { protocols } = whichProtocols(opt, base);
+      handlers.push(createUniversalMethodHandler(createMethodImplSpec(method4, impl), protocols));
+      return router;
+    }
+  };
+  return router;
+}
+function whichProtocols(options, base) {
+  if (base && !options) {
+    return base;
+  }
+  const opt = base ? Object.assign(Object.assign({}, validateUniversalHandlerOptions(base.options)), options) : Object.assign(Object.assign({}, options), validateUniversalHandlerOptions(options !== null && options !== void 0 ? options : {}));
+  const protocols = [];
+  if ((options === null || options === void 0 ? void 0 : options.grpc) !== false) {
+    protocols.push(createHandlerFactory2(opt));
+  }
+  if ((options === null || options === void 0 ? void 0 : options.grpcWeb) !== false) {
+    protocols.push(createHandlerFactory(opt));
+  }
+  if ((options === null || options === void 0 ? void 0 : options.connect) !== false) {
+    protocols.push(createHandlerFactory3(opt));
+  }
+  if (protocols.length === 0) {
+    throw new ConnectError("cannot create handler, all protocols are disabled", Code.InvalidArgument);
+  }
+  return {
+    options: opt,
+    protocols
+  };
+}
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect-node@2._776f2cc8cd8b672833e46deb1c27bd76/node_modules/@connectrpc/connect-node/dist/esm/compression.js
+import * as zlib from "node:zlib";
+import { promisify } from "node:util";
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect-node@2._776f2cc8cd8b672833e46deb1c27bd76/node_modules/@connectrpc/connect-node/dist/esm/node-error.js
+function connectErrorFromNodeReason(reason) {
+  let code = Code.Internal;
+  const chain = unwrapNodeErrorChain(reason).map(getNodeErrorProps);
+  if (chain.some((p) => p.code == "ERR_STREAM_WRITE_AFTER_END")) {
+    code = Code.Aborted;
+  } else if (chain.some((p) => p.code == "ERR_STREAM_DESTROYED" || p.code == "ERR_HTTP2_INVALID_STREAM" || p.code == "ECONNRESET")) {
+    code = Code.Aborted;
+  } else if (chain.some((p) => p.code == "ETIMEDOUT" || p.code == "ENOTFOUND" || p.code == "EAI_AGAIN" || p.code == "ECONNREFUSED")) {
+    code = Code.Unavailable;
+  }
+  const ce = ConnectError.from(reason, code);
+  if (ce !== reason) {
+    ce.cause = reason;
+  }
+  return ce;
+}
+function unwrapNodeErrorChain(reason) {
+  const chain = [];
+  for (; ; ) {
+    if (!(reason instanceof Error)) {
+      break;
+    }
+    if (chain.includes(reason)) {
+      break;
+    }
+    chain.push(reason);
+    if (!("cause" in reason)) {
+      break;
+    }
+    reason = reason.cause;
+  }
+  return chain;
+}
+function getNodeErrorProps(reason) {
+  const props = {};
+  if (reason instanceof Error) {
+    if ("code" in reason && typeof reason.code == "string") {
+      props.code = reason.code;
+    }
+    if ("syscall" in reason && typeof reason.syscall == "string") {
+      props.syscall = reason.syscall;
+    }
+  }
+  return props;
+}
+function connectErrorFromH2ResetCode(rstCode) {
+  switch (rstCode) {
+    case H2Code.PROTOCOL_ERROR:
+    case H2Code.INTERNAL_ERROR:
+    case H2Code.FLOW_CONTROL_ERROR:
+    case H2Code.SETTINGS_TIMEOUT:
+    case H2Code.FRAME_SIZE_ERROR:
+    case H2Code.COMPRESSION_ERROR:
+    case H2Code.CONNECT_ERROR:
+      return new ConnectError(`http/2 stream closed with error code ${H2Code[rstCode]} (0x${rstCode.toString(16)})`, Code.Internal);
+    case H2Code.REFUSED_STREAM:
+      return new ConnectError(`http/2 stream closed with error code ${H2Code[rstCode]} (0x${rstCode.toString(16)})`, Code.Unavailable);
+    case H2Code.CANCEL:
+      return new ConnectError(`http/2 stream closed with error code ${H2Code[rstCode]} (0x${rstCode.toString(16)})`, Code.Canceled);
+    case H2Code.ENHANCE_YOUR_CALM:
+      return new ConnectError(`http/2 stream closed with error code ${H2Code[rstCode]} (0x${rstCode.toString(16)})`, Code.ResourceExhausted);
+    case H2Code.INADEQUATE_SECURITY:
+      return new ConnectError(`http/2 stream closed with error code ${H2Code[rstCode]} (0x${rstCode.toString(16)})`, Code.PermissionDenied);
+    case H2Code.HTTP_1_1_REQUIRED:
+      return new ConnectError(`http/2 stream closed with error code ${H2Code[rstCode]} (0x${rstCode.toString(16)})`, Code.PermissionDenied);
+    default:
+      break;
+  }
+  return void 0;
+}
+var H2Code;
+(function(H2Code2) {
+  H2Code2[H2Code2["NO_ERROR"] = 0] = "NO_ERROR";
+  H2Code2[H2Code2["PROTOCOL_ERROR"] = 1] = "PROTOCOL_ERROR";
+  H2Code2[H2Code2["INTERNAL_ERROR"] = 2] = "INTERNAL_ERROR";
+  H2Code2[H2Code2["FLOW_CONTROL_ERROR"] = 3] = "FLOW_CONTROL_ERROR";
+  H2Code2[H2Code2["SETTINGS_TIMEOUT"] = 4] = "SETTINGS_TIMEOUT";
+  H2Code2[H2Code2["STREAM_CLOSED"] = 5] = "STREAM_CLOSED";
+  H2Code2[H2Code2["FRAME_SIZE_ERROR"] = 6] = "FRAME_SIZE_ERROR";
+  H2Code2[H2Code2["REFUSED_STREAM"] = 7] = "REFUSED_STREAM";
+  H2Code2[H2Code2["CANCEL"] = 8] = "CANCEL";
+  H2Code2[H2Code2["COMPRESSION_ERROR"] = 9] = "COMPRESSION_ERROR";
+  H2Code2[H2Code2["CONNECT_ERROR"] = 10] = "CONNECT_ERROR";
+  H2Code2[H2Code2["ENHANCE_YOUR_CALM"] = 11] = "ENHANCE_YOUR_CALM";
+  H2Code2[H2Code2["INADEQUATE_SECURITY"] = 12] = "INADEQUATE_SECURITY";
+  H2Code2[H2Code2["HTTP_1_1_REQUIRED"] = 13] = "HTTP_1_1_REQUIRED";
+})(H2Code || (H2Code = {}));
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect-node@2._776f2cc8cd8b672833e46deb1c27bd76/node_modules/@connectrpc/connect-node/dist/esm/compression.js
+var gzip2 = promisify(zlib.gzip);
+var gunzip2 = promisify(zlib.gunzip);
+var brotliCompress2 = promisify(zlib.brotliCompress);
+var brotliDecompress2 = promisify(zlib.brotliDecompress);
+var compressionGzip = {
+  name: "gzip",
+  compress(bytes) {
+    return asUint8ArrayArrayBuffer(gzip2(bytes, {}));
+  },
+  decompress(bytes, readMaxBytes) {
+    if (bytes.length == 0) {
+      return Promise.resolve(new Uint8Array(0));
+    }
+    return asUint8ArrayArrayBuffer(wrapZLibErrors(gunzip2(bytes, {
+      maxOutputLength: readMaxBytes
+    }), readMaxBytes));
+  }
+};
+var compressionBrotli = {
+  name: "br",
+  compress(bytes) {
+    return asUint8ArrayArrayBuffer(brotliCompress2(bytes, {}));
+  },
+  decompress(bytes, readMaxBytes) {
+    if (bytes.length == 0) {
+      return Promise.resolve(new Uint8Array(0));
+    }
+    return asUint8ArrayArrayBuffer(wrapZLibErrors(brotliDecompress2(bytes, {
+      maxOutputLength: readMaxBytes
+    }), readMaxBytes));
+  }
+};
+function asUint8ArrayArrayBuffer(bytes) {
+  return bytes.then((b) => {
+    if (b.buffer instanceof ArrayBuffer) {
+      return b;
+    }
+    return new Uint8Array(b);
+  });
+}
+function wrapZLibErrors(promise, readMaxBytes) {
+  return promise.catch((e) => {
+    var _a;
+    const props = getNodeErrorProps(e);
+    let code = Code.Internal;
+    let message = "decompression failed";
+    switch (props.code) {
+      case "ERR_BUFFER_TOO_LARGE":
+        code = Code.ResourceExhausted;
+        message = `message is larger than configured readMaxBytes ${readMaxBytes} after decompression`;
+        break;
+      case "Z_DATA_ERROR":
+      case "ERR_PADDING_2":
+        code = Code.InvalidArgument;
+        break;
+      default:
+        if ((_a = props.code) === null || _a === void 0 ? void 0 : _a.startsWith("ERR__ERROR_FORMAT_")) {
+          code = Code.InvalidArgument;
+        }
+        break;
+    }
+    return Promise.reject(new ConnectError(message, code, void 0, void 0, e));
+  });
+}
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect-node@2._776f2cc8cd8b672833e46deb1c27bd76/node_modules/@connectrpc/connect-node/dist/esm/node-universal-header.js
+function nodeHeaderToWebHeader(nodeHeaders) {
+  const header = new Headers();
+  for (const [k, v] of Object.entries(nodeHeaders)) {
+    if (k.startsWith(":")) {
+      continue;
+    }
+    if (v === void 0) {
+      continue;
+    }
+    if (typeof v == "string") {
+      header.append(k, v);
+    } else if (typeof v == "number") {
+      header.append(k, String(v));
+    } else {
+      for (const e of v) {
+        header.append(k, e);
+      }
+    }
+  }
+  return header;
+}
+function webHeaderToNodeHeaders(headersInit, defaultNodeHeaders) {
+  if (headersInit === void 0 && defaultNodeHeaders === void 0) {
+    return void 0;
+  }
+  const o = /* @__PURE__ */ Object.create(null);
+  if (defaultNodeHeaders !== void 0) {
+    if (Array.isArray(defaultNodeHeaders)) {
+      for (let i = 0; i + 1 < defaultNodeHeaders.length; i += 2) {
+        const key = defaultNodeHeaders[i];
+        const value = defaultNodeHeaders[i + 1];
+        if (Array.isArray(o[key])) {
+          o[key].push(value);
+        } else if (typeof o[key] == "string") {
+          o[key] = [o[key], value];
+        } else {
+          o[key] = value;
+        }
+      }
+    } else {
+      for (const [key, value] of Object.entries(defaultNodeHeaders)) {
+        if (Array.isArray(value)) {
+          o[key] = value.concat();
+        } else if (value !== void 0) {
+          o[key] = value;
+        }
+      }
+    }
+  }
+  if (headersInit !== void 0) {
+    if (Array.isArray(headersInit)) {
+      for (const [key, value] of headersInit) {
+        appendWebHeader(o, key, value);
+      }
+    } else if ("forEach" in headersInit) {
+      if (typeof headersInit.forEach == "function") {
+        headersInit.forEach((value, key) => {
+          appendWebHeader(o, key, value);
+        });
+      }
+    } else {
+      for (const [key, value] of Object.entries(headersInit)) {
+        appendWebHeader(o, key, value);
+      }
+    }
+  }
+  return o;
+}
+function appendWebHeader(o, key, value) {
+  key = key.toLowerCase();
+  const existing = o[key];
+  if (Array.isArray(existing)) {
+    existing.push(value);
+  } else if (existing === void 0) {
+    o[key] = value;
+  } else {
+    o[key] = [existing.toString(), value];
+  }
+}
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect-node@2._776f2cc8cd8b672833e46deb1c27bd76/node_modules/@connectrpc/connect-node/dist/esm/node-universal-handler.js
+import * as http2 from "node:http2";
+var __asyncValues3 = function(o) {
+  if (!Symbol.asyncIterator) throw new TypeError("Symbol.asyncIterator is not defined.");
+  var m = o[Symbol.asyncIterator], i;
+  return m ? m.call(o) : (o = typeof __values === "function" ? __values(o) : o[Symbol.iterator](), i = {}, verb("next"), verb("throw"), verb("return"), i[Symbol.asyncIterator] = function() {
+    return this;
+  }, i);
+  function verb(n) {
+    i[n] = o[n] && function(v) {
+      return new Promise(function(resolve, reject2) {
+        v = o[n](v), settle(resolve, reject2, v.done, v.value);
+      });
+    };
+  }
+  function settle(resolve, reject2, d, v) {
+    Promise.resolve(v).then(function(v2) {
+      resolve({ value: v2, done: d });
+    }, reject2);
+  }
+};
+function universalRequestFromNodeRequest(nodeRequest, ...rest) {
+  var _a, _b;
+  const nodeResponse = rest.length === 3 ? rest[0] : void 0;
+  const parsedJsonBody = rest.length === 3 ? rest[1] : rest[0];
+  const contextValues = rest.length === 3 ? rest[2] : rest[1];
+  const encrypted = "encrypted" in nodeRequest.socket && nodeRequest.socket.encrypted;
+  const protocol = encrypted ? "https" : "http";
+  const authority = "authority" in nodeRequest ? nodeRequest.authority : nodeRequest.headers.host;
+  const pathname = (_a = nodeRequest.url) !== null && _a !== void 0 ? _a : "";
+  if (authority === void 0) {
+    throw new ConnectError("unable to determine request authority from Node.js server request", Code.Internal);
+  }
+  const body = parsedJsonBody !== void 0 ? parsedJsonBody : nodeRequest.iterator({
+    destroyOnReturn: false
+  });
+  const abortController = new AbortController();
+  if ("stream" in nodeRequest) {
+    nodeRequest.once("close", () => {
+      const err = connectErrorFromH2ResetCode(nodeRequest.stream.rstCode);
+      if (err !== void 0) {
+        abortController.abort(err);
+      } else {
+        abortController.abort();
+      }
+    });
+  } else {
+    const nodeResponsOrRequest = nodeResponse !== null && nodeResponse !== void 0 ? nodeResponse : nodeRequest;
+    const onH1Error = (e) => {
+      nodeRequest.off("error", onH1Error);
+      nodeResponsOrRequest.off("close", onH1Close);
+      abortController.abort(connectErrorFromNodeReason(e));
+    };
+    const onH1Close = () => {
+      nodeRequest.off("error", onH1Error);
+      nodeResponsOrRequest.off("close", onH1Close);
+      abortController.abort(nodeRequest.errored ? connectErrorFromNodeReason(nodeRequest.errored) : void 0);
+    };
+    nodeRequest.once("error", onH1Error);
+    nodeResponsOrRequest.once("close", onH1Close);
+  }
+  return {
+    httpVersion: nodeRequest.httpVersion,
+    method: (_b = nodeRequest.method) !== null && _b !== void 0 ? _b : "",
+    url: new URL(pathname, `${protocol}://${authority}`).toString(),
+    header: nodeHeaderToWebHeader(nodeRequest.headers),
+    body,
+    signal: abortController.signal,
+    contextValues
+  };
+}
+async function universalResponseToNodeResponse(universalResponse, nodeResponse) {
+  var _a, e_1, _b, _c;
+  var _d, _e, _f, _g, _h;
+  const it = (_d = universalResponse.body) === null || _d === void 0 ? void 0 : _d[Symbol.asyncIterator]();
+  let isWriteError = false;
+  try {
+    let chunk = await (it === null || it === void 0 ? void 0 : it.next());
+    const nodeHeaders = webHeaderToNodeHeaders((_e = universalResponse.header) !== null && _e !== void 0 ? _e : {});
+    if ("stream" in nodeResponse) {
+      const stream = nodeResponse.stream;
+      stream.once("wantTrailers", () => {
+        setImmediate(() => {
+          if (stream.state.remoteClose === 0) {
+            stream.close(http2.constants.NGHTTP2_NO_ERROR);
+          }
+        });
+      });
+    } else if (nodeResponse.shouldKeepAlive && ((_f = nodeHeaders.connection) === null || _f === void 0 ? void 0 : _f.toString().toLowerCase()) !== "close") {
+      const maxDrainBytes = 256 * 1024;
+      const closeDelayMs = 500;
+      const request = nodeResponse.req;
+      let didError = false;
+      let drainedBytes = 0;
+      try {
+        try {
+          for (var _j = true, _k = __asyncValues3(request.iterator({
+            destroyOnReturn: false
+          })), _l; _l = await _k.next(), _a = _l.done, !_a; _j = true) {
+            _c = _l.value;
+            _j = false;
+            const drained = _c;
+            drainedBytes += drained.byteLength;
+            if (drainedBytes > maxDrainBytes) {
+              break;
+            }
+          }
+        } catch (e_1_1) {
+          e_1 = { error: e_1_1 };
+        } finally {
+          try {
+            if (!_j && !_a && (_b = _k.return)) await _b.call(_k);
+          } finally {
+            if (e_1) throw e_1.error;
+          }
+        }
+      } catch (_m) {
+        didError = true;
+      }
+      const socket = nodeResponse.socket;
+      if (!request.complete && socket !== null) {
+        nodeHeaders.connection = "close";
+        if (!didError) {
+          socket.destroySoon = () => {
+            socket.end(() => setTimeout(() => socket.destroy(), closeDelayMs).unref());
+          };
+        }
+      }
+    }
+    isWriteError = true;
+    nodeResponse.writeHead(universalResponse.status, nodeHeaders);
+    isWriteError = false;
+    while (chunk !== void 0 && chunk.done !== true) {
+      isWriteError = true;
+      await write(nodeResponse, chunk.value);
+      if ("flush" in nodeResponse && typeof nodeResponse.flush == "function") {
+        nodeResponse.flush();
+      }
+      isWriteError = false;
+      chunk = await (it === null || it === void 0 ? void 0 : it.next());
+    }
+    if (universalResponse.trailer) {
+      nodeResponse.addTrailers(webHeaderToNodeHeaders(universalResponse.trailer));
+    }
+    await new Promise((resolve) => {
+      nodeResponse.once("end", resolve);
+      nodeResponse.end();
+    });
+  } catch (e) {
+    if (isWriteError) {
+      (_g = it === null || it === void 0 ? void 0 : it.throw) === null || _g === void 0 ? void 0 : _g.call(it, e).catch(() => {
+      });
+    }
+    throw connectErrorFromNodeReason(e);
+  } finally {
+    (_h = it === null || it === void 0 ? void 0 : it.return) === null || _h === void 0 ? void 0 : _h.call(it).catch(() => {
+    });
+  }
+}
+function write(stream, data) {
+  return new Promise((resolve, reject2) => {
+    if (stream.errored) {
+      return error(stream.errored);
+    }
+    stream.once("error", error);
+    stream.once("drain", drain);
+    const flushed = stream.write(data, "binary", (err) => {
+      if (err && !flushed) {
+        error(err);
+        stream.once("error", () => {
+        });
+      }
+    });
+    if (flushed) {
+      drain();
+    }
+    function error(err) {
+      stream.off("error", error);
+      stream.off("drain", drain);
+      reject2(err);
+    }
+    function drain() {
+      stream.off("error", error);
+      stream.off("drain", drain);
+      resolve();
+    }
+  });
+}
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect-node@2._776f2cc8cd8b672833e46deb1c27bd76/node_modules/@connectrpc/connect-node/dist/esm/connect-node-adapter.js
+function connectNodeAdapter(options) {
+  var _a;
+  if (options.acceptCompression === void 0) {
+    options.acceptCompression = [compressionGzip, compressionBrotli];
+  }
+  const router = createConnectRouter(options);
+  options.routes(router);
+  const prefix = (_a = options.requestPathPrefix) !== null && _a !== void 0 ? _a : "";
+  const paths2 = /* @__PURE__ */ new Map();
+  for (const uHandler of router.handlers) {
+    paths2.set(prefix + uHandler.requestPath, uHandler);
+  }
+  return function nodeRequestHandler(req, res) {
+    var _a2, _b, _c, _d;
+    const uHandler = paths2.get((_b = (_a2 = req.url) === null || _a2 === void 0 ? void 0 : _a2.split("?", 2)[0]) !== null && _b !== void 0 ? _b : "");
+    if (!uHandler) {
+      ((_c = options.fallback) !== null && _c !== void 0 ? _c : fallback)(req, res);
+      return;
+    }
+    const uReq = universalRequestFromNodeRequest(req, res, void 0, (_d = options.contextValues) === null || _d === void 0 ? void 0 : _d.call(options, req));
+    uHandler(uReq).then((uRes) => universalResponseToNodeResponse(uRes, res)).catch((reason) => {
+      if (ConnectError.from(reason).code == Code.Aborted) {
+        return;
+      }
+      console.error(`handler for rpc ${uHandler.method.name} of ${uHandler.service.typeName} failed`, reason);
+    });
+  };
+}
+var fallback = (request, response) => {
+  response.writeHead(uResponseNotFound.status);
+  response.end();
+};
+
+// src/entrypoints/http/room-event-stream.ts
+var method2 = BoardRoomService.method.streamBoardRoomEvents;
+var roomEventStreamPath = `/${method2.parent.typeName}/${method2.name}`;
+var maxEventBytes = 96 * 1024;
+var maxQueuedEvents = 32;
+var maxQueuedBytes = 512 * 1024;
+var recheckIntervalMs2 = 1500;
+var packedEvents = /* @__PURE__ */ new WeakMap();
+function packEvent(event) {
+  const cached = packedEvents.get(event);
+  if (cached) {
+    return cached;
+  }
+  let wire = create(BoardRoomEventSchema, eventWire(event));
+  let bytes = toBinary(BoardRoomEventSchema, wire).byteLength;
+  if (bytes > maxEventBytes) {
+    wire = create(BoardRoomEventSchema, eventWire({ ...event, payload: compactPayload(event) }));
+    bytes = toBinary(BoardRoomEventSchema, wire).byteLength;
+  }
+  if (bytes > maxEventBytes) {
+    throw new RoomCapacityError("Room event exceeds the stream message limit");
+  }
+  const packed = { event: wire, bytes };
+  packedEvents.set(event, packed);
+  return packed;
+}
+function decodeCursor({
+  boardId,
+  after
+}) {
+  if (!boardId.trim() || boardId.length > 160) {
+    throw new RoomInputError("Invalid room identifier");
+  }
+  if (!after) {
+    return;
+  }
+  const { roomInstanceId, sequence: sequence3 } = after;
+  if (!roomInstanceId.trim() || roomInstanceId.length > 160 || sequence3 === void 0) {
+    throw new RoomInputError("Invalid room event cursor");
+  }
+  return { roomInstanceId, sequence: sequence3 };
+}
+function streamError(error, reportError) {
+  if (error instanceof ConnectError) {
+    return error;
+  }
+  if (error instanceof RoomInputError) {
+    return new ConnectError(error.message, Code.InvalidArgument);
+  }
+  if (error instanceof RoomAccessError || error instanceof SharingAccessError) {
+    return new ConnectError("Room access is unavailable", Code.PermissionDenied);
+  }
+  if (error instanceof RoomCapacityError) {
+    return new ConnectError(error.message, Code.ResourceExhausted);
+  }
+  reportError(error);
+  return new ConnectError("Room stream failed", Code.Internal);
+}
+function authorizeBoardRead(actor, boardId) {
+  if (actor.authorizeRead) {
+    actor.authorizeRead(boardId);
+  } else {
+    actor.authorize?.({ boardId });
+  }
+}
+var RoomEventStream = class {
+  constructor(options) {
+    this.options = options;
+  }
+  options;
+  pending = [];
+  pendingBytes = 0;
+  wake;
+  failure;
+  subscription;
+  interval;
+  async *read(cursor, signal) {
+    const cancel = () => this.fail(ConnectError.from(signal.reason, Code.Canceled));
+    signal.addEventListener("abort", cancel, { once: true });
+    try {
+      if (signal.aborted) {
+        cancel();
+        return;
+      }
+      this.open(cursor);
+      for (; ; ) {
+        const event = await this.take();
+        if (!event) {
+          return;
+        }
+        this.checkAccess();
+        yield { event };
+      }
+    } catch (error) {
+      throw this.fail(error);
+    } finally {
+      signal.removeEventListener("abort", cancel);
+      this.dispose();
+    }
+  }
+  open(cursor) {
+    const { application, boardId, key } = this.options;
+    const subscription = application.subscribeAfter(boardId, key, cursor, {
+      deliver: (event) => this.run(() => this.enqueue(event)),
+      recheck: () => this.run(() => this.checkAccess()),
+      close: () => this.fail(new ConnectError("Room stream closed", Code.Unavailable))
+    });
+    this.subscription = subscription;
+    for (const event of subscription.events) {
+      this.enqueue(event);
+    }
+    this.interval = setInterval(() => this.run(() => this.tick()), recheckIntervalMs2);
+    this.interval.unref();
+  }
+  checkAccess() {
+    const { application, boardId, key, authorize } = this.options;
+    const actor = authorize();
+    if (!actor || actor.id !== key.actorId || actor.kind === "agent") {
+      throw new RoomAccessError("Room stream authorization has changed");
+    }
+    authorizeBoardRead(actor, boardId);
+    const access = application.access(boardId, key.actorId);
+    const baseline2 = this.subscription?.access;
+    if (!access || access.role !== baseline2?.role || access.canEdit !== baseline2.canEdit) {
+      throw new RoomAccessError("Room stream authorization has changed");
+    }
+    return access;
+  }
+  tick() {
+    const access = this.checkAccess();
+    this.options.application.tick(this.options.boardId, access.boardRevision);
+  }
+  enqueue(event) {
+    const packed = packEvent(event);
+    const pendingBytes = this.pendingBytes + packed.bytes;
+    if (this.pending.length >= maxQueuedEvents || pendingBytes > maxQueuedBytes) {
+      throw new RoomCapacityError("Room stream cannot keep up with events");
+    }
+    this.pending.push(packed);
+    this.pendingBytes = pendingBytes;
+    this.notify();
+  }
+  async take() {
+    if (!this.pending.length && !this.failure) {
+      await new Promise((resolve) => {
+        this.wake = resolve;
+      });
+    }
+    if (this.failure) {
+      throw this.failure;
+    }
+    const next = this.pending.shift();
+    if (next) {
+      this.pendingBytes -= next.bytes;
+      return next.event;
+    }
+  }
+  notify() {
+    const wake = this.wake;
+    this.wake = void 0;
+    wake?.();
+  }
+  run(action) {
+    if (this.failure) {
+      return;
+    }
+    try {
+      action();
+    } catch (error) {
+      this.fail(error);
+    }
+  }
+  fail(error) {
+    if (this.failure) {
+      return this.failure;
+    }
+    this.failure = streamError(error, this.options.reportError);
+    this.dispose();
+    this.notify();
+    this.options.disconnectBlockedWriter();
+    if (this.failure.code === Code.PermissionDenied) {
+      const { application, boardId, key } = this.options;
+      application.revokeView(boardId, key);
+    }
+    return this.failure;
+  }
+  dispose() {
+    clearInterval(this.interval);
+    this.subscription?.release();
+    this.subscription = void 0;
+    this.pending.length = 0;
+    this.pendingBytes = 0;
+  }
+};
+var roomStreamRequest = createContextKey(void 0);
+function createRoomEventStreamRoute(application, reportError) {
+  const requests = /* @__PURE__ */ new WeakMap();
+  const handler = connectNodeAdapter({
+    connect: true,
+    grpc: false,
+    grpcWeb: true,
+    readMaxBytes: 2048,
+    writeMaxBytes: 2 * maxEventBytes,
+    acceptCompression: [],
+    contextValues: (request) => createContextValues().set(roomStreamRequest, requests.get(request)),
+    routes(router) {
+      router.rpc(method2, async function* (input, context) {
+        const request = context.values.get(roomStreamRequest);
+        const actor = request?.authorize();
+        if (!request || !actor) {
+          throw new ConnectError("Room authentication is required", Code.Unauthenticated);
+        }
+        if (actor.kind === "agent") {
+          throw new ConnectError("Room streams are for human viewers", Code.PermissionDenied);
+        }
+        let cursor;
+        try {
+          cursor = decodeCursor(input);
+          authorizeBoardRead(actor, input.boardId);
+        } catch (error) {
+          throw streamError(error, reportError);
+        }
+        context.responseHeader.set("cache-control", "no-store, no-transform");
+        context.responseHeader.set("x-accel-buffering", "no");
+        yield* new RoomEventStream({
+          application,
+          boardId: input.boardId,
+          key: { actorId: actor.id, viewId: input.viewId },
+          reportError,
+          ...request
+        }).read(cursor, context.signal);
+      });
+    }
+  });
+  return (request, response, authorize) => {
+    requests.set(request, {
+      authorize,
+      disconnectBlockedWriter() {
+        if (response.writableNeedDrain) {
+          response.destroy();
+        }
+      }
+    });
+    try {
+      handler(request, response);
+    } finally {
+      requests.delete(request);
+    }
+  };
+}
+
+// src/entrypoints/http/room-event-wait.ts
+var method3 = BoardRoomService.method.waitBoardRoomEvents;
+var roomEventWaitPath = `/${method3.parent.typeName}/${method3.name}`;
+var waitMs = 2e4;
+var recheckMs = 1500;
+var maxEvents = 12;
+var maxResponseBytes = 96 * 1024;
+var eventEnvelopeBytes = 5;
+function packEvents(events) {
+  const packed = [];
+  let size = 0;
+  for (const event of events.slice(0, maxEvents)) {
+    let wire = create(BoardRoomEventSchema, eventWire(event));
+    let bytes = toBinary(BoardRoomEventSchema, wire).byteLength + eventEnvelopeBytes;
+    if (bytes > maxResponseBytes) {
+      wire = create(BoardRoomEventSchema, eventWire({ ...event, payload: compactPayload(event) }));
+      bytes = toBinary(BoardRoomEventSchema, wire).byteLength + eventEnvelopeBytes;
+    }
+    if (size + bytes > maxResponseBytes) {
+      if (packed.length === 0) {
+        throw new RoomCapacityError("Room event exceeds the wait response limit");
+      }
+      break;
+    }
+    packed.push(wire);
+    size += bytes;
+  }
+  return toBinary(
+    WaitBoardRoomEventsResponseSchema,
+    create(WaitBoardRoomEventsResponseSchema, {
+      events: packed
+    })
+  );
+}
+function waitForEvents({ application, boardId, key, cursor, response, authorize }) {
+  return new Promise((resolve, reject2) => {
+    let release;
+    let timeout;
+    let interval;
+    let baseline2;
+    let finished = false;
+    function stop() {
+      finished = true;
+      clearTimeout(timeout);
+      clearInterval(interval);
+      response.off("close", cancel);
+      release?.();
+    }
+    function cancel() {
+      stop();
+      resolve(void 0);
+    }
+    function run(action) {
+      if (finished) {
+        return;
+      }
+      try {
+        action();
+      } catch (error) {
+        stop();
+        reject2(error);
+      }
+    }
+    function currentAccess() {
+      const actor = authorize();
+      if (actor?.id !== key.actorId) {
+        throw new RoomAccessError("Room access has changed");
+      }
+      actor.authorizeRead?.(boardId);
+      const access = application.access(boardId, key.actorId);
+      if (!access || access.canEdit !== baseline2.canEdit || access.role !== baseline2.role) {
+        throw new RoomAccessError("Room access has changed");
+      }
+      return access;
+    }
+    function complete(events) {
+      currentAccess();
+      stop();
+      resolve(events);
+    }
+    run(() => {
+      if (response.destroyed) {
+        cancel();
+        return;
+      }
+      const subscription = application.subscribeAfter(boardId, key, cursor, {
+        deliver: (event) => run(() => complete([event])),
+        recheck: () => run(() => {
+          currentAccess();
+        }),
+        close: () => run(() => {
+          throw new RoomCapacityError("Room event subscription closed");
+        })
+      });
+      baseline2 = subscription.access;
+      release = subscription.release;
+      if (subscription.events.length > 0) {
+        complete(subscription.events);
+        return;
+      }
+      response.once("close", cancel);
+      timeout = setTimeout(() => run(() => complete([])), waitMs);
+      interval = setInterval(
+        () => run(() => application.tick(boardId, currentAccess().boardRevision)),
+        recheckMs
+      );
+      timeout.unref();
+      interval.unref();
+    });
+  });
+}
+async function serveRoomEventWait(application, request, response, actor, authorize) {
+  const input = decodeRequest(method3.input, await readBody(request, 2048));
+  actor.authorize?.(input);
+  const boardId = requireId(input.boardId);
+  const { after } = input;
+  if (boardId.length > 160) {
+    throw new HttpRequestError(400, "Room identifier is too long");
+  }
+  let cursor;
+  if (after) {
+    if (!after.roomInstanceId || after.roomInstanceId.length > 160 || after.sequence === void 0) {
+      throw new HttpRequestError(400, "Invalid room event cursor");
+    }
+    cursor = { roomInstanceId: after.roomInstanceId, sequence: after.sequence };
+  }
+  const events = await waitForEvents({
+    application,
+    boardId,
+    key: { actorId: actor.id, viewId: input.viewId },
+    cursor,
+    response,
+    authorize
+  });
+  if (events && !response.destroyed) {
+    sendProtobuf(response, packEvents(events));
+  }
+}
+
 // src/entrypoints/http/receipt.ts
 var REJECTION_REASONS = {
   forbidden: MoveRejectionReason.FORBIDDEN,
@@ -19683,7 +24000,7 @@ function toCommandTarget(target2) {
   return { objectId, expectedGeometryVersion };
 }
 function toMoveCommand(request) {
-  const { boardId, commandId, delta, targets } = request;
+  const { boardId, commandId, delta, targets: targets2 } = request;
   if (!delta) {
     throw new HttpRequestError(400, "Move delta is required");
   }
@@ -19691,7 +24008,7 @@ function toMoveCommand(request) {
     boardId: requireId(boardId),
     commandId: requireId(commandId),
     delta: { dx: delta.dx, dy: delta.dy },
-    targets: targets.map(toCommandTarget)
+    targets: targets2.map(toCommandTarget)
   };
 }
 function toOutcome(outcome) {
@@ -20009,8 +24326,8 @@ import {
 } from "node:http";
 var loopback = "127.0.0.1";
 var originProtocol = "http://";
-async function sendAsset(read, path2, request, response) {
-  const asset = await read(path2);
+async function sendAsset(read, path3, request, response) {
+  const asset = await read(path3);
   if (!asset) {
     response.writeHead(404).end();
     return;
@@ -20026,11 +24343,11 @@ async function sendAsset(read, path2, request, response) {
 function listener(read, guest, onError) {
   return (request, response) => {
     response.setHeader("referrer-policy", "no-referrer");
-    const path2 = request.url?.split("?", 1)[0] ?? "/";
-    const asset = path2 === "/" || path2.startsWith("/assets/");
+    const path3 = request.url?.split("?", 1)[0] ?? "/";
+    const asset = path3 === "/" || path3.startsWith("/assets/");
     const readable = request.method === "GET" || request.method === "HEAD";
     if (asset && readable) {
-      sendAsset(read, path2, request, response).catch((error) => {
+      sendAsset(read, path3, request, response).catch((error) => {
         onError?.(error);
         response.writeHead(500).end();
       });
@@ -20126,37 +24443,45 @@ var requestLimits = /* @__PURE__ */ new Map([
   [boardVideoRoutePath, boardVideoRequestLimit],
   [agentActivityPath, agentActivityRequestLimit]
 ]);
-async function handleRequest(request, response, routes, {
-  archiveApplication,
-  features,
-  resolveActor,
-  onError,
-  agentSuggestionPath
-}) {
-  const path2 = request.url ?? "";
+function serveRoomConnection(request, response, { features, resolveActor, onError }, roomStream) {
+  const path3 = request.url ?? "";
   const rooms = features?.rooms;
-  if (rooms && roomEventPath(path2)) {
-    serveRoomEvents(
-      rooms,
-      request,
-      response,
-      () => {
-        const actor2 = resolveActor(request);
-        return actor2?.kind === "agent" ? void 0 : actor2;
-      },
-      onError
-    );
+  if (roomStream && path3 === roomEventStreamPath) {
+    roomStream(request, response, () => resolveActor(request));
+    return true;
+  }
+  if (!rooms || !roomEventPath(path3)) {
+    return false;
+  }
+  serveRoomEvents(
+    rooms,
+    request,
+    response,
+    () => {
+      const actor = resolveActor(request);
+      return actor?.kind === "agent" ? void 0 : actor;
+    },
+    onError
+  );
+  return true;
+}
+async function handleRequest(request, response, routes, options) {
+  if (serveRoomConnection(request, response, options, routes.roomStream)) {
     return;
   }
-  const route2 = routes.get(path2);
-  const rawRoute = archiveRoute(path2, archiveApplication);
-  if (!route2 && !rawRoute) {
+  const { archiveApplication, features, resolveActor, agentSuggestionPath } = options;
+  const path3 = request.url ?? "";
+  const rooms = features?.rooms;
+  const route2 = routes.unary.get(path3);
+  const rawRoute = archiveRoute(path3, archiveApplication);
+  const waitForRoom = path3 === roomEventWaitPath && rooms;
+  if (!route2 && !rawRoute && !waitForRoom) {
     sendStatus(response, 404);
     return;
   }
-  const method2 = rawRoute?.method ?? REQUEST_METHOD;
-  if (request.method !== method2) {
-    response.setHeader("allow", method2);
+  const method4 = rawRoute?.method ?? REQUEST_METHOD;
+  if (request.method !== method4) {
+    response.setHeader("allow", method4);
     sendStatus(response, 405);
     return;
   }
@@ -20165,7 +24490,7 @@ async function handleRequest(request, response, routes, {
     sendStatus(response, 401);
     return;
   }
-  if (actor.kind === "agent" && path2 !== agentSuggestionPath && path2 !== agentActivityPath) {
+  if (actor.kind === "agent" && path3 !== agentSuggestionPath && path3 !== agentActivityPath) {
     sendStatus(response, 403);
     return;
   }
@@ -20177,8 +24502,12 @@ async function handleRequest(request, response, routes, {
     sendStatus(response, 415);
     return;
   }
+  if (waitForRoom) {
+    await serveRoomEventWait(waitForRoom, request, response, actor, () => resolveActor(request));
+    return;
+  }
   if (route2) {
-    const limit = requestLimits.get(path2);
+    const limit = requestLimits.get(path3);
     sendProtobuf(response, await route2(actor, await readBody(request, limit)));
   }
 }
@@ -20226,12 +24555,12 @@ async function handleGuestRequest(request, response, routes, options, guest) {
     sendStatus(response, 403);
     return;
   }
-  const path2 = request.url ?? "";
-  if (isGuestInvitationPath(path2)) {
+  const path3 = request.url ?? "";
+  if (isGuestInvitationPath(path3)) {
     await handleGuestInvitation(request, response, sharing, guest);
     return;
   }
-  const access = guestAccessForPath(path2);
+  const access = guestAccessForPath(path3);
   if (!access) {
     sendStatus(response, 404);
     return;
@@ -20253,13 +24582,16 @@ function createWhiteboardRequestHandler(options, guest) {
     ...features.rooms ? createRoomRoutes(features.rooms) : [],
     ...features.suggestions ? createBoardSuggestionRoutes(features.suggestions, features.digest, observe) : []
   ] : [];
-  const routes = new Map([
-    ...createWhiteboardRoutes(application, observe),
-    ...studioRoutes,
-    ...createCatalogRoutes(catalogApplication),
-    createArchiveReceiptRoute(archiveApplication),
-    ...sharing ? createSharingRoutes(sharing) : []
-  ]);
+  const routes = {
+    unary: new Map([
+      ...createWhiteboardRoutes(application, observe),
+      ...studioRoutes,
+      ...createCatalogRoutes(catalogApplication),
+      createArchiveReceiptRoute(archiveApplication),
+      ...sharing ? createSharingRoutes(sharing) : []
+    ]),
+    roomStream: features?.rooms && createRoomEventStreamRoute(features.rooms, onError)
+  };
   return (request, response) => {
     const pending = guest ? handleGuestRequest(request, response, routes, options, guest) : handleRequest(request, response, routes, options);
     pending.catch((error) => handleError(response, error, onError));
@@ -20908,9 +25240,9 @@ var fonts;
 function fileMissing(error) {
   return error instanceof Error && "code" in error && error.code === "ENOENT";
 }
-async function readOptional(path2) {
+async function readOptional(path3) {
   try {
-    return await readFile2(path2);
+    return await readFile2(path3);
   } catch (error) {
     if (!fileMissing(error)) {
       throw error;
@@ -20957,18 +25289,24 @@ function withinCanvasLimit(svg) {
   const height = Number(dimensions3?.[2]);
   return validImageSize(Math.ceil(width), Math.ceil(height));
 }
-async function renderSvgPng(svg) {
+async function openSvg(svg, requireFont) {
   if (!withinCanvasLimit(svg)) {
     return void 0;
   }
   renderer ??= initialize();
   fonts ??= readFonts();
   const [fontBuffers] = await Promise.all([fonts, renderer]);
-  if (fontBuffers.length === 0 && /<text\b/u.test(svg)) {
+  if (requireFont && fontBuffers.length === 0 && /<text\b/u.test(svg)) {
     throw new Error("PNG export requires a readable system font for its text.");
   }
   const { defaultFontFamily } = fontConfiguration();
-  const resvg = new Resvg2(svg, { font: { fontBuffers, defaultFontFamily } });
+  return new Resvg2(svg, { font: { fontBuffers, defaultFontFamily } });
+}
+async function renderSvgPng(svg) {
+  const resvg = await openSvg(svg, true);
+  if (!resvg) {
+    return void 0;
+  }
   try {
     if (!validImageSize(resvg.width, resvg.height)) {
       return void 0;
@@ -20983,14 +25321,22 @@ async function renderSvgPng(svg) {
     resvg.free();
   }
 }
-async function renderSvgUpload(svg) {
+async function validateSvgUpload(svg) {
   try {
-    return await renderSvgPng(svg);
+    const resvg = await openSvg(svg, false);
+    if (!resvg) {
+      return false;
+    }
+    try {
+      return validImageSize(resvg.width, resvg.height);
+    } finally {
+      resvg.free();
+    }
   } catch (error) {
     if (!(error instanceof Error && error.message.startsWith("SVG data parsing failed"))) {
       throw error;
     }
-    return void 0;
+    return false;
   }
 }
 
@@ -21316,38 +25662,76 @@ function restoreContent(encoded, prior, payloadCount) {
   }
   return { fields, units: units.map((id) => archiveIndex(id, payloadCount)) };
 }
-function checkHistory(value, contentCount, payloadCount) {
+function readHistory(value, contentCount, payloadCount) {
   const history = archiveArray(value);
   if (history.length > MAX_HISTORY) {
     throw archiveTooLarge();
   }
-  for (const version of history) {
-    const references = archiveArray(version);
+  return history.map((version2) => {
+    const references = archiveArray(version2);
     if (references.length !== 3) {
       throw invalidArchive("Invalid archive history references");
     }
-    archiveIndex(references[0], payloadCount);
-    archiveIndex(references[1], payloadCount);
-    archiveIndex(references[2], contentCount);
-  }
+    return {
+      entry: archiveIndex(references[0], payloadCount),
+      artifact: archiveIndex(references[1], payloadCount),
+      content: archiveIndex(references[2], contentCount)
+    };
+  });
 }
-function latestObjects(value, reader2) {
+function readScene(value, readPayload) {
   const budget = { maximum: MAX_ARCHIVE_BOARD_BYTES, bytes: 0, nodes: 0 };
   if (typeof value === "number") {
-    const content = archiveRecord(reader2.payload(value, budget));
+    const content = archiveRecord(readPayload(value, budget));
     const elements2 = archiveArray(content.elements);
     if (elements2.length > MAX_UNITS) {
       throw archiveTooLarge();
     }
     return elements2;
   }
-  const fields = archiveRecord(reader2.payload(value.fields, budget));
+  const fields = archiveRecord(readPayload(value.fields, budget));
   if (Object.hasOwn(fields, "elements")) {
     throw invalidArchive("Duplicate archive object list");
   }
-  return value.units.map((reference) => reader2.payload(reference, budget));
+  return value.units.map((reference) => readPayload(reference, budget));
 }
-function projectState(header, contents, reader2, artifactId) {
+function cachedPayload(reader2, total) {
+  const cache = /* @__PURE__ */ new Map();
+  return (reference, budget) => {
+    let entry = cache.get(reference);
+    if (!entry) {
+      const measured = { maximum: total.maximum - total.bytes, bytes: 0, nodes: 0 };
+      const value = reader2.payload(reference, measured);
+      total.bytes += measured.bytes;
+      total.nodes += measured.nodes;
+      if (total.nodes > MAX_JSON_STRUCTURE) {
+        throw archiveTooLarge();
+      }
+      entry = { value, bytes: measured.bytes, nodes: measured.nodes };
+      cache.set(reference, entry);
+    }
+    budget.bytes += entry.bytes;
+    budget.nodes += entry.nodes;
+    if (budget.bytes > budget.maximum || budget.nodes > MAX_JSON_STRUCTURE) {
+      throw archiveTooLarge();
+    }
+    return entry.value;
+  };
+}
+function legacyStudioBackup(current, board, history, reader2, budget) {
+  if (typeof current === "number" || !Number.isSafeInteger(board.revision)) {
+    return false;
+  }
+  const fields = archiveRecord(reader2.payload(current.fields, budget));
+  if (Object.keys(fields).length > 0) {
+    return false;
+  }
+  return history.every(({ entry }) => {
+    const record7 = archiveRecord(reader2.payload(entry, budget));
+    return Number.isSafeInteger(record7.revision) && record7.id === "revision-" + String(record7.revision);
+  });
+}
+function projectState(header, contents, reader2, artifactId, history) {
   const properties = archiveFields(header.properties);
   if (properties.size > MAX_PROPERTIES) {
     throw archiveTooLarge();
@@ -21364,12 +25748,44 @@ function projectState(header, contents, reader2, artifactId) {
   if (typeof title !== "string" || !title.trim()) {
     throw invalidArchive("Archive board title is missing");
   }
-  const current = contents[archiveIndex(header.current, contents.length)];
+  const currentIndex = archiveIndex(header.current, contents.length);
+  const current = contents[currentIndex];
   if (current === void 0) {
     throw invalidArchive("Archive contains no current board");
   }
   const assets = archiveRecord(reader2.payload(properties.get("assets"), budget));
-  return { title, objects: latestObjects(current, reader2), assets };
+  const marker = properties.get("studioII");
+  const details = marker === void 0 ? void 0 : archiveRecord(reader2.payload(marker, budget));
+  const restore = details || legacyStudioBackup(current, board, history, reader2, budget);
+  if (!restore) {
+    return {
+      title,
+      objects: readScene(current, (reference, allowance) => reader2.payload(reference, allowance)),
+      assets
+    };
+  }
+  const readPayload = cachedPayload(reader2, budget);
+  const scenes = /* @__PURE__ */ new Map();
+  function scene(index) {
+    const existing = scenes.get(index);
+    if (existing) {
+      return existing;
+    }
+    const result = readScene(contents[index], readPayload);
+    scenes.set(index, result);
+    return result;
+  }
+  const restoredHistory = history.map(({ entry, artifact: artifact2, content }) => ({
+    entry: archiveRecord(reader2.payload(entry, budget)),
+    artifact: archiveRecord(reader2.payload(artifact2, budget)),
+    objects: scene(content)
+  }));
+  return {
+    title,
+    objects: scene(currentIndex),
+    assets,
+    restoration: { artifact: board, details, history: restoredHistory }
+  };
 }
 async function readSections(records, lines, artifactId) {
   const header = archiveRecord(await records.read());
@@ -21387,8 +25803,14 @@ async function readSections(records, lines, artifactId) {
   for (const value of encodedContents) {
     contents.push(restoreContent(value, contents, payloads.length));
   }
-  checkHistory(header.history, contents.length, payloads.length);
-  return projectState(header, contents, new ArchiveValueReader(texts, payloads), artifactId);
+  const history = readHistory(header.history, contents.length, payloads.length);
+  return projectState(
+    header,
+    contents,
+    new ArchiveValueReader(texts, payloads),
+    artifactId,
+    history
+  );
 }
 async function readCurrentArchiveState(chunks, artifactId) {
   const lines = stateLines(chunks);
@@ -21470,8 +25892,7 @@ var ArchiveRecords = class {
     }
     return id;
   }
-  delta(units) {
-    const fields = this.payload(this.emptyFields);
+  delta(units, fields) {
     const previous = this.previous;
     if (previous) {
       const changes = units.flatMap(
@@ -21483,7 +25904,7 @@ var ArchiveRecords = class {
     }
     return { fields, units };
   }
-  content(elements2) {
+  content(elements2, contentFields2) {
     const retained = this.contentIds.get(elements2);
     if (retained !== void 0) {
       return retained;
@@ -21499,18 +25920,19 @@ var ArchiveRecords = class {
       }
       return this.payload(element);
     });
-    this.contents.push(this.reserve(this.delta(units)));
+    this.contents.push(this.reserve(this.delta(units, this.payload(contentFields2))));
     this.previous = { index, elements: units };
     this.contentIds.set(elements2, index);
     return index;
   }
   serialize(state) {
+    const fields = state.contentFields ?? this.emptyFields;
     const history = state.history.map(({ entry, artifact: artifact2, elements: elements2 }) => [
       this.payload(entry),
       this.payload(artifact2),
-      this.content(elements2)
+      this.content(elements2, fields)
     ]);
-    const current = this.content(state.elements);
+    const current = this.content(state.elements, fields);
     const properties = Object.entries(state.properties).map(([field, value]) => [
       field,
       this.payload(value)
@@ -21581,8 +26003,8 @@ function invalidPathSegment(segment2) {
   return !pathSegment3.test(segment2) || deviceName.test(segment2);
 }
 function requireEntryLimit(name, limitForName) {
-  const path2 = name.endsWith("/") ? name.slice(0, -1) : name;
-  if (path2.split("/").some(invalidPathSegment)) {
+  const path3 = name.endsWith("/") ? name.slice(0, -1) : name;
+  if (path3.split("/").some(invalidPathSegment)) {
     throw invalidZip("Invalid ZIP entry name");
   }
   const limit = limitForName(name);
@@ -21804,9 +26226,9 @@ async function extractEntry(archive, entry, file) {
 async function extractEntries(archive, directory, entries) {
   const files = /* @__PURE__ */ new Map();
   for (const [index, entry] of entries.entries()) {
-    const path2 = join4(directory, "entry-" + index);
-    await extractEntry(archive, entry, path2);
-    files.set(entry.name, { path: path2, size: entry.size });
+    const path3 = join4(directory, "entry-" + index);
+    await extractEntry(archive, entry, path3);
+    files.set(entry.name, { path: path3, size: entry.size });
   }
   return files;
 }
@@ -21854,12 +26276,12 @@ function compress(source) {
 }
 function headers2(entry, bytes, offset) {
   const name = Buffer7.from(entry.name);
-  const method2 = entry.compressed ? 8 : 0;
+  const method4 = entry.compressed ? 8 : 0;
   const crc = crc322(entry.body);
   const local = Buffer7.alloc(localHeaderBytes + name.length);
   local.writeUInt32LE(localSignature, 0);
   local.writeUInt16LE(20, 4);
-  local.writeUInt16LE(method2, 8);
+  local.writeUInt16LE(method4, 8);
   local.writeUInt32LE(crc, 14);
   local.writeUInt32LE(bytes.length, 18);
   local.writeUInt32LE(entry.body.length, 22);
@@ -21869,7 +26291,7 @@ function headers2(entry, bytes, offset) {
   central.writeUInt32LE(centralSignature, 0);
   central.writeUInt16LE(20, 4);
   central.writeUInt16LE(20, 6);
-  central.writeUInt16LE(method2, 10);
+  central.writeUInt16LE(method4, 10);
   central.writeUInt32LE(crc, 16);
   central.writeUInt32LE(bytes.length, 20);
   central.writeUInt32LE(entry.body.length, 24);
@@ -21924,7 +26346,7 @@ async function writeBoardArchive(snapshot, maximumBytes) {
   };
   const assets = [...snapshot.assets].map(([id, asset]) => ({
     name: "assets/" + id,
-    body: Buffer8.from(asset.base64, "base64")
+    body: Buffer8.from(asset.bytes.buffer, asset.bytes.byteOffset, asset.bytes.byteLength)
   }));
   return writeZip(
     [
@@ -22079,6 +26501,7 @@ async function stageCurrentArchive(chunks) {
       sourceBoardId,
       title: state.title,
       objects: state.objects,
+      restoration: state.restoration,
       assets,
       archivePath,
       signature,
@@ -22141,7 +26564,7 @@ function readActiveBoardGuest(connection, boardId, actorId2, now) {
     return void 0;
   }
   const query = connection.prepare(`
-    SELECT m.role, m.name, s.scope, s.version
+    SELECT m.role, m.name, s.scope, s.version, m.last_seen_at_millis
     FROM board_sharing_members AS m
     JOIN sharing_browser_sessions AS b ON b.actor_id = m.actor_id
     JOIN board_sharing AS s ON s.board_id = m.board_id AND s.enabled = 1
@@ -22158,14 +26581,15 @@ function readActiveBoardGuest(connection, boardId, actorId2, now) {
   if (!row) {
     return void 0;
   }
-  const { role, name, scope: scope2, version } = row;
+  const { role, name, scope: scope2, version: version2 } = row;
   const validRole = role === "editor" || role === "commenter" || role === "viewer";
   const validScope = scope2 === "local" || scope2 === "lan";
-  const validMetadata = typeof name === "string" && typeof version === "bigint";
+  const validMetadata = typeof name === "string" && typeof version2 === "bigint";
   if (!validRole || !validScope || !validMetadata) {
     throw new Error("Invalid stored guest access.");
   }
-  return { role, name, scope: scope2, version };
+  const lastSeenAtMillis = typeof row.last_seen_at_millis === "bigint" ? Number(row.last_seen_at_millis) : void 0;
+  return { role, name, scope: scope2, version: version2, lastSeenAtMillis };
 }
 function readBoardAccess(connection, boardId, actorId2) {
   const local = localAccess(connection, boardId, actorId2);
@@ -22182,6 +26606,135 @@ function readBoardAccess(connection, boardId, actorId2) {
       role,
       name
     };
+  }
+}
+
+// src/infrastructure/adapters/archives/history.ts
+var objectColumns = [
+  "kind",
+  "label",
+  "layer_index",
+  "x",
+  "y",
+  "width",
+  "height",
+  "rotation",
+  "geometry_version",
+  "locked",
+  "parent_id",
+  "group_id",
+  "appearance_json",
+  "detail_json"
+];
+var absentObject = objectColumns.map(() => null);
+function objectValues(object3) {
+  return [
+    object3.kind,
+    object3.label,
+    object3.layerIndex,
+    object3.x,
+    object3.y,
+    object3.width,
+    object3.height,
+    object3.rotation,
+    object3.geometryVersion,
+    Number(object3.locked),
+    object3.parentId ?? null,
+    object3.groupId ?? null,
+    object3.appearanceJson ?? null,
+    object3.detailJson ?? null
+  ];
+}
+function sameObject(before, after) {
+  return before === after || after !== void 0 && before.kind === after.kind && before.label === after.label && before.layerIndex === after.layerIndex && before.x === after.x && before.y === after.y && before.width === after.width && before.height === after.height && before.rotation === after.rotation && before.geometryVersion === after.geometryVersion && before.locked === after.locked && before.parentId === after.parentId && before.groupId === after.groupId && before.appearanceJson === after.appearanceJson && before.detailJson === after.detailJson;
+}
+function samePayload2(before, after) {
+  return before?.version === after?.version && before?.kind === after?.kind && before?.json === after?.json;
+}
+function historyWriter(connection, boardId) {
+  const insertVersion = connection.prepare(`
+    INSERT INTO board_versions (
+      board_id, revision, title, actor_id, kind, saved_at_millis, source_revision, changed_object_count
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const insertObject = connection.prepare(`
+    INSERT INTO board_history_objects (
+      board_id, change_revision, object_id, ${objectColumns.join(", ")}
+    ) VALUES (?, ?, ?, ${objectColumns.map(() => "?").join(", ")})
+  `);
+  const insertPayload = connection.prepare(`
+    INSERT INTO board_history_payloads (
+      board_id, change_revision, object_id, payload_version, body_kind, body_json
+    ) VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  const reserveObject = connection.prepare(`
+    INSERT OR IGNORE INTO board_used_object_ids (board_id, object_id) VALUES (?, ?)
+  `);
+  return {
+    version(snapshot) {
+      insertVersion.run(
+        boardId,
+        snapshot.revision,
+        snapshot.title,
+        snapshot.actorId ?? null,
+        snapshot.kind,
+        snapshot.savedAtMillis ?? null,
+        snapshot.sourceRevision ?? null,
+        snapshot.changedObjectCount
+      );
+    },
+    object(revision, objectId, before) {
+      const values = before ? objectValues(before) : absentObject;
+      insertObject.run(boardId, revision, objectId, ...values);
+    },
+    payload(revision, objectId, before) {
+      insertPayload.run(
+        boardId,
+        revision,
+        objectId,
+        before?.version ?? null,
+        before?.kind ?? null,
+        before?.json ?? null
+      );
+    },
+    reserve(objectId) {
+      reserveObject.run(boardId, objectId);
+    }
+  };
+}
+function writeChanges(writer2, revision, before, after) {
+  for (const [id, previous] of before) {
+    const next = after.get(id);
+    if (!sameObject(previous, next)) {
+      writer2.object(revision, id, previous);
+    }
+    if (!samePayload2(previous.payload, next?.payload)) {
+      writer2.payload(revision, id, previous.payload);
+    }
+    if (!next) {
+      writer2.reserve(id);
+    }
+  }
+  for (const [id, next] of after) {
+    if (before.has(id)) {
+      continue;
+    }
+    writer2.object(revision, id);
+    if (next.payload) {
+      writer2.payload(revision, id);
+    }
+  }
+}
+function writeArchiveHistory(connection, boardId, snapshots) {
+  const writer2 = historyWriter(connection, boardId);
+  let previous;
+  for (const snapshot of snapshots) {
+    const current = new Map(snapshot.objects.map((object3) => [object3.objectId, object3]));
+    writer2.version(snapshot);
+    if (previous) {
+      writeChanges(writer2, snapshot.revision, previous, current);
+    }
+    previous = current;
   }
 }
 
@@ -22295,16 +26848,16 @@ function appearance2(element) {
     hollow: booleanValue(element.hollow, "hollow object")
   };
 }
-function endpoint(value, side, fallback, ids) {
+function endpoint(value, side, fallback2, ids) {
   if (typeof value === "string") {
     const port = optionalString2(side, "connector port");
     if (port !== void 0 && !connectorPorts.has(port)) {
       throw new ArchiveObjectError("Invalid archived connector port.");
     }
-    return { point: fallback, attachment: ids.has(value) ? { objectId: value, port } : void 0 };
+    return { point: fallback2, attachment: ids.has(value) ? { objectId: value, port } : void 0 };
   }
   if (value === void 0) {
-    return { point: fallback };
+    return { point: fallback2 };
   }
   const coords = sequence2(value, "connector endpoint");
   if (coords.length !== 2) {
@@ -22493,14 +27046,14 @@ function cell(value) {
 }
 function tablePayload(value, text3) {
   const table = nullableData(value);
-  const rows = table.rows === void 0 ? [] : sequence2(table.rows, "table rows");
+  const rows2 = table.rows === void 0 ? [] : sequence2(table.rows, "table rows");
   const rowIds = table.rowIds === void 0 ? [] : sequence2(table.rowIds, "table row identifiers");
   const columnIds = table.columnIds === void 0 ? [] : sequence2(table.columnIds, "table column identifiers");
   const widths = table.columnWidths === void 0 ? [] : sequence2(table.columnWidths, "table column widths");
   return {
     text: text3,
     grid: {
-      rows: rows.map((row) => ({ cells: sequence2(row, "table cells").map(cell) })),
+      rows: rows2.map((row) => ({ cells: sequence2(row, "table cells").map(cell) })),
       rowIds: rowIds.map((id) => requiredId(id, "table row identifier")),
       columnIds: columnIds.map((id) => requiredId(id, "table column identifier")),
       columnWidths: widths.map((width) => numberValue(width, "table column width")),
@@ -22631,7 +27184,7 @@ function sceneKind(element) {
   }
   return type;
 }
-function sceneObject(objectId, element, ids, resolveSource, origin) {
+function prepareArchiveObject(objectId, element, ids, resolveSource, origin) {
   const kind = sceneKind(element);
   const text3 = kind === "connector" ? element.label : element.text;
   const label2 = optionalString2(text3, "object label") ?? "";
@@ -22649,7 +27202,7 @@ function sceneObject(objectId, element, ids, resolveSource, origin) {
     payload: payloadFor(element, { geometry, kind, label: label2, resolveSource, origin })
   };
 }
-function prepareArchiveObjects(values, resolveSource, origin) {
+function indexArchiveObjects(values) {
   const ids = /* @__PURE__ */ new Set();
   const objectsById = values.map((value) => {
     const element = record4(value, "object");
@@ -22663,7 +27216,600 @@ function prepareArchiveObjects(values, resolveSource, origin) {
     ids.add(id);
     return { id, element };
   });
-  return objectsById.map(({ id, element }) => sceneObject(id, element, ids, resolveSource, origin));
+  return { ids, objectsById };
+}
+
+// src/infrastructure/adapters/archives/restore-scene.ts
+var maxInteger = 9223372036854775807n;
+var decimal = /^(?:0|[1-9][0-9]{0,18})$/u;
+var nativeKinds = /* @__PURE__ */ new Set([
+  "shape",
+  "text",
+  "image",
+  "video",
+  "html",
+  "document",
+  "table",
+  "link",
+  "note",
+  "sticker",
+  "diagram",
+  "chart",
+  "todo",
+  "section",
+  "ink",
+  "connector"
+]);
+var payloadKinds2 = /* @__PURE__ */ new Set([
+  "text",
+  "image",
+  "video",
+  "document",
+  "todo",
+  "table",
+  "link",
+  "embed",
+  "ink",
+  "sticker",
+  "extension"
+]);
+var objectIdentifier2 = /^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/u;
+function unsigned(value, name) {
+  if (typeof value === "string" && decimal.test(value)) {
+    const parsed2 = BigInt(value);
+    if (parsed2 <= maxInteger) {
+      return parsed2;
+    }
+  }
+  if (typeof value === "number") {
+    return BigInt(unsignedInteger(value, name));
+  }
+  throw new ArchiveObjectError(`Invalid archived ${name}.`);
+}
+function optionalVersion(value, name) {
+  return value === void 0 ? void 0 : unsigned(value, name);
+}
+function archivedDate(value, name) {
+  if (value === void 0) {
+    return void 0;
+  }
+  return unsignedInteger(Date.parse(stringValue2(value, name)), name);
+}
+function versionKind2(value) {
+  switch (value) {
+    case "baseline":
+    case "geometry":
+    case "content":
+    case "image":
+    case "restore":
+      return value;
+    default:
+      throw new ArchiveObjectError("Invalid archived version kind.");
+  }
+}
+function projection(object3, layerIndex) {
+  return {
+    ...object3,
+    layerIndex,
+    geometryVersion: 0n,
+    appearanceJson: object3.appearance && JSON.stringify(object3.appearance),
+    detailJson: object3.detail && JSON.stringify(object3.detail),
+    payload: object3.payload && {
+      version: 0n,
+      kind: object3.payload.bodyKind,
+      json: JSON.stringify(object3.payload.data)
+    }
+  };
+}
+function legacySceneReader(resolveSource, origin) {
+  const cache = /* @__PURE__ */ new WeakMap();
+  return (raw) => {
+    const { ids, objectsById } = indexArchiveObjects(raw);
+    return objectsById.map(({ id, element }, layerIndex) => {
+      if (element.type === "arrow") {
+        return projection(
+          prepareArchiveObject(id, element, ids, resolveSource, origin),
+          layerIndex
+        );
+      }
+      let cached = cache.get(element);
+      if (!cached) {
+        cached = projection(
+          prepareArchiveObject(id, element, ids, resolveSource, origin),
+          layerIndex
+        );
+        cache.set(element, cached);
+      }
+      return cached.layerIndex === layerIndex ? cached : { ...cached, layerIndex };
+    });
+  };
+}
+function rewriteNative(value, resolveSource, assetPrefix5, field) {
+  if (typeof value === "string") {
+    const sourceField = field === "src" || field === "poster" || field === "url";
+    if (sourceField && value.startsWith(assetPrefix5)) {
+      return resolveSource(value, "reference");
+    }
+    return remapMarkup(value, resolveSource);
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => rewriteNative(item, resolveSource, assetPrefix5));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        key,
+        rewriteNative(item, resolveSource, assetPrefix5, key)
+      ])
+    );
+  }
+  return value;
+}
+function nativePayloadData(value, kind, resolveSource, origin) {
+  const assetPrefix5 = "/assets/" + origin.sourceBoardId + "/";
+  const data = record4(rewriteNative(value, resolveSource, assetPrefix5), "object content");
+  if (kind !== "todo" || !Array.isArray(data.items)) {
+    return data;
+  }
+  return {
+    ...data,
+    items: data.items.map((raw) => {
+      const item = record4(raw, "todo item");
+      if (item.sourceRef === void 0) {
+        return item;
+      }
+      const source = record4(item.sourceRef, "todo source");
+      return source.boardId === origin.sourceBoardId ? { ...item, sourceRef: { ...source, boardId: origin.boardId } } : item;
+    })
+  };
+}
+function readAppearance2(value) {
+  if (value === void 0) {
+    return void 0;
+  }
+  const { fill, stroke, strokeWidth, dashed, hollow } = record4(value, "object appearance");
+  return JSON.stringify({
+    fill: optionalString2(fill, "fill"),
+    stroke: optionalString2(stroke, "stroke"),
+    strokeWidth: optionalNumber(strokeWidth, "stroke width"),
+    dashed: dashed === void 0 ? void 0 : booleanValue(dashed, "dashed stroke"),
+    hollow: hollow === void 0 ? void 0 : booleanValue(hollow, "hollow object")
+  });
+}
+function nativeObject(data, resolveSource, origin) {
+  const native = record4(data.studioII, "Studio II object");
+  const kind = stringValue2(native.kind, "object kind");
+  const geometryVersion = unsigned(native.geometryVersion, "geometry version");
+  const objectId = requiredId(data.id, "object ID");
+  const payloadVersion = optionalVersion(native.payloadVersion, "payload version");
+  const bodyKind = optionalString2(native.bodyKind, "object content kind");
+  const invalidObject = !nativeKinds.has(kind) || !objectIdentifier2.test(objectId);
+  const unknownBody = bodyKind !== void 0 && !payloadKinds2.has(bodyKind);
+  const missingVersion = bodyKind === void 0 !== (payloadVersion === void 0);
+  const missingData = bodyKind === void 0 !== (native.data === void 0);
+  const invalidPayload = unknownBody || missingVersion || missingData;
+  if (invalidObject || invalidPayload) {
+    throw new ArchiveObjectError("Invalid archived Studio II object content.");
+  }
+  const payload = bodyKind !== void 0 && payloadVersion !== void 0 ? {
+    kind: bodyKind,
+    version: payloadVersion,
+    json: JSON.stringify(nativePayloadData(native.data, bodyKind, resolveSource, origin))
+  } : void 0;
+  return {
+    objectId,
+    kind,
+    label: optionalString2(kind === "connector" ? data.label : data.text, "object label") ?? "",
+    layerIndex: 0,
+    ...readGeometry2(data),
+    geometryVersion,
+    locked: booleanValue(data.locked, "object lock"),
+    parentId: optionalString2(data.parentId, "object parent"),
+    groupId: optionalString2(data.groupId, "object group"),
+    payload,
+    appearanceJson: readAppearance2(native.appearance),
+    detailJson: native.detail === void 0 ? void 0 : JSON.stringify(record4(native.detail, "object detail"))
+  };
+}
+function nativeSceneReader(resolveSource, origin, validate) {
+  const cache = /* @__PURE__ */ new WeakMap();
+  return (raw) => {
+    const ids = /* @__PURE__ */ new Set();
+    return raw.map((value, index) => {
+      const data = record4(value, "object");
+      let object3 = cache.get(data);
+      if (!object3) {
+        object3 = { ...nativeObject(data, resolveSource, origin), layerIndex: index };
+        try {
+          validate(object3);
+        } catch (error) {
+          throw new ArchiveObjectError("Invalid archived Studio II object.", { cause: error });
+        }
+        cache.set(data, object3);
+      }
+      if (ids.has(object3.objectId)) {
+        throw new ArchiveObjectError("Duplicate archived object identifier.");
+      }
+      ids.add(object3.objectId);
+      return object3.layerIndex === index ? object3 : { ...object3, layerIndex: index };
+    });
+  };
+}
+function legacyActor(value) {
+  return value === void 0 ? void 0 : requiredId(record4(value, "version actor").id, "actor ID");
+}
+function versionDate(value, name) {
+  return value === void 0 ? void 0 : unsignedInteger(value, name);
+}
+function parseVersion(entry, artifact2, native) {
+  const revision = unsigned(entry.revision, "history revision");
+  const title = requiredId(artifact2.title, "history title");
+  if (unsigned(artifact2.revision, "history board revision") !== revision) {
+    throw new ArchiveObjectError("The archived version does not match its whiteboard revision.");
+  }
+  const data = native ? record4(entry.studioII, "Studio II version") : void 0;
+  const actorId2 = data ? optionalString2(data.actorId, "version actor") : legacyActor(entry.actor);
+  const savedAtMillis = data ? versionDate(data.savedAtMillis, "version date") : archivedDate(entry.createdAt, "version date");
+  const source = /^revision-(\d+)$/u.exec(
+    optionalString2(entry.restoredFrom, "version source") ?? ""
+  );
+  const sourceRevision = optionalVersion(
+    data ? data.sourceRevision : source?.[1],
+    "source revision"
+  );
+  const kind = versionKind2(data ? data.kind : entry.summary);
+  const missingActorOrDate = actorId2 === void 0 || savedAtMillis === void 0;
+  const unknownCommit = kind !== "baseline" && missingActorOrDate;
+  const invalidSource = sourceRevision !== void 0 && sourceRevision >= revision;
+  if (unknownCommit || invalidSource) {
+    throw new ArchiveObjectError("Invalid archived version provenance.");
+  }
+  return {
+    revision,
+    title,
+    actorId: actorId2,
+    savedAtMillis,
+    sourceRevision,
+    kind,
+    changedObjectCount: unsignedInteger(
+      data ? data.changedObjectCount : entry.changedObjectCount,
+      "changed object count"
+    )
+  };
+}
+function boardMetadata(restoration) {
+  const details = restoration?.details;
+  const sourceRevision = restoration?.artifact.revision;
+  const revision = restoration ? unsigned(details?.revision ?? sourceRevision, "board revision") : 0n;
+  if (details && (details.version !== 1 || unsigned(sourceRevision, "board revision") !== revision)) {
+    throw new ArchiveObjectError("Invalid archived Studio II version.");
+  }
+  return {
+    revision,
+    createdAtMillis: versionDate(details?.createdAtMillis, "board creation date") ?? archivedDate(restoration?.artifact.createdAt, "board creation date"),
+    updatedAtMillis: versionDate(details?.updatedAtMillis, "board modification date") ?? archivedDate(restoration?.artifact.updatedAt, "board modification date"),
+    pinned: booleanValue(restoration?.artifact.pinned, "pinned board")
+  };
+}
+function compareScenes(left, right) {
+  const normalize2 = (_key, value) => typeof value === "bigint" ? value.toString() : value;
+  return left === right || JSON.stringify(left, normalize2) === JSON.stringify(right, normalize2);
+}
+function readVersions(restoration, revision, sourceBoardId, objects, scene) {
+  const history = [];
+  for (const item of restoration.history) {
+    const version2 = parseVersion(item.entry, item.artifact, restoration.details !== void 0);
+    const previous = history.at(-1)?.revision;
+    const discontinuity = previous !== void 0 && version2.revision !== previous + 1n;
+    if (item.artifact.id !== sourceBoardId || version2.revision > revision || discontinuity) {
+      throw new ArchiveObjectError("Archived revisions do not form a continuous board history.");
+    }
+    const savedObjects = scene(item.objects);
+    if (version2.revision === revision && !compareScenes(savedObjects, objects)) {
+      throw new ArchiveObjectError(
+        "The latest archived version does not match the whiteboard scene."
+      );
+    }
+    history.push({ ...version2, objects: savedObjects });
+  }
+  const latest = history.at(-1);
+  if (restoration.details && !latest) {
+    throw new ArchiveObjectError("The archived Studio II snapshot has no version record.");
+  }
+  if (latest && latest.revision !== revision) {
+    throw new ArchiveObjectError("The archived revision does not match the latest version.");
+  }
+  return history;
+}
+function prepareArchiveScene(values, resolveSource, origin, validate, restoration) {
+  const metadata = boardMetadata(restoration);
+  const sceneCache = /* @__PURE__ */ new Map();
+  const readScene2 = restoration?.details ? nativeSceneReader(resolveSource, origin, validate) : legacySceneReader(resolveSource, origin);
+  function scene(raw) {
+    const cached = sceneCache.get(raw);
+    if (cached) {
+      return cached;
+    }
+    const objects2 = readScene2(raw);
+    sceneCache.set(raw, objects2);
+    return objects2;
+  }
+  const objects = scene(values);
+  const history = restoration ? readVersions(restoration, metadata.revision, origin.sourceBoardId, objects, scene) : [];
+  return {
+    ...metadata,
+    objects,
+    history
+  };
+}
+
+// src/infrastructure/adapters/archives/restored-metadata.ts
+var statuses = /* @__PURE__ */ new Set(["open", "resolved"]);
+var actorKinds = /* @__PURE__ */ new Set(["human", "agent"]);
+var roles = /* @__PURE__ */ new Set(["owner", "editor", "commenter", "viewer"]);
+var maximumDate = 8640000000000000n;
+function nullable(reader2) {
+  return (value, name) => value === null ? null : reader2(value, name);
+}
+function oneOf(values) {
+  return (value, name) => {
+    const entry = stringValue2(value, name);
+    if (!values.has(entry)) {
+      throw new ArchiveObjectError(`Invalid archived ${name}.`);
+    }
+    return entry;
+  };
+}
+function within(maximum, minimum = 0n) {
+  return (value, name) => {
+    const number = unsigned(value, name);
+    if (number < minimum || number > maximum) {
+      throw new ArchiveObjectError(`Invalid archived ${name}.`);
+    }
+    return number;
+  };
+}
+function parsed(value, name) {
+  const text3 = stringValue2(value, name);
+  try {
+    return JSON.parse(text3);
+  } catch (error) {
+    throw new ArchiveObjectError(`Invalid archived ${name}.`, { cause: error });
+  }
+}
+function contentAnchor(value, name) {
+  const unit = record4(parsed(value, name), name);
+  switch (unit.kind) {
+    case "document":
+      sequence2(unit.blockIds, name).forEach((id) => requiredId(id, name));
+      break;
+    case "todo":
+      requiredId(unit.itemId, name);
+      break;
+    case "html":
+      sequence2(unit.nodeIds, name).forEach((id) => requiredId(id, name));
+      stringValue2(unit.sourceRevision, name);
+      unsigned(unit.sourceRevision, name);
+      break;
+    default:
+      throw new ArchiveObjectError(`Invalid archived ${name} kind.`);
+  }
+  return JSON.stringify(unit);
+}
+function targetIds(value, name) {
+  const ids = sequence2(parsed(value, name), name);
+  ids.forEach((id) => requiredId(id, name));
+  return JSON.stringify(ids);
+}
+function targets(value, name) {
+  const entries = sequence2(parsed(value, name), name);
+  for (const entry of entries) {
+    const target2 = record4(entry, name);
+    requiredId(target2.objectId, name);
+    requiredId(target2.kind, name);
+    stringValue2(target2.geometryVersion, name);
+    unsigned(target2.geometryVersion, name);
+    if (target2.payloadVersion !== void 0) {
+      stringValue2(target2.payloadVersion, name);
+      unsigned(target2.payloadVersion, name);
+    }
+    const geometry = record4(target2.geometry, name);
+    for (const field of ["x", "y", "width", "height", "rotation"]) {
+      numberValue(geometry[field], field);
+    }
+  }
+  return JSON.stringify(entries);
+}
+var tally = within(0xffffffffn);
+var version = within(9223372036854775807n, 1n);
+var date = within(maximumDate);
+var threadColumns = {
+  thread_id: requiredId,
+  status: oneOf(statuses),
+  source_board_revision: unsigned,
+  frozen_x: numberValue,
+  frozen_y: numberValue,
+  object_id: nullable(requiredId),
+  object_u: nullable(numberValue),
+  object_v: nullable(numberValue),
+  object_geometry_version: nullable(unsigned),
+  object_kind: nullable(requiredId),
+  object_label: nullable(stringValue2),
+  object_x: nullable(numberValue),
+  object_y: nullable(numberValue),
+  object_width: nullable(numberValue),
+  object_height: nullable(numberValue),
+  object_rotation: nullable(numberValue),
+  version,
+  updated_at_millis: date,
+  reply_count: tally
+};
+var messageColumns = {
+  thread_id: requiredId,
+  message_id: requiredId,
+  author_actor_id: requiredId,
+  author_name: (value, field) => value === void 0 || value === null ? null : stringValue2(value, field),
+  text: stringValue2,
+  created_at_millis: date,
+  updated_at_millis: date,
+  version,
+  position: tally
+};
+var anchorColumns = {
+  thread_id: requiredId,
+  payload_version: unsigned,
+  unit_json: contentAnchor,
+  frozen_excerpt: nullable(stringValue2)
+};
+var reviewColumns = {
+  source_id: requiredId,
+  owner_actor_id: requiredId,
+  board_revision: unsigned,
+  object_ids_json: targetIds,
+  feedback_thread_id: nullable(requiredId)
+};
+var snapshotColumns = {
+  source_id: requiredId,
+  targets_board_revision: unsigned,
+  targets_json: targets
+};
+var actorColumns = {
+  actor_id: requiredId,
+  name: stringValue2,
+  kind: oneOf(actorKinds),
+  role: oneOf(roles)
+};
+function rows(value, name, columns) {
+  const values = value === void 0 ? [] : sequence2(value, name);
+  return values.map((value2) => {
+    const row = record4(value2, name);
+    return Object.fromEntries(
+      Object.entries(columns).map(([key, read]) => [key, read(row[key], key)])
+    );
+  });
+}
+function actorRows(value) {
+  const values = value === void 0 ? [] : sequence2(value, "actors");
+  const translated = values.map((entry) => {
+    const actor = record4(entry, "actor");
+    return { actor_id: actor.id, name: actor.name, kind: actor.kind, role: actor.role };
+  });
+  return rows(translated, "actors", actorColumns);
+}
+function optionalRecord(value, name) {
+  return value === void 0 ? {} : record4(value, name);
+}
+function uniqueIds(values, key, name) {
+  const ids = new Set(values.map(key));
+  if (ids.size !== values.length) {
+    throw new ArchiveObjectError(`Duplicate archived ${name}.`);
+  }
+  return ids;
+}
+function checkThreads(threads, messages, anchors) {
+  const ids = uniqueIds(threads, (thread) => thread.thread_id, "thread ID");
+  const anchorsById = uniqueIds(anchors, (anchor2) => anchor2.thread_id, "content anchor");
+  uniqueIds(
+    messages,
+    (message) => JSON.stringify([message.thread_id, message.message_id]),
+    "message ID"
+  );
+  uniqueIds(messages, (message) => message.thread_id + ":" + message.position, "message position");
+  if ([...anchorsById].some((id) => !ids.has(id))) {
+    throw new ArchiveObjectError("An archived anchor has no feedback thread.");
+  }
+  const counts = /* @__PURE__ */ new Map();
+  for (const message of messages) {
+    if (!ids.has(message.thread_id) || message.position === 0n !== (message.thread_id === message.message_id) || message.updated_at_millis < message.created_at_millis) {
+      throw new ArchiveObjectError("Invalid archived feedback message.");
+    }
+    const current = counts.get(message.thread_id) ?? { replies: 0n, root: false };
+    counts.set(message.thread_id, {
+      replies: current.replies + (message.position === 0n ? 0n : 1n),
+      root: current.root || message.position === 0n
+    });
+  }
+  for (const thread of threads) {
+    const count = counts.get(thread.thread_id);
+    const fields = [
+      thread.object_u,
+      thread.object_v,
+      thread.object_geometry_version,
+      thread.object_kind,
+      thread.object_label,
+      thread.object_x,
+      thread.object_y,
+      thread.object_width,
+      thread.object_height,
+      thread.object_rotation
+    ];
+    const wrongCounts = !count?.root || count.replies !== thread.reply_count;
+    const incompleteObject = fields.some(
+      (value) => thread.object_id === null !== (value === null)
+    );
+    const missingObject = thread.object_id === null && anchorsById.has(thread.thread_id);
+    if (wrongCounts || incompleteObject || missingObject) {
+      throw new ArchiveObjectError("Invalid archived feedback thread.");
+    }
+  }
+}
+function prepareRestoredMetadata(details, ownerActorId) {
+  const feedback = optionalRecord(details.feedback, "feedback details");
+  const threads = rows(feedback.threads, "threads", threadColumns);
+  const messages = rows(feedback.messages, "feedback messages", messageColumns);
+  const anchors = rows(feedback.contentAnchors, "content anchors", anchorColumns);
+  checkThreads(threads, messages, anchors);
+  const review = optionalRecord(details.reviewSources, "review source details");
+  const sources = rows(review.sources, "review sources", reviewColumns);
+  const snapshots = rows(review.targetSnapshots, "review target snapshots", snapshotColumns);
+  const sourceIds = uniqueIds(sources, (source) => source.source_id, "review source");
+  uniqueIds(snapshots, (snapshot) => snapshot.source_id, "review target snapshot");
+  if (snapshots.some((snapshot) => !sourceIds.has(snapshot.source_id))) {
+    throw new ArchiveObjectError("An archived target snapshot has no review source.");
+  }
+  const actors = actorRows(details.actors);
+  uniqueIds(actors, (actor) => actor.actor_id, "actor");
+  const names = new Map(actors.map((actor) => [actor.actor_id, actor.name]));
+  return {
+    threads,
+    messages: messages.map((message) => ({
+      ...message,
+      author_name: message.author_name ?? names.get(message.author_actor_id) ?? null
+    })),
+    anchors,
+    sources: sources.map((source) => ({
+      ...source,
+      owner_actor_id: ownerActorId
+    })),
+    snapshots,
+    actors
+  };
+}
+function writeRows(connection, boardId, table, columns, values) {
+  if (!values.length) {
+    return;
+  }
+  const keys = Object.keys(columns);
+  const insert = connection.prepare(
+    `INSERT INTO ${table} (board_id, ${keys.join(", ")}) VALUES (?, ${keys.map(() => "?").join(", ")})`
+  );
+  for (const row of values) {
+    insert.run(boardId, ...keys.map((key) => row[key] ?? null));
+  }
+}
+function writeRestoredMetadata(connection, boardId, metadata) {
+  writeRows(connection, boardId, "feedback_threads", threadColumns, metadata.threads);
+  writeRows(connection, boardId, "feedback_messages", messageColumns, metadata.messages);
+  writeRows(connection, boardId, "feedback_content_anchors", anchorColumns, metadata.anchors);
+  writeRows(connection, boardId, "board_review_sources", reviewColumns, metadata.sources);
+  writeRows(
+    connection,
+    boardId,
+    "board_review_target_snapshots",
+    snapshotColumns,
+    metadata.snapshots
+  );
+  writeRows(connection, boardId, "board_archive_actors", actorColumns, metadata.actors);
 }
 
 // src/infrastructure/adapters/archives/publication.ts
@@ -22685,7 +27831,7 @@ var webMediaTypes = /* @__PURE__ */ new Set([
   "audio/wav",
   "audio/webm"
 ]);
-function preparePublication(archive, boardId) {
+function preparePublication(archive, { actorId: actorId2, boardId }, validate) {
   const prefix = `/assets/${archive.sourceBoardId}/`;
   const assetIds = /* @__PURE__ */ new Set();
   function resolveSource(source, kind) {
@@ -22702,56 +27848,67 @@ function preparePublication(archive, boardId) {
     assetIds.add(assetId);
     return `/studio-archive-assets/${boardId}/${assetId}`;
   }
-  const objects = prepareArchiveObjects(archive.objects, resolveSource, {
-    sourceBoardId: archive.sourceBoardId,
-    boardId
-  });
-  return { objects, assetIds };
+  const origin = { sourceBoardId: archive.sourceBoardId, boardId };
+  const scene = prepareArchiveScene(
+    archive.objects,
+    resolveSource,
+    origin,
+    validate,
+    archive.restoration
+  );
+  const details = archive.restoration?.details;
+  const metadata = details ? prepareRestoredMetadata(details, actorId2) : void 0;
+  return { ...scene, assetIds, metadata };
 }
-function writeBoard(connection, command, title) {
-  const { actorId: actorId2, boardId, updatedAtMillis } = command;
-  connection.prepare("INSERT INTO boards (board_id, title, revision) VALUES (?, ?, 0)").run(boardId, title);
+function writeBoard(connection, command, title, { revision, pinned, createdAtMillis, updatedAtMillis }) {
+  const { actorId: actorId2, boardId } = command;
+  connection.prepare("INSERT INTO boards (board_id, title, revision) VALUES (?, ?, ?)").run(boardId, title, revision);
   connection.prepare("INSERT INTO board_members (board_id, actor_id, can_edit) VALUES (?, ?, 1)").run(boardId, actorId2);
   connection.prepare(`
       INSERT INTO catalog_entries (board_id, updated_at_millis, pinned, entry_version)
-      VALUES (?, ?, 0, 0)
-    `).run(boardId, updatedAtMillis);
+      VALUES (?, ?, ?, 0)
+    `).run(boardId, updatedAtMillis ?? command.updatedAtMillis, Number(pinned));
+  if (createdAtMillis !== void 0) {
+    connection.prepare("INSERT INTO board_archive_metadata (board_id, created_at_millis) VALUES (?, ?)").run(boardId, createdAtMillis);
+  }
 }
 function writeScene(connection, boardId, objects) {
   const insertObject = connection.prepare(`
     INSERT INTO board_objects (
       board_id, object_id, kind, label, layer_index, x, y, width, height, rotation,
       geometry_version, locked, parent_id, group_id, appearance_json, detail_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const insertPayload = connection.prepare(`
     INSERT INTO object_payloads (board_id, object_id, payload_version, body_kind, body_json)
-    VALUES (?, ?, 0, ?, ?)
+    VALUES (?, ?, ?, ?, ?)
   `);
-  for (const [layerIndex, object3] of objects.entries()) {
+  for (const object3 of objects) {
     insertObject.run(
       boardId,
       object3.objectId,
       object3.kind,
       object3.label,
-      layerIndex,
+      object3.layerIndex,
       object3.x,
       object3.y,
       object3.width,
       object3.height,
       object3.rotation,
+      object3.geometryVersion,
       Number(object3.locked),
       object3.parentId ?? null,
       object3.groupId ?? null,
-      object3.appearance ? JSON.stringify(object3.appearance) : null,
-      object3.detail ? JSON.stringify(object3.detail) : null
+      object3.appearanceJson ?? null,
+      object3.detailJson ?? null
     );
     if (object3.payload) {
       insertPayload.run(
         boardId,
         object3.objectId,
-        object3.payload.bodyKind,
-        JSON.stringify(object3.payload.data)
+        object3.payload.version,
+        object3.payload.kind,
+        object3.payload.json
       );
     }
   }
@@ -22782,9 +27939,15 @@ function retainSource(connection, boardId, archive) {
 }
 function writePublication(connection, command, archive, publication) {
   const { boardId } = command;
-  writeBoard(connection, command, archive.title);
+  writeBoard(connection, command, archive.title, publication);
   writeScene(connection, boardId, publication.objects);
   writeAssets(connection, boardId, archive, publication.assetIds);
+  if (publication.history.length) {
+    writeArchiveHistory(connection, boardId, publication.history);
+  }
+  if (publication.metadata) {
+    writeRestoredMetadata(connection, boardId, publication.metadata);
+  }
   retainSource(connection, boardId, archive);
 }
 function readPublishedAsset(connection, actorId2, boardId, assetId) {
@@ -22834,6 +27997,20 @@ var archiveSchema = `
     chunk_index INTEGER NOT NULL CHECK (chunk_index >= 0),
     bytes BLOB NOT NULL,
     PRIMARY KEY (board_id, chunk_index)
+  ) STRICT;
+
+  CREATE TABLE IF NOT EXISTS board_archive_metadata (
+    board_id TEXT PRIMARY KEY REFERENCES boards (board_id) ON DELETE CASCADE,
+    created_at_millis INTEGER NOT NULL CHECK (created_at_millis >= 0)
+  ) STRICT;
+
+  CREATE TABLE IF NOT EXISTS board_archive_actors (
+    board_id TEXT NOT NULL REFERENCES boards (board_id) ON DELETE CASCADE,
+    actor_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('human', 'agent')),
+    role TEXT NOT NULL CHECK (role IN ('owner', 'editor', 'commenter', 'viewer')),
+    PRIMARY KEY (board_id, actor_id)
   ) STRICT;
 `;
 
@@ -22893,7 +28070,7 @@ function replayReceipt(connection, command, signature) {
   }
   return existing.signature === signature ? existing.receipt : rejected6(command.commandId, "commandIdReuse");
 }
-function publishArchive(connection, command, archive) {
+function publishArchive(connection, command, archive, validate) {
   const { actorId: actorId2, boardId, commandId } = command;
   const { signature, title } = archive;
   const replay = replayReceipt(connection, command, signature);
@@ -22902,7 +28079,7 @@ function publishArchive(connection, command, archive) {
   }
   let publication;
   try {
-    publication = preparePublication(archive, boardId);
+    publication = preparePublication(archive, command, validate);
   } catch (error) {
     if (!(error instanceof ArchiveObjectError)) {
       throw error;
@@ -22925,7 +28102,7 @@ function recordReadRejection(database, command, error) {
     (connection) => replayReceipt(connection, command, signature) ?? writeReceipt3(connection, command.actorId, signature, receipt)
   );
 }
-async function importCurrent(database, command) {
+async function importCurrent(database, command, validate) {
   let archive;
   try {
     archive = await stageCurrentArchive(command.chunks);
@@ -22936,15 +28113,15 @@ async function importCurrent(database, command) {
     return recordReadRejection(database, command, error);
   }
   try {
-    return database.write((connection) => publishArchive(connection, command, archive));
+    return database.write((connection) => publishArchive(connection, command, archive, validate));
   } finally {
     await archive.dispose();
   }
 }
-function createArchiveImportRepository(database) {
+function createArchiveImportRepository(database, validate) {
   database.write((connection) => connection.exec(archiveSchema));
   return {
-    importCurrent: (command) => importCurrent(database, command),
+    importCurrent: (command) => importCurrent(database, command, validate),
     getReceipt: (actorId2, commandId) => database.read((connection) => readReceipt(connection, actorId2, commandId)?.receipt),
     getAsset: (actorId2, boardId, assetId) => database.read((connection) => readPublishedAsset(connection, actorId2, boardId, assetId))
   };
@@ -23143,8 +28320,8 @@ function rewriteAssets(bodyKind, body, replace) {
   }
 }
 function rewriteCopyPayload(bodyKind, bodyJson, scope2) {
-  const parsed = JSON.parse(bodyJson);
-  const body = record5(parsed);
+  const parsed2 = JSON.parse(bodyJson);
+  const body = record5(parsed2);
   if (!body) {
     throw new CopyPayloadError();
   }
@@ -23300,7 +28477,7 @@ function record6(value) {
   }
   return value;
 }
-function unsigned(value) {
+function unsigned2(value) {
   const decoded = BigInt(text2(value));
   if (decoded < 0n) {
     throw new Error("Invalid stored catalog receipt version.");
@@ -23315,9 +28492,9 @@ function readBoard(value) {
   return {
     boardId: text2(boardId),
     title: text2(title),
-    updatedAtMillis: updatedAtMillis === void 0 ? void 0 : unsigned(updatedAtMillis),
+    updatedAtMillis: updatedAtMillis === void 0 ? void 0 : unsigned2(updatedAtMillis),
     pinned,
-    entryVersion: unsigned(entryVersion),
+    entryVersion: unsigned2(entryVersion),
     canManage
   };
 }
@@ -23461,395 +28638,6 @@ var catalogSchema = `
   JOIN board_members AS member ON member.board_id = owner.board_id AND member.actor_id = owner.actor_id
   WHERE NOT EXISTS (SELECT 1 FROM board_lifecycle AS lifecycle WHERE lifecycle.board_id = owner.board_id);
 `;
-
-// src/infrastructure/adapters/catalog/thumbnail.ts
-var maximumObjects = 160;
-var maximumDescriptorBytes = 8192;
-var maximumMediaSourceBytes = 48 * 1024;
-var maximumEmbeddedImageBytes = 24 * 1024;
-var assetIdentifier = /^[A-Za-z0-9_-]{1,128}$/u;
-var drawableMediaTypes = /* @__PURE__ */ new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
-var activeCondition = "l.trashed_at_millis IS NULL";
-var trashCondition = "l.trashed_at_millis IS NOT NULL AND l.owner_actor_id = m.actor_id";
-function visibleRevision(connection, lookup) {
-  const condition = lookup.trashed ? trashCondition : activeCondition;
-  const statement = connection.prepare(`
-    SELECT b.revision FROM board_members AS m
-    JOIN boards AS b ON b.board_id = m.board_id
-    LEFT JOIN board_lifecycle AS l ON l.board_id = b.board_id
-    WHERE m.actor_id = ? AND m.board_id = ? AND ${condition}
-  `);
-  statement.setReadBigInts(true);
-  const row = statement.get(lookup.actorId, lookup.boardId);
-  return row && revisionValue(row.revision);
-}
-function revisionValue(value) {
-  if (typeof value !== "bigint" || value < 0n) {
-    throw new Error("The preview board revision is invalid.");
-  }
-  return value;
-}
-function coordinate(value) {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new Error("The board preview contains invalid geometry.");
-  }
-  return value;
-}
-function label(value, name) {
-  if (typeof value !== "string") {
-    throw new Error("The board preview contains an invalid " + name + ".");
-  }
-  return value;
-}
-function optionalText(value) {
-  return typeof value === "string" ? value : void 0;
-}
-function readBounds(connection, boardId) {
-  const row = connection.prepare(`
-    SELECT COUNT(*) AS total,
-      MIN(x - CASE WHEN rotation = 0 THEN 0.0 ELSE height / 2.0 END) AS left,
-      MIN(y - CASE WHEN rotation = 0 THEN 0.0 ELSE width / 2.0 END) AS top,
-      MAX(x + width + CASE WHEN rotation = 0 THEN 0.0 ELSE height / 2.0 END) AS right,
-      MAX(y + height + CASE WHEN rotation = 0 THEN 0.0 ELSE width / 2.0 END) AS bottom
-    FROM board_objects WHERE board_id = ?
-  `).get(boardId);
-  if (!row || row.total === 0) {
-    return void 0;
-  }
-  return {
-    total: coordinate(row.total),
-    left: coordinate(row.left),
-    top: coordinate(row.top),
-    right: coordinate(row.right),
-    bottom: coordinate(row.bottom)
-  };
-}
-function readRows2(connection, boardId, total) {
-  const count = Math.min(total, maximumObjects);
-  return connection.prepare(`
-      WITH RECURSIVE slots(slot) AS (
-        VALUES(0)
-        UNION ALL
-        SELECT slot + 1 FROM slots WHERE slot + 1 < ?2
-      ), ordered AS (
-      SELECT *, ROW_NUMBER() OVER (ORDER BY layer_index, object_id) - 1 AS slot
-      FROM board_objects WHERE board_id = ?1
-    ), sampled AS (
-        SELECT ordered.* FROM ordered JOIN slots
-          ON ordered.slot = CAST(slots.slot * ?3 / ?2 AS INTEGER)
-    )
-    SELECT o.object_id, o.kind, SUBSTR(o.label, 1, 120) AS label,
-      o.x, o.y, o.width, o.height, o.rotation,
-      CASE WHEN length(CAST(o.appearance_json AS BLOB)) <= ?4 THEN o.appearance_json END AS appearance,
-      CASE WHEN length(CAST(o.detail_json AS BLOB)) <= ?4 THEN o.detail_json END AS detail,
-      CASE WHEN length(CAST(p.body_json AS BLOB)) <= ?5 THEN json_extract(p.body_json, '$.src') END AS image_source
-    FROM sampled AS o LEFT JOIN object_payloads AS p
-      ON p.board_id = ?1 AND p.object_id = o.object_id AND o.kind = 'image' AND p.body_kind = 'image'
-    ORDER BY o.slot
-  `).all(boardId, count, total, maximumDescriptorBytes, maximumMediaSourceBytes);
-}
-function readImages(connection, boardId) {
-  const prefix = "/studio-archive-assets/" + boardId + "/";
-  let statement;
-  let remaining = maximumEmbeddedImageBytes;
-  return (source) => {
-    if (typeof source !== "string" || remaining === 0 || !source.startsWith(prefix)) {
-      return void 0;
-    }
-    const id = source.slice(prefix.length);
-    if (!assetIdentifier.test(id)) {
-      return void 0;
-    }
-    statement ??= connection.prepare(`
-      SELECT mime_type, bytes FROM board_archive_assets
-      WHERE board_id = ? AND asset_id = ? AND length(bytes) <= ?
-    `);
-    const asset = statement.get(boardId, id, remaining);
-    if (!asset) {
-      return void 0;
-    }
-    const { mime_type: mimeType, bytes } = asset;
-    if (typeof mimeType !== "string" || !drawableMediaTypes.has(mimeType) || !(bytes instanceof Uint8Array)) {
-      return void 0;
-    }
-    remaining -= bytes.byteLength;
-    return "data:" + mimeType + ";base64," + Buffer.from(bytes).toString("base64");
-  };
-}
-function readObject2(row, image) {
-  return {
-    id: label(row.object_id, "object identifier"),
-    kind: label(row.kind, "object kind"),
-    label: label(row.label, "object label"),
-    x: coordinate(row.x),
-    y: coordinate(row.y),
-    width: coordinate(row.width),
-    height: coordinate(row.height),
-    rotation: coordinate(row.rotation),
-    appearance: optionalText(row.appearance),
-    detail: optionalText(row.detail),
-    image
-  };
-}
-function readCatalogThumbnail(connection, lookup, cached) {
-  const { boardId } = lookup;
-  const revision = visibleRevision(connection, lookup);
-  if (revision === void 0) {
-    return { kind: "forbidden" };
-  }
-  if (revision !== lookup.revision) {
-    return { kind: "unavailable" };
-  }
-  if (cached?.revision === revision) {
-    return { kind: "thumbnail", thumbnail: cached };
-  }
-  const bounds = readBounds(connection, boardId);
-  if (!bounds) {
-    return { kind: "unavailable" };
-  }
-  const findImage = readImages(connection, boardId);
-  const objects = readRows2(connection, boardId, bounds.total).map(
-    (row) => readObject2(row, findImage(row.image_source))
-  );
-  return {
-    kind: "scene",
-    scene: { ...bounds, revision, objects }
-  };
-}
-
-// src/infrastructure/adapters/catalog/index.ts
-var catalogOrderings = {
-  recent: {
-    columns: "-pinned, -COALESCE(updated_at_millis, -1), board_id",
-    parameters: "-?, -COALESCE(?, -1), ?",
-    values: ({ pinned, updatedAtMillis, boardId }) => [
-      Number(pinned),
-      updatedAtMillis ?? null,
-      boardId
-    ]
-  },
-  title: {
-    columns: "-pinned, lower(title), board_id",
-    parameters: "-?, lower(?), ?",
-    values: ({ pinned, title, boardId }) => [Number(pinned), title, boardId]
-  }
-};
-var trashOrderings = {
-  recent: {
-    columns: "-trashed_at_millis, board_id",
-    parameters: "-?, ?",
-    values: ({ trashedAtMillis, boardId }) => [trashedAtMillis ?? null, boardId]
-  },
-  title: {
-    columns: "lower(title), board_id",
-    parameters: "lower(?), ?",
-    values: ({ title, boardId }) => [title, boardId]
-  }
-};
-var catalogColumns = `
-  b.board_id, b.title, c.updated_at_millis,
-  COALESCE(c.pinned, 0) AS pinned,
-  COALESCE(c.entry_version, 0) AS entry_version,
-  COALESCE(l.owner_actor_id = m.actor_id, 0) AS can_manage,
-  l.trashed_at_millis
-`;
-var catalogTables = `
-  FROM board_members AS m
-  JOIN boards AS b ON b.board_id = m.board_id
-  LEFT JOIN catalog_entries AS c ON c.board_id = b.board_id
-  LEFT JOIN board_lifecycle AS l ON l.board_id = b.board_id
-`;
-var activeBoards = "l.trashed_at_millis IS NULL";
-var activePinnedBoards = activeBoards + " AND c.pinned = 1";
-var ownedTrash = "l.owner_actor_id = m.actor_id AND l.trashed_at_millis IS NOT NULL";
-function readUnsigned(value, fieldName) {
-  if (typeof value !== "bigint" || value < 0n) {
-    throw new Error(`Invalid catalog integer for ${fieldName}.`);
-  }
-  return value;
-}
-function readSummary(row) {
-  const {
-    board_id: boardId,
-    title,
-    updated_at_millis: updatedAtMillis,
-    pinned,
-    entry_version: entryVersion,
-    can_manage: canManage
-  } = row;
-  if (typeof boardId !== "string" || typeof title !== "string") {
-    throw new Error("Invalid catalog board identity.");
-  }
-  if (pinned !== 0n && pinned !== 1n) {
-    throw new Error("Invalid catalog pin state.");
-  }
-  if (canManage !== 0n && canManage !== 1n) {
-    throw new Error("Invalid catalog management permission.");
-  }
-  return {
-    boardId,
-    title,
-    updatedAtMillis: updatedAtMillis === null ? void 0 : readUnsigned(updatedAtMillis, "updated_at_millis"),
-    pinned: pinned === 1n,
-    entryVersion: readUnsigned(entryVersion, "entry_version"),
-    canManage: canManage === 1n
-  };
-}
-function readListSummary(row) {
-  return {
-    ...readSummary(row),
-    previewRevision: readUnsigned(row.preview_revision, "preview_revision")
-  };
-}
-function listRows(connection, lookup, condition, ordering) {
-  const { actorId: actorId2, query, limit, after } = lookup;
-  const boundary = after ? `WHERE (${ordering.columns}) > (${ordering.parameters})` : "";
-  const values = after ? ordering.values(after) : [];
-  const statement = connection.prepare(`
-    WITH visible AS (
-      SELECT ${catalogColumns}, b.revision AS preview_revision
-      ${catalogTables}
-      WHERE m.actor_id = ? AND instr(lower(b.title), lower(?)) > 0 AND ${condition}
-    )
-    SELECT board_id, title, updated_at_millis, pinned, entry_version, can_manage,
-      trashed_at_millis, preview_revision
-    FROM visible
-    ${boundary}
-    ORDER BY ${ordering.columns}
-    LIMIT ?
-  `);
-  statement.setReadBigInts(true);
-  return statement.all(actorId2, query, ...values, limit);
-}
-function listBoards2(connection, lookup) {
-  const condition = lookup.pinnedOnly ? activePinnedBoards : activeBoards;
-  return listRows(connection, lookup, condition, catalogOrderings[lookup.order]).map(
-    readListSummary
-  );
-}
-function listTrashedBoards2(connection, lookup) {
-  return listRows(connection, lookup, ownedTrash, trashOrderings[lookup.order]).map((row) => ({
-    board: readListSummary(row),
-    trashedAtMillis: readUnsigned(row.trashed_at_millis, "trashed_at_millis")
-  }));
-}
-function getCreatedReceipt(connection, actorId2, commandId) {
-  const statement = connection.prepare(`
-    SELECT c.board_id, c.title, c.updated_at_millis, c.pinned, c.entry_version,
-      1 AS can_manage, d.source_board_id
-    FROM catalog_create_receipts AS c
-    LEFT JOIN catalog_duplicate_sources AS d
-      ON d.actor_id = c.actor_id AND d.command_id = c.command_id
-    WHERE c.actor_id = ? AND c.command_id = ?
-  `);
-  statement.setReadBigInts(true);
-  const row = statement.get(actorId2, commandId);
-  if (!row) {
-    return void 0;
-  }
-  const { source_board_id: sourceBoardId } = row;
-  if (sourceBoardId !== null && typeof sourceBoardId !== "string") {
-    throw new Error("Invalid stored catalogue duplicate source.");
-  }
-  return {
-    receipt: { kind: "created", commandId, board: readSummary(row) },
-    duplicateSourceId: sourceBoardId ?? void 0
-  };
-}
-function getReceipt(connection, actorId2, commandId) {
-  return getCreatedReceipt(connection, actorId2, commandId) ?? getManagementReceipt(connection, actorId2, commandId);
-}
-function getManagedBoard(connection, actorId2, boardId) {
-  const statement = connection.prepare(`
-    SELECT ${catalogColumns}
-    ${catalogTables}
-    WHERE m.actor_id = ? AND b.board_id = ? AND l.owner_actor_id = m.actor_id
-  `);
-  statement.setReadBigInts(true);
-  const row = statement.get(actorId2, boardId);
-  if (!row) {
-    return void 0;
-  }
-  return {
-    board: readSummary(row),
-    trashedAtMillis: row.trashed_at_millis === null ? void 0 : readUnsigned(row.trashed_at_millis, "trashed_at_millis")
-  };
-}
-function changeBoard(connection, change) {
-  const { board, trashedAtMillis } = change;
-  const { boardId, title, updatedAtMillis, entryVersion, pinned } = board;
-  if (updatedAtMillis === void 0) {
-    throw new Error("Catalog changes require an update timestamp.");
-  }
-  connection.prepare("UPDATE boards SET title = ? WHERE board_id = ?").run(title, boardId);
-  connection.prepare(`
-      INSERT INTO catalog_entries (board_id, updated_at_millis, pinned, entry_version)
-      VALUES (?, ?, ?, ?)
-      ON CONFLICT (board_id) DO UPDATE SET
-        updated_at_millis = excluded.updated_at_millis,
-        pinned = excluded.pinned,
-        entry_version = excluded.entry_version
-    `).run(boardId, updatedAtMillis, Number(pinned), entryVersion);
-  connection.prepare("UPDATE board_lifecycle SET trashed_at_millis = ? WHERE board_id = ?").run(trashedAtMillis ?? null, boardId);
-}
-function deleteBoard(connection, boardId) {
-  connection.prepare("DELETE FROM boards WHERE board_id = ?").run(boardId);
-}
-function saveBoard(connection, actorId2, receipt) {
-  const { commandId, board } = receipt;
-  const { boardId, title, updatedAtMillis, pinned, entryVersion } = board;
-  if (updatedAtMillis === void 0) {
-    throw new Error("New catalog entries require an update timestamp.");
-  }
-  const pinValue = Number(pinned);
-  connection.prepare("INSERT INTO boards (board_id, title, revision) VALUES (?, ?, 0)").run(boardId, title);
-  connection.prepare("INSERT INTO board_members (board_id, actor_id, can_edit) VALUES (?, ?, 1)").run(boardId, actorId2);
-  connection.prepare(`
-    INSERT INTO catalog_entries (board_id, updated_at_millis, pinned, entry_version)
-    VALUES (?, ?, ?, ?)
-  `).run(boardId, updatedAtMillis, pinValue, entryVersion);
-  connection.prepare(`
-    INSERT INTO catalog_create_receipts (
-      actor_id, command_id, board_id, title, updated_at_millis, pinned, entry_version
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(actorId2, commandId, boardId, title, updatedAtMillis, pinValue, entryVersion);
-}
-function saveDuplicatedBoard(connection, actorId2, sourceBoardId, receipt) {
-  const rejected7 = duplicateBoard2(
-    connection,
-    sourceBoardId,
-    receipt.board.boardId,
-    () => saveBoard(connection, actorId2, receipt)
-  );
-  if (rejected7) {
-    return rejected7;
-  }
-  connection.prepare(
-    "INSERT INTO catalog_duplicate_sources (actor_id, command_id, source_board_id) VALUES (?, ?, ?)"
-  ).run(actorId2, receipt.commandId, sourceBoardId);
-  return void 0;
-}
-function createCatalogRepository(database) {
-  database.write((connection) => connection.exec(catalogSchema));
-  return {
-    listBoards: (lookup) => database.read((connection) => listBoards2(connection, lookup)),
-    listTrashedBoards: (lookup) => database.read((connection) => listTrashedBoards2(connection, lookup)),
-    readThumbnail: (lookup, cached) => database.read((connection) => readCatalogThumbnail(connection, lookup, cached)),
-    getReceipt: (actorId2, commandId) => database.read((connection) => getReceipt(connection, actorId2, commandId)?.receipt),
-    write: (work) => database.write(
-      (connection) => work({
-        getReceipt: (actorId2, commandId) => getReceipt(connection, actorId2, commandId),
-        saveBoard: (actorId2, receipt) => saveBoard(connection, actorId2, receipt),
-        duplicateBoard: (actorId2, sourceBoardId, receipt) => saveDuplicatedBoard(connection, actorId2, sourceBoardId, receipt),
-        getManagedBoard: (actorId2, boardId) => getManagedBoard(connection, actorId2, boardId),
-        changeBoard: (board) => changeBoard(connection, board),
-        deleteBoard: (boardId) => deleteBoard(connection, boardId),
-        saveManagementReceipt: (actorId2, signature, receipt) => saveManagementReceipt(connection, actorId2, signature, receipt)
-      })
-    )
-  };
-}
 
 // ../../../../node_modules/.pnpm/parse5@8.1.1/node_modules/parse5/dist/common/unicode.js
 var UNDEFINED_CODE_POINTS = /* @__PURE__ */ new Set([
@@ -32583,6 +37371,634 @@ function parse(html, options) {
   return Parser.parse(html, options);
 }
 
+// src/infrastructure/adapters/catalog/thumbnail-html.ts
+var svgNamespace = "http://www.w3.org/2000/svg";
+var htmlTags = new Set(
+  "article aside b blockquote br caption code dd div dl dt em figcaption figure footer h1 h2 h3 h4 h5 h6 header hr i li main ol p pre section small span strong sub sup table tbody td th thead tr u ul".split(
+    " "
+  )
+);
+var svgTags = new Set(
+  "svg g path circle rect ellipse line polyline polygon text tspan defs clipPath marker linearGradient radialGradient stop".split(
+    " "
+  )
+);
+var excludedTags = new Set(
+  "audio canvas embed foreignObject head iframe link math meta noscript object script style template video".split(
+    " "
+  )
+);
+var svgAttributes = new Set(
+  "viewBox preserveAspectRatio width height x y x1 y1 x2 y2 cx cy r rx ry d points transform fill fill-opacity fill-rule stroke stroke-width stroke-opacity stroke-dasharray stroke-linecap stroke-linejoin opacity text-anchor dominant-baseline font-family font-size font-weight dx dy markerHeight markerWidth markerUnits orient refX refY gradientTransform gradientUnits offset stop-color stop-opacity".split(
+    " "
+  )
+);
+var cssProperties = new Set(
+  "background background-color border border-color border-radius border-style border-width box-sizing color column-gap display flex flex-basis flex-direction flex-grow flex-shrink flex-wrap font-family font-size font-style font-weight gap grid-area grid-auto-columns grid-auto-flow grid-auto-rows grid-column grid-row grid-template-areas grid-template-columns grid-template-rows height justify-content justify-items justify-self align-content align-items align-self left letter-spacing line-height margin margin-bottom margin-left margin-right margin-top max-height max-width min-height min-width opacity overflow padding padding-bottom padding-left padding-right padding-top position right row-gap text-align text-decoration text-overflow text-transform top bottom vertical-align white-space width word-break word-wrap z-index".split(
+    " "
+  )
+);
+var safeCssValue = /^[\w\s#.,%+'"()/-]+$/u;
+var safeCssFunctions = /* @__PURE__ */ new Set([
+  "calc",
+  "clamp",
+  "hsl",
+  "hsla",
+  "linear-gradient",
+  "max",
+  "min",
+  "minmax",
+  "radial-gradient",
+  "repeat",
+  "rgb",
+  "rgba"
+]);
+var safeSelector = /^[a-z\d_.#\s>+~-]+$/iu;
+var safeSvgValue = /^[\w\s#.,%+'()/-]+$/u;
+var safeId = /^[a-z_][\w-]{0,100}$/iu;
+var localSvgReference = /^url\(\s*#([a-z_][\w-]{0,100})\s*\)$/iu;
+var svgReferenceAttributes = /* @__PURE__ */ new Set([
+  "clip-path",
+  "fill",
+  "marker-end",
+  "marker-mid",
+  "marker-start",
+  "stroke"
+]);
+var maximumNodes = 400;
+var maximumDepth3 = 20;
+var maximumText = 3e3;
+function xml2(value) {
+  return value.replace(
+    new RegExp("\\p{Cc}|[\\uFFFE\\uFFFF]", "gu"),
+    (character) => /[\t\r\n]/u.test(character) ? character : ""
+  ).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+}
+function safeDeclaration(declaration) {
+  const colon = declaration.indexOf(":");
+  const property = declaration.slice(0, colon).trim().toLowerCase();
+  const value = declaration.slice(colon + 1).trim();
+  if (colon < 1 || !cssProperties.has(property) || !safeCssValue.test(value)) {
+    return [];
+  }
+  const functions = Array.from(value.matchAll(/(?<![\w-])([\w-]+)\s*\(/gu), (match) => match[1]);
+  return functions.every((name) => name && safeCssFunctions.has(name.toLowerCase())) ? [property + ":" + value] : [];
+}
+function safeDeclarations(value) {
+  return value.slice(0, 8e3).split(";").flatMap(safeDeclaration).join(";");
+}
+function safeSelectors(value, scope2) {
+  return value.split(",").flatMap((part) => {
+    const selector = part.trim();
+    if (!safeSelector.test(selector)) {
+      return [];
+    }
+    const local = selector.replace(/#([a-z_][\w-]*)/giu, scope2 + "-$1");
+    const root = /^(?:html\s+body|body|html)(?=[.#\s>+~]|$)/iu;
+    if (root.test(local)) {
+      return [local.replace(root, scope2)];
+    }
+    return [scope2 + " " + local];
+  });
+}
+function safeStylesheet(value, scope2) {
+  const rules = value.slice(0, 12e3).replace(/\/\*[\s\S]*?\*\//gu, "").split("}");
+  return rules.map((rule) => {
+    const [selectors, declarations, nesting] = rule.split("{");
+    if (!selectors || !declarations || nesting !== void 0) {
+      return "";
+    }
+    const scoped = safeSelectors(selectors, scope2);
+    const style = safeDeclarations(declarations);
+    return scoped.length && style ? scoped.join(",") + "{" + style + "}" : "";
+  }).join("");
+}
+function isElement(node) {
+  return "tagName" in node;
+}
+function attribute(node, name) {
+  return node.attrs.find((value) => value.name === name && !value.namespace)?.value;
+}
+function svgAttribute(name, value, id) {
+  const local = svgReferenceAttributes.has(name) ? localSvgReference.exec(value)?.[1] : void 0;
+  if (local) {
+    return [" " + name + '="url(#' + id + "-" + local + ')"'];
+  }
+  const literal = value.length <= 4096 && safeSvgValue.test(value) && !/url\s*\(/iu.test(value);
+  return svgAttributes.has(name) && literal ? [" " + name + '="' + xml2(value) + '"'] : [];
+}
+function safeAttributes(node, svg, id) {
+  return node.attrs.flatMap(({ name, value, namespace: namespace2 }) => {
+    if (namespace2) {
+      return [];
+    }
+    if (name === "style") {
+      const style = safeDeclarations(value);
+      return style ? [' style="' + xml2(style) + '"'] : [];
+    }
+    if (name === "class" && /^[\w\s-]{1,300}$/u.test(value)) {
+      return [' class="' + xml2(value) + '"'];
+    }
+    if (name === "id" && safeId.test(value)) {
+      return [' id="' + id + "-" + value + '"'];
+    }
+    return svg ? svgAttribute(name, value, id) : [];
+  }).join("");
+}
+function staticMarkup(node, budget, depth) {
+  if (depth > maximumDepth3 || budget.nodes <= 0) {
+    return "";
+  }
+  budget.nodes -= 1;
+  if ("value" in node) {
+    const text3 = node.value.slice(0, budget.characters);
+    budget.characters -= text3.length;
+    return xml2(text3);
+  }
+  if (!isElement(node) || excludedTags.has(node.tagName)) {
+    return "";
+  }
+  if (attribute(node, "hidden") !== void 0 || attribute(node, "aria-hidden") === "true") {
+    return "";
+  }
+  const { tagName } = node;
+  const svg = node.namespaceURI === svgNamespace;
+  const content = node.childNodes.map((child3) => staticMarkup(child3, budget, depth + 1)).join("");
+  if (!(svg ? svgTags : htmlTags).has(tagName)) {
+    return content;
+  }
+  const attributes2 = safeAttributes(node, svg, budget.id);
+  const ns = tagName === "svg" ? ' xmlns="' + svgNamespace + '"' : "";
+  return tagName === "br" || tagName === "hr" ? "<" + tagName + attributes2 + "/>" : "<" + tagName + ns + attributes2 + ">" + content + "</" + tagName + ">";
+}
+function childElement(node, tag2) {
+  return node?.childNodes.find(
+    (child3) => isElement(child3) && child3.tagName === tag2
+  );
+}
+function sanitizeThumbnailHtml(source, index) {
+  const document = parse(source);
+  const html = childElement(document, "html");
+  const body = childElement(html, "body");
+  if (!body) {
+    return void 0;
+  }
+  const id = "thumbnail-html-" + index;
+  const budget = { id, nodes: maximumNodes, characters: maximumText };
+  const markup = body.childNodes.map((child3) => staticMarkup(child3, budget, 1)).join("");
+  if (!markup.trim()) {
+    return void 0;
+  }
+  const styles = [childElement(html, "head"), body].flatMap(
+    (root) => root?.childNodes.filter(
+      (child3) => isElement(child3) && child3.tagName === "style"
+    ) ?? []
+  );
+  const css = styles.slice(0, 4).flatMap((style) => style.childNodes.map((child3) => "value" in child3 ? child3.value : "")).join("\n");
+  const stylesheet = safeStylesheet(css, "#" + id);
+  const bodyStyle = safeDeclarations(attribute(body, "style") ?? "");
+  return '<div xmlns="http://www.w3.org/1999/xhtml" style="width:100%;height:100%;overflow:hidden;font:14px sans-serif">' + (stylesheet && "<style>" + xml2(stylesheet) + "</style>") + '<div id="' + id + '" style="' + xml2("min-height:100%;" + bodyStyle) + '">' + markup + "</div></div>";
+}
+
+// src/infrastructure/adapters/catalog/thumbnail.ts
+var maximumObjects = 160;
+var maximumDetailedObjects = 32;
+var maximumDescriptorBytes = 8192;
+var maximumPayloadBytes = 96 * 1024;
+var maximumEmbeddedImageBytes = 48 * 1024;
+var assetIdentifier = /^[A-Za-z0-9_-]{1,128}$/u;
+var drawableMediaTypes = /* @__PURE__ */ new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+var embeddedImage = /^data:image\/(?:png|jpeg|webp|gif);base64,([a-z\d+/]+={0,2})$/iu;
+var activeCondition = "l.trashed_at_millis IS NULL";
+var trashCondition = "l.trashed_at_millis IS NOT NULL AND l.owner_actor_id = m.actor_id";
+function visibleRevision(connection, lookup) {
+  const condition = lookup.trashed ? trashCondition : activeCondition;
+  const statement = connection.prepare(`
+    SELECT b.revision FROM board_members AS m
+    JOIN boards AS b ON b.board_id = m.board_id
+    LEFT JOIN board_lifecycle AS l ON l.board_id = b.board_id
+    WHERE m.actor_id = ? AND m.board_id = ? AND ${condition}
+  `);
+  statement.setReadBigInts(true);
+  const row = statement.get(lookup.actorId, lookup.boardId);
+  return row && revisionValue(row.revision);
+}
+function revisionValue(value) {
+  if (typeof value !== "bigint" || value < 0n) {
+    throw new Error("The preview board revision is invalid.");
+  }
+  return value;
+}
+function coordinate(value) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error("The board preview contains invalid geometry.");
+  }
+  return value;
+}
+function label(value, name) {
+  if (typeof value !== "string") {
+    throw new Error("The board preview contains an invalid " + name + ".");
+  }
+  return value;
+}
+function optionalText(value) {
+  return typeof value === "string" ? value : void 0;
+}
+function readBounds(connection, boardId) {
+  const row = connection.prepare(`
+    SELECT COUNT(*) AS total,
+      MIN(x - CASE WHEN rotation = 0 THEN 0.0 ELSE height / 2.0 END) AS left,
+      MIN(y - CASE WHEN rotation = 0 THEN 0.0 ELSE width / 2.0 END) AS top,
+      MAX(x + width + CASE WHEN rotation = 0 THEN 0.0 ELSE height / 2.0 END) AS right,
+      MAX(y + height + CASE WHEN rotation = 0 THEN 0.0 ELSE width / 2.0 END) AS bottom
+    FROM board_objects WHERE board_id = ?
+  `).get(boardId);
+  if (!row || row.total === 0) {
+    return void 0;
+  }
+  return {
+    total: coordinate(row.total),
+    left: coordinate(row.left),
+    top: coordinate(row.top),
+    right: coordinate(row.right),
+    bottom: coordinate(row.bottom)
+  };
+}
+function readRows2(connection, boardId, total) {
+  const count = Math.min(total, maximumObjects);
+  return connection.prepare(`
+      WITH RECURSIVE slots(slot) AS (
+        VALUES(0)
+        UNION ALL
+        SELECT slot + 1 FROM slots WHERE slot + 1 < ?2
+      ), ordered AS (
+      SELECT object_id, ROW_NUMBER() OVER (ORDER BY layer_index, object_id) - 1 AS slot
+      FROM board_objects WHERE board_id = ?1
+    ), sampled AS (
+        SELECT ordered.* FROM ordered JOIN slots
+          ON ordered.slot = CAST(slots.slot * ?3 / ?2 AS INTEGER)
+    )
+    SELECT o.object_id, o.kind, SUBSTR(o.label, 1, 120) AS label,
+      o.x, o.y, o.width, o.height, o.rotation,
+      CASE WHEN length(CAST(o.appearance_json AS BLOB)) <= ?4 THEN o.appearance_json END AS appearance,
+      CASE WHEN length(CAST(o.detail_json AS BLOB)) <= ?4 THEN o.detail_json END AS detail
+    FROM sampled AS s JOIN board_objects AS o ON o.board_id = ?1 AND o.object_id = s.object_id
+    ORDER BY s.slot
+  `).all(boardId, count, total, maximumDescriptorBytes);
+}
+function readImages(connection, boardId) {
+  const prefix = "/studio-archive-assets/" + boardId + "/";
+  let statement;
+  let remaining = maximumEmbeddedImageBytes;
+  return (source) => {
+    if (typeof source !== "string" || remaining === 0) {
+      return void 0;
+    }
+    if (!source.startsWith(prefix)) {
+      const data = embeddedImage.exec(source)?.[1];
+      if (data && Buffer.byteLength(data, "base64") <= remaining) {
+        remaining -= Buffer.byteLength(data, "base64");
+        return source;
+      }
+      return void 0;
+    }
+    const id = source.slice(prefix.length);
+    if (!assetIdentifier.test(id)) {
+      return void 0;
+    }
+    statement ??= connection.prepare(`
+      SELECT mime_type, bytes FROM board_archive_assets
+      WHERE board_id = ? AND asset_id = ? AND length(bytes) <= ?
+    `);
+    const asset = statement.get(boardId, id, remaining);
+    if (!asset) {
+      return void 0;
+    }
+    const { mime_type: mimeType, bytes } = asset;
+    if (typeof mimeType !== "string" || !drawableMediaTypes.has(mimeType) || !(bytes instanceof Uint8Array)) {
+      return void 0;
+    }
+    remaining -= bytes.byteLength;
+    return "data:" + mimeType + ";base64," + Buffer.from(bytes).toString("base64");
+  };
+}
+function readObject2(row) {
+  return {
+    id: label(row.object_id, "object identifier"),
+    kind: label(row.kind, "object kind"),
+    label: label(row.label, "object label"),
+    x: coordinate(row.x),
+    y: coordinate(row.y),
+    width: coordinate(row.width),
+    height: coordinate(row.height),
+    rotation: coordinate(row.rotation),
+    appearance: optionalText(row.appearance),
+    detail: optionalText(row.detail)
+  };
+}
+var payloadKinds3 = /* @__PURE__ */ new Map([
+  ["html", "embed"],
+  ["document", "document"],
+  ["todo", "todo"],
+  ["sticker", "sticker"],
+  ["image", "image"],
+  ["note", "text"],
+  ["text", "text"]
+]);
+function readDetailedObjects(connection, boardId, objects) {
+  const findImage = readImages(connection, boardId);
+  const statement = connection.prepare(`
+    SELECT body_json, length(CAST(body_json AS BLOB)) AS byte_length
+    FROM object_payloads
+    WHERE board_id = ? AND object_id = ? AND body_kind = ?
+      AND length(CAST(body_json AS BLOB)) <= ?
+  `);
+  let remaining = maximumPayloadBytes;
+  return objects.map((object3, index) => {
+    const bodyKind = payloadKinds3.get(object3.kind);
+    if (!bodyKind || remaining === 0) {
+      return object3;
+    }
+    const row = statement.get(boardId, object3.id, bodyKind, remaining);
+    if (!row || typeof row.body_json !== "string") {
+      return object3;
+    }
+    remaining -= coordinate(row.byte_length);
+    const value = JSON.parse(row.body_json);
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return object3;
+    }
+    const data = value;
+    const { html, src } = data;
+    return {
+      ...object3,
+      content: object3.kind === "html" ? void 0 : data,
+      html: object3.kind === "html" && typeof html === "string" ? sanitizeThumbnailHtml(html, index) : void 0,
+      image: object3.kind === "image" ? findImage(src) : void 0
+    };
+  });
+}
+function readCatalogThumbnail(connection, lookup, cached) {
+  const { boardId } = lookup;
+  const revision = visibleRevision(connection, lookup);
+  if (revision === void 0) {
+    return { kind: "forbidden" };
+  }
+  if (revision !== lookup.revision) {
+    return { kind: "unavailable" };
+  }
+  if (cached?.revision === revision) {
+    return { kind: "thumbnail", thumbnail: cached };
+  }
+  const bounds = readBounds(connection, boardId);
+  if (!bounds) {
+    return { kind: "unavailable" };
+  }
+  const objects = readRows2(connection, boardId, bounds.total).map(readObject2);
+  return {
+    kind: "scene",
+    scene: {
+      ...bounds,
+      revision,
+      objects: bounds.total <= maximumDetailedObjects ? readDetailedObjects(connection, boardId, objects) : objects
+    }
+  };
+}
+
+// src/infrastructure/adapters/catalog/index.ts
+var catalogOrderings = {
+  recent: {
+    columns: "-pinned, -COALESCE(updated_at_millis, -1), board_id",
+    parameters: "-?, -COALESCE(?, -1), ?",
+    values: ({ pinned, updatedAtMillis, boardId }) => [
+      Number(pinned),
+      updatedAtMillis ?? null,
+      boardId
+    ]
+  },
+  title: {
+    columns: "-pinned, lower(title), board_id",
+    parameters: "-?, lower(?), ?",
+    values: ({ pinned, title, boardId }) => [Number(pinned), title, boardId]
+  }
+};
+var trashOrderings = {
+  recent: {
+    columns: "-trashed_at_millis, board_id",
+    parameters: "-?, ?",
+    values: ({ trashedAtMillis, boardId }) => [trashedAtMillis ?? null, boardId]
+  },
+  title: {
+    columns: "lower(title), board_id",
+    parameters: "lower(?), ?",
+    values: ({ title, boardId }) => [title, boardId]
+  }
+};
+var catalogColumns = `
+  b.board_id, b.title, c.updated_at_millis,
+  COALESCE(c.pinned, 0) AS pinned,
+  COALESCE(c.entry_version, 0) AS entry_version,
+  COALESCE(l.owner_actor_id = m.actor_id, 0) AS can_manage,
+  l.trashed_at_millis
+`;
+var catalogTables = `
+  FROM board_members AS m
+  JOIN boards AS b ON b.board_id = m.board_id
+  LEFT JOIN catalog_entries AS c ON c.board_id = b.board_id
+  LEFT JOIN board_lifecycle AS l ON l.board_id = b.board_id
+`;
+var activeBoards = "l.trashed_at_millis IS NULL";
+var activePinnedBoards = activeBoards + " AND c.pinned = 1";
+var ownedTrash = "l.owner_actor_id = m.actor_id AND l.trashed_at_millis IS NOT NULL";
+function readUnsigned(value, fieldName) {
+  if (typeof value !== "bigint" || value < 0n) {
+    throw new Error(`Invalid catalog integer for ${fieldName}.`);
+  }
+  return value;
+}
+function readSummary(row) {
+  const {
+    board_id: boardId,
+    title,
+    updated_at_millis: updatedAtMillis,
+    pinned,
+    entry_version: entryVersion,
+    can_manage: canManage
+  } = row;
+  if (typeof boardId !== "string" || typeof title !== "string") {
+    throw new Error("Invalid catalog board identity.");
+  }
+  if (pinned !== 0n && pinned !== 1n) {
+    throw new Error("Invalid catalog pin state.");
+  }
+  if (canManage !== 0n && canManage !== 1n) {
+    throw new Error("Invalid catalog management permission.");
+  }
+  return {
+    boardId,
+    title,
+    updatedAtMillis: updatedAtMillis === null ? void 0 : readUnsigned(updatedAtMillis, "updated_at_millis"),
+    pinned: pinned === 1n,
+    entryVersion: readUnsigned(entryVersion, "entry_version"),
+    canManage: canManage === 1n
+  };
+}
+function readListSummary(row) {
+  return {
+    ...readSummary(row),
+    previewRevision: readUnsigned(row.preview_revision, "preview_revision")
+  };
+}
+function listRows(connection, lookup, condition, ordering) {
+  const { actorId: actorId2, query, limit, after } = lookup;
+  const boundary = after ? `WHERE (${ordering.columns}) > (${ordering.parameters})` : "";
+  const values = after ? ordering.values(after) : [];
+  const statement = connection.prepare(`
+    WITH visible AS (
+      SELECT ${catalogColumns}, b.revision AS preview_revision
+      ${catalogTables}
+      WHERE m.actor_id = ? AND instr(lower(b.title), lower(?)) > 0 AND ${condition}
+    )
+    SELECT board_id, title, updated_at_millis, pinned, entry_version, can_manage,
+      trashed_at_millis, preview_revision
+    FROM visible
+    ${boundary}
+    ORDER BY ${ordering.columns}
+    LIMIT ?
+  `);
+  statement.setReadBigInts(true);
+  return statement.all(actorId2, query, ...values, limit);
+}
+function listBoards2(connection, lookup) {
+  const condition = lookup.pinnedOnly ? activePinnedBoards : activeBoards;
+  return listRows(connection, lookup, condition, catalogOrderings[lookup.order]).map(
+    readListSummary
+  );
+}
+function listTrashedBoards2(connection, lookup) {
+  return listRows(connection, lookup, ownedTrash, trashOrderings[lookup.order]).map((row) => ({
+    board: readListSummary(row),
+    trashedAtMillis: readUnsigned(row.trashed_at_millis, "trashed_at_millis")
+  }));
+}
+function getCreatedReceipt(connection, actorId2, commandId) {
+  const statement = connection.prepare(`
+    SELECT c.board_id, c.title, c.updated_at_millis, c.pinned, c.entry_version,
+      1 AS can_manage, d.source_board_id
+    FROM catalog_create_receipts AS c
+    LEFT JOIN catalog_duplicate_sources AS d
+      ON d.actor_id = c.actor_id AND d.command_id = c.command_id
+    WHERE c.actor_id = ? AND c.command_id = ?
+  `);
+  statement.setReadBigInts(true);
+  const row = statement.get(actorId2, commandId);
+  if (!row) {
+    return void 0;
+  }
+  const { source_board_id: sourceBoardId } = row;
+  if (sourceBoardId !== null && typeof sourceBoardId !== "string") {
+    throw new Error("Invalid stored catalogue duplicate source.");
+  }
+  return {
+    receipt: { kind: "created", commandId, board: readSummary(row) },
+    duplicateSourceId: sourceBoardId ?? void 0
+  };
+}
+function getReceipt(connection, actorId2, commandId) {
+  return getCreatedReceipt(connection, actorId2, commandId) ?? getManagementReceipt(connection, actorId2, commandId);
+}
+function getManagedBoard(connection, actorId2, boardId) {
+  const statement = connection.prepare(`
+    SELECT ${catalogColumns}
+    ${catalogTables}
+    WHERE m.actor_id = ? AND b.board_id = ? AND l.owner_actor_id = m.actor_id
+  `);
+  statement.setReadBigInts(true);
+  const row = statement.get(actorId2, boardId);
+  if (!row) {
+    return void 0;
+  }
+  return {
+    board: readSummary(row),
+    trashedAtMillis: row.trashed_at_millis === null ? void 0 : readUnsigned(row.trashed_at_millis, "trashed_at_millis")
+  };
+}
+function changeBoard(connection, change) {
+  const { board, trashedAtMillis } = change;
+  const { boardId, title, updatedAtMillis, entryVersion, pinned } = board;
+  if (updatedAtMillis === void 0) {
+    throw new Error("Catalog changes require an update timestamp.");
+  }
+  connection.prepare("UPDATE boards SET title = ? WHERE board_id = ?").run(title, boardId);
+  connection.prepare(`
+      INSERT INTO catalog_entries (board_id, updated_at_millis, pinned, entry_version)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT (board_id) DO UPDATE SET
+        updated_at_millis = excluded.updated_at_millis,
+        pinned = excluded.pinned,
+        entry_version = excluded.entry_version
+    `).run(boardId, updatedAtMillis, Number(pinned), entryVersion);
+  connection.prepare("UPDATE board_lifecycle SET trashed_at_millis = ? WHERE board_id = ?").run(trashedAtMillis ?? null, boardId);
+}
+function deleteBoard(connection, boardId) {
+  connection.prepare("DELETE FROM boards WHERE board_id = ?").run(boardId);
+}
+function saveBoard(connection, actorId2, receipt) {
+  const { commandId, board } = receipt;
+  const { boardId, title, updatedAtMillis, pinned, entryVersion } = board;
+  if (updatedAtMillis === void 0) {
+    throw new Error("New catalog entries require an update timestamp.");
+  }
+  const pinValue = Number(pinned);
+  connection.prepare("INSERT INTO boards (board_id, title, revision) VALUES (?, ?, 0)").run(boardId, title);
+  connection.prepare("INSERT INTO board_members (board_id, actor_id, can_edit) VALUES (?, ?, 1)").run(boardId, actorId2);
+  connection.prepare(`
+    INSERT INTO catalog_entries (board_id, updated_at_millis, pinned, entry_version)
+    VALUES (?, ?, ?, ?)
+  `).run(boardId, updatedAtMillis, pinValue, entryVersion);
+  connection.prepare(`
+    INSERT INTO catalog_create_receipts (
+      actor_id, command_id, board_id, title, updated_at_millis, pinned, entry_version
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(actorId2, commandId, boardId, title, updatedAtMillis, pinValue, entryVersion);
+}
+function saveDuplicatedBoard(connection, actorId2, sourceBoardId, receipt) {
+  const rejected7 = duplicateBoard2(
+    connection,
+    sourceBoardId,
+    receipt.board.boardId,
+    () => saveBoard(connection, actorId2, receipt)
+  );
+  if (rejected7) {
+    return rejected7;
+  }
+  connection.prepare(
+    "INSERT INTO catalog_duplicate_sources (actor_id, command_id, source_board_id) VALUES (?, ?, ?)"
+  ).run(actorId2, receipt.commandId, sourceBoardId);
+  return void 0;
+}
+function createCatalogRepository(database) {
+  database.write((connection) => connection.exec(catalogSchema));
+  return {
+    listBoards: (lookup) => database.read((connection) => listBoards2(connection, lookup)),
+    listTrashedBoards: (lookup) => database.read((connection) => listTrashedBoards2(connection, lookup)),
+    readThumbnail: (lookup, cached) => database.read((connection) => readCatalogThumbnail(connection, lookup, cached)),
+    getReceipt: (actorId2, commandId) => database.read((connection) => getReceipt(connection, actorId2, commandId)?.receipt),
+    write: (work) => database.write(
+      (connection) => work({
+        getReceipt: (actorId2, commandId) => getReceipt(connection, actorId2, commandId),
+        saveBoard: (actorId2, receipt) => saveBoard(connection, actorId2, receipt),
+        duplicateBoard: (actorId2, sourceBoardId, receipt) => saveDuplicatedBoard(connection, actorId2, sourceBoardId, receipt),
+        getManagedBoard: (actorId2, boardId) => getManagedBoard(connection, actorId2, boardId),
+        changeBoard: (board) => changeBoard(connection, board),
+        deleteBoard: (boardId) => deleteBoard(connection, boardId),
+        saveManagementReceipt: (actorId2, signature, receipt) => saveManagementReceipt(connection, actorId2, signature, receipt)
+      })
+    )
+  };
+}
+
 // src/infrastructure/adapters/feedback/stored-values.ts
 function readText(value, field) {
   if (typeof value !== "string") {
@@ -32636,7 +38052,7 @@ function validateHtmlNodes(html, ids) {
     if (!node || !visibleElement(node)) {
       continue;
     }
-    const id = node.attrs.find((attribute) => attribute.name === "data-studio-id")?.value;
+    const id = node.attrs.find((attribute2) => attribute2.name === "data-studio-id")?.value;
     if (id && requested.has(id)) {
       matches.set(id, (matches.get(id) ?? 0) + 1);
     }
@@ -32713,9 +38129,10 @@ function encodeFeedbackContentUnit(unit) {
 }
 
 // src/infrastructure/adapters/feedback/messages.ts
-var messageColumns = `
+var messageColumns2 = `
   m.message_id,
   m.author_actor_id,
+  m.author_name,
   m.text,
   m.created_at_millis,
   m.updated_at_millis AS message_updated_at_millis,
@@ -32725,6 +38142,7 @@ function readMessage2(row) {
   return {
     messageId: readText(row.message_id, "message_id"),
     authorActorId: readText(row.author_actor_id, "author_actor_id"),
+    authorName: row.author_name === null ? void 0 : readText(row.author_name, "author_name"),
     text: readText(row.text, "text"),
     createdAtMillis: readUnsigned2(row.created_at_millis, "created_at_millis"),
     updatedAtMillis: readUnsigned2(row.message_updated_at_millis, "message_updated_at_millis"),
@@ -32733,7 +38151,7 @@ function readMessage2(row) {
 }
 function getMessage(connection, boardId, threadId, messageId) {
   const statement = connection.prepare(`
-    SELECT ${messageColumns}
+    SELECT ${messageColumns2}
     FROM feedback_messages AS m
     WHERE m.board_id = ? AND m.thread_id = ? AND m.message_id = ?
   `);
@@ -32743,7 +38161,7 @@ function getMessage(connection, boardId, threadId, messageId) {
 }
 function listReplies(connection, boardId, threadId, afterPosition, limit) {
   const statement = connection.prepare(`
-    SELECT ${messageColumns}
+    SELECT ${messageColumns2}
     FROM feedback_messages AS m
     WHERE m.board_id = ? AND m.thread_id = ? AND m.position > ?
     ORDER BY m.position ASC
@@ -32753,31 +38171,32 @@ function listReplies(connection, boardId, threadId, afterPosition, limit) {
   return statement.all(boardId, threadId, afterPosition, limit).map(readMessage2);
 }
 function insertMessage(connection, boardId, threadId, position, message) {
-  const { messageId, authorActorId, text: text3, createdAtMillis, updatedAtMillis, version } = message;
+  const { messageId, authorActorId, authorName, text: text3, createdAtMillis, updatedAtMillis, version: version2 } = message;
   connection.prepare(`
       INSERT INTO feedback_messages (
-        board_id, thread_id, message_id, author_actor_id, text,
+        board_id, thread_id, message_id, author_actor_id, author_name, text,
         created_at_millis, updated_at_millis, version, position
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
     boardId,
     threadId,
     messageId,
     authorActorId,
+    authorName ?? null,
     text3,
     createdAtMillis,
     updatedAtMillis,
-    version,
+    version2,
     position
   );
 }
 function updateMessage(connection, boardId, threadId, message) {
-  const { messageId, text: text3, updatedAtMillis, version } = message;
+  const { messageId, text: text3, updatedAtMillis, version: version2 } = message;
   connection.prepare(`
       UPDATE feedback_messages
       SET text = ?, updated_at_millis = ?, version = ?
       WHERE board_id = ? AND thread_id = ? AND message_id = ?
-    `).run(text3, updatedAtMillis, version, boardId, threadId, messageId);
+    `).run(text3, updatedAtMillis, version2, boardId, threadId, messageId);
 }
 
 // src/infrastructure/adapters/feedback/receipts.ts
@@ -32899,6 +38318,7 @@ var feedbackSchema = `
     thread_id TEXT NOT NULL,
     message_id TEXT NOT NULL,
     author_actor_id TEXT NOT NULL,
+    author_name TEXT,
     text TEXT NOT NULL,
     created_at_millis INTEGER NOT NULL CHECK (created_at_millis >= 0),
     updated_at_millis INTEGER NOT NULL CHECK (updated_at_millis >= created_at_millis),
@@ -32929,7 +38349,7 @@ var feedbackSchema = `
 
 // src/infrastructure/adapters/feedback/threads.ts
 var selectThreads = `
-  SELECT t.*, ${messageColumns}, live.object_id AS live_object_id,
+  SELECT t.*, ${messageColumns2}, live.object_id AS live_object_id,
          content.payload_version AS content_payload_version,
          content.unit_json AS content_unit_json, content.frozen_excerpt AS frozen_excerpt
   FROM feedback_threads AS t
@@ -33036,8 +38456,8 @@ function listThreads(connection, lookup) {
   statement.setReadBigInts(true);
   return statement.all(...args, limit).map(readThread);
 }
-function objectFields2(anchor) {
-  const { target: target2, frozenObject } = anchor;
+function objectFields2(anchor2) {
+  const { target: target2, frozenObject } = anchor2;
   if (target2.kind === "board") {
     return [null, null, null, null, null, null, null, null, null, null, null];
   }
@@ -33060,8 +38480,8 @@ function objectFields2(anchor) {
   ];
 }
 function insertThread(connection, boardId, thread) {
-  const { threadId, status, anchor, updatedAtMillis, version, replyCount } = thread;
-  const { frozenPoint, sourceBoardRevision } = anchor;
+  const { threadId, status, anchor: anchor2, updatedAtMillis, version: version2, replyCount } = thread;
+  const { frozenPoint, sourceBoardRevision } = anchor2;
   connection.prepare(`
       INSERT INTO feedback_threads (
         board_id, thread_id, status, source_board_revision, frozen_x, frozen_y,
@@ -33076,32 +38496,32 @@ function insertThread(connection, boardId, thread) {
     sourceBoardRevision,
     frozenPoint.x,
     frozenPoint.y,
-    ...objectFields2(anchor),
-    version,
+    ...objectFields2(anchor2),
+    version2,
     updatedAtMillis,
     replyCount
   );
   insertMessage(connection, boardId, threadId, 0, thread.first);
-  if (anchor.target.kind === "content") {
+  if (anchor2.target.kind === "content") {
     connection.prepare(`
       INSERT INTO feedback_content_anchors (board_id, thread_id, payload_version, unit_json, frozen_excerpt)
       VALUES (?, ?, ?, ?, ?)
     `).run(
       boardId,
       threadId,
-      anchor.target.payloadVersion,
-      encodeFeedbackContentUnit(anchor.target.content),
-      anchor.frozenExcerpt ?? null
+      anchor2.target.payloadVersion,
+      encodeFeedbackContentUnit(anchor2.target.content),
+      anchor2.frozenExcerpt ?? null
     );
   }
 }
 function updateThread(connection, boardId, thread) {
-  const { threadId, status, updatedAtMillis, version, replyCount } = thread;
+  const { threadId, status, updatedAtMillis, version: version2, replyCount } = thread;
   connection.prepare(`
       UPDATE feedback_threads
       SET status = ?, version = ?, updated_at_millis = ?, reply_count = ?
       WHERE board_id = ? AND thread_id = ?
-    `).run(status, version, updatedAtMillis, replyCount, boardId, threadId);
+    `).run(status, version2, updatedAtMillis, replyCount, boardId, threadId);
 }
 function deleteThread(connection, boardId, threadId) {
   connection.prepare("DELETE FROM feedback_threads WHERE board_id = ? AND thread_id = ?").run(boardId, threadId);
@@ -33154,7 +38574,13 @@ function createReader(connection) {
   };
 }
 function createFeedbackRepository(database) {
-  database.write((connection) => connection.exec(feedbackSchema));
+  database.write((connection) => {
+    connection.exec(feedbackSchema);
+    const columns = connection.prepare("PRAGMA table_info(feedback_messages)").all();
+    if (!columns.some(({ name }) => name === "author_name")) {
+      connection.exec("ALTER TABLE feedback_messages ADD COLUMN author_name TEXT");
+    }
+  });
   return {
     read: (work) => database.read((connection) => work(createReader(connection))),
     write: (work) => database.write(
@@ -33179,6 +38605,9 @@ function millis(value) {
   }
   return value;
 }
+function hasTable(connection, table) {
+  return connection.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) !== void 0;
+}
 function readBackupMetadata(connection, boardId, actorId2) {
   if (!readBoardAccess(connection, boardId, actorId2)?.isOwner) {
     return void 0;
@@ -33191,10 +38620,124 @@ function readBackupMetadata(connection, boardId, actorId2) {
   if (!row) {
     throw new Error("The whiteboard has no catalog entry.");
   }
+  const archived = hasTable(connection, "board_archive_metadata") ? connection.prepare("SELECT created_at_millis FROM board_archive_metadata WHERE board_id = ?").get(boardId)?.created_at_millis : void 0;
+  const created = archived ?? row.created_at_millis;
   return {
     updatedAtMillis: millis(row.updated_at_millis),
-    createdAtMillis: row.created_at_millis === null ? void 0 : millis(row.created_at_millis),
+    createdAtMillis: created === null ? void 0 : millis(created),
     pinned: row.pinned === 1
+  };
+}
+function portableValue(value) {
+  if (typeof value === "bigint") {
+    return value.toString();
+  }
+  if (value === null || typeof value === "number" || typeof value === "string") {
+    return value;
+  }
+  throw new Error("Invalid stored backup metadata.");
+}
+var backupRows = {
+  feedback_threads: {
+    columns: `thread_id, status, source_board_revision, frozen_x, frozen_y,
+      object_id, object_u, object_v, object_geometry_version, object_kind, object_label,
+      object_x, object_y, object_width, object_height, object_rotation,
+      version, updated_at_millis, reply_count`,
+    order: "thread_id"
+  },
+  feedback_messages: {
+    columns: `thread_id, message_id, author_actor_id, author_name, text,
+      created_at_millis, updated_at_millis, version, position`,
+    order: "thread_id, position"
+  },
+  feedback_content_anchors: {
+    columns: "thread_id, payload_version, unit_json, frozen_excerpt",
+    order: "thread_id"
+  },
+  board_review_sources: {
+    columns: "source_id, owner_actor_id, board_revision, object_ids_json, feedback_thread_id",
+    order: "source_id"
+  },
+  board_review_target_snapshots: {
+    columns: "source_id, targets_board_revision, targets_json",
+    order: "source_id"
+  }
+};
+function readPortableRows(connection, boardId, table) {
+  if (!hasTable(connection, table)) {
+    return [];
+  }
+  const { columns, order } = backupRows[table];
+  const query = connection.prepare(
+    `SELECT ${columns} FROM ${table} WHERE board_id = ? ORDER BY ${order}`
+  );
+  query.setReadBigInts(true);
+  return query.all(boardId).map(
+    (row) => Object.fromEntries(
+      Object.entries(row).map(([column, value]) => [column, portableValue(value)])
+    )
+  );
+}
+function readBackupActors(connection, boardId) {
+  const actors = /* @__PURE__ */ new Map();
+  const local = connection.prepare(`
+    SELECT m.actor_id, m.can_edit, l.owner_actor_id
+    FROM board_members AS m
+    LEFT JOIN board_lifecycle AS l ON l.board_id = m.board_id
+    WHERE m.board_id = ?
+  `);
+  for (const { actor_id: id, can_edit, owner_actor_id } of local.all(boardId)) {
+    if (typeof id === "string") {
+      const memberRole = can_edit === 1 ? "editor" : "viewer";
+      const role = id === owner_actor_id ? "owner" : memberRole;
+      actors.set(id, { id, name: id === "local" ? "\u6211" : id, kind: "human", role });
+    }
+  }
+  function readNamedActors(table, kindSql) {
+    if (!hasTable(connection, table)) {
+      return;
+    }
+    const query = connection.prepare(`
+      SELECT actor_id, name, role, ${kindSql} AS kind FROM ${table} WHERE board_id = ?
+    `);
+    for (const { actor_id: id, name, kind, role } of query.all(boardId)) {
+      const named = typeof id === "string" && typeof name === "string";
+      const actorKind = kind === "human" || kind === "agent";
+      const writingRole = role === "owner" || role === "editor";
+      const readingRole = role === "commenter" || role === "viewer";
+      const knownRole = writingRole || readingRole;
+      if (named && actorKind && knownRole) {
+        actors.set(id, { id, name, kind, role });
+      }
+    }
+  }
+  readNamedActors("board_archive_actors", "kind");
+  readNamedActors("board_sharing_members", "'human'");
+  return actors;
+}
+function retainBackupGuest(connection, boardId, actorId2) {
+  const guest = actorId2.startsWith("guest-") && hasTable(connection, "board_sharing_members");
+  if (!guest || !hasTable(connection, "board_archive_actors")) {
+    return;
+  }
+  connection.prepare(`
+      INSERT OR IGNORE INTO board_archive_actors (board_id, actor_id, name, kind, role)
+      SELECT board_id, actor_id, name, 'human', role
+      FROM board_sharing_members WHERE board_id = ? AND actor_id = ?
+    `).run(boardId, actorId2);
+}
+function readBackupDetails(connection, boardId) {
+  return {
+    actors: readBackupActors(connection, boardId),
+    feedback: {
+      threads: readPortableRows(connection, boardId, "feedback_threads"),
+      messages: readPortableRows(connection, boardId, "feedback_messages"),
+      contentAnchors: readPortableRows(connection, boardId, "feedback_content_anchors")
+    },
+    reviewSources: {
+      sources: readPortableRows(connection, boardId, "board_review_sources"),
+      targetSnapshots: readPortableRows(connection, boardId, "board_review_target_snapshots")
+    }
   };
 }
 
@@ -33446,7 +38989,7 @@ var boardHistorySchema = `
   CREATE INDEX IF NOT EXISTS board_history_payloads_by_revision
     ON board_history_payloads (board_id, change_revision, object_id);
 `;
-var objectColumns = [
+var objectColumns2 = [
   "kind",
   "label",
   "layer_index",
@@ -33466,11 +39009,11 @@ var versionColumns = "revision, title, actor_id, kind, saved_at_millis, source_r
 var requestedObjects = "requested AS (SELECT DISTINCT value AS object_id FROM json_each(?3))";
 var requestedOnly = "AND object_id IN (SELECT object_id FROM requested)";
 function objectProjection(alias) {
-  return objectColumns.map((column) => `${alias}.${column}`).join(", ");
+  return objectColumns2.map((column) => `${alias}.${column}`).join(", ");
 }
 var captureObjects = `
   INSERT OR IGNORE INTO board_history_objects
-    (board_id, change_revision, object_id, ${objectColumns.join(", ")})
+    (board_id, change_revision, object_id, ${objectColumns2.join(", ")})
   SELECT b.board_id, b.revision + 1, target.value, ${objectProjection("o")}
   FROM boards AS b
   CROSS JOIN json_each(?2) AS target
@@ -33517,6 +39060,7 @@ function publishBoardVersion(connection, before, after, commit) {
   }
   const { boardId, title } = before;
   const { actorId: actorId2, kind, savedAtMillis, sourceRevision, changedObjectCount } = commit;
+  retainBackupGuest(connection, boardId, actorId2);
   connection.prepare(`
     INSERT INTO board_versions (board_id, ${versionColumns})
       SELECT ?1, ?2, ?3, NULL, 'baseline', NULL, NULL, 0
@@ -33537,7 +39081,7 @@ function publishBoardVersion(connection, before, after, commit) {
   );
   pruneBoardVersions(connection, boardId);
 }
-function versionKind2(value) {
+function versionKind3(value) {
   switch (value) {
     case "baseline":
     case "geometry":
@@ -33561,7 +39105,7 @@ function decodeVersion(row) {
     revision: storedVersion(row.revision, "revision"),
     title: storedText(row.title, "title"),
     actorId: row.actor_id === null ? void 0 : storedText(row.actor_id, "actor_id"),
-    kind: versionKind2(row.kind),
+    kind: versionKind3(row.kind),
     savedAtMillis: row.saved_at_millis === null ? void 0 : safeVersionNumber(row.saved_at_millis, "saved_at_millis"),
     sourceRevision: row.source_revision === null ? void 0 : storedVersion(row.source_revision, "source_revision"),
     changedObjectCount: safeVersionNumber(row.changed_object_count, "changed_object_count")
@@ -33593,11 +39137,11 @@ function readCreationVersion(connection, boardId) {
   }
 }
 function withCreationVersion(connection, boardId, row) {
-  const version = decodeVersion(row);
-  if (version.kind === "baseline" && version.revision === 0n) {
-    return readCreationVersion(connection, boardId) ?? version;
+  const version2 = decodeVersion(row);
+  if (version2.kind === "baseline" && version2.revision === 0n) {
+    return readCreationVersion(connection, boardId) ?? version2;
   }
-  return version;
+  return version2;
 }
 function readBoardVersions(connection, boardId, before, limit = defaultPageSize3) {
   const cutoff = before === void 0 ? "" : "AND revision < ?3";
@@ -33606,8 +39150,8 @@ function readBoardVersions(connection, boardId, before, limit = defaultPageSize3
     WHERE board_id = ?1 ${cutoff} ORDER BY revision DESC LIMIT ?2
   `);
   query.setReadBigInts(true);
-  const rows = before === void 0 ? query.all(boardId, limit) : query.all(boardId, limit, before);
-  return rows.map((row) => withCreationVersion(connection, boardId, row));
+  const rows2 = before === void 0 ? query.all(boardId, limit) : query.all(boardId, limit, before);
+  return rows2.map((row) => withCreationVersion(connection, boardId, row));
 }
 function readBoardVersion(connection, boardId, revision) {
   const query = connection.prepare(`
@@ -33672,8 +39216,8 @@ function readVersionObjects(connection, boardId, revision, objectIds) {
     ORDER BY geometry.layer_index, geometry.object_id
   `);
   query.setReadBigInts(true);
-  const rows = objectIds === void 0 ? query.all(boardId, revision) : query.all(boardId, revision, JSON.stringify(objectIds));
-  return rows.map(decodeSceneObject);
+  const rows2 = objectIds === void 0 ? query.all(boardId, revision) : query.all(boardId, revision, JSON.stringify(objectIds));
+  return rows2.map(decodeSceneObject);
 }
 function readVersionPayloads(connection, boardId, revision, objectIds) {
   if (objectIds.length === 0) {
@@ -34064,9 +39608,9 @@ function readReceiptDetails(connection, boardId, revision, snapshot) {
     revision,
     references.map(({ objectId }) => objectId)
   ) : readMatchingCurrentPayloads(connection, boardId, references);
-  const byId2 = new Map(found.map((payload) => [payload.objectId, payload]));
+  const byId3 = new Map(found.map((payload) => [payload.objectId, payload]));
   const payloads = references.flatMap(({ objectId, payloadVersion }) => {
-    const payload = byId2.get(objectId);
+    const payload = byId3.get(objectId);
     return payload?.payloadVersion === payloadVersion ? [payload] : [];
   });
   const order = hasOrder && available ? readVersionObjects(connection, boardId, revision).map(({ objectId }) => objectId) : void 0;
@@ -34549,12 +40093,12 @@ function listProposals(connection, boardId, nowMillis, limit, beforeProposalId) 
   `);
   query.setReadBigInts(true);
   const cursor = beforeProposalId ?? null;
-  const rows = query.all(boardId, nowMillis, cursor, boardId, cursor, limit);
+  const rows2 = query.all(boardId, nowMillis, cursor, boardId, cursor, limit);
   const options = connection.prepare(`
     SELECT option_id, label, description FROM board_suggestion_options
     WHERE board_id = ? AND proposal_id = ? ORDER BY position
   `);
-  return rows.map((row) => {
+  return rows2.map((row) => {
     const proposal = metadataFromRow(row);
     return {
       ...proposal,
@@ -34608,7 +40152,7 @@ function insertSource(connection, source) {
   if (source.targetsBoardRevision === void 0) {
     throw new Error("A new board review source requires a frozen target revision.");
   }
-  const targets = JSON.stringify(
+  const targets2 = JSON.stringify(
     source.targets,
     (_key, value) => typeof value === "bigint" ? value.toString() : value
   );
@@ -34616,7 +40160,7 @@ function insertSource(connection, source) {
       INSERT INTO board_review_target_snapshots (
         board_id, source_id, targets_board_revision, targets_json
       ) VALUES (?, ?, ?, ?)
-    `).run(source.boardId, source.sourceId, source.targetsBoardRevision, targets);
+    `).run(source.boardId, source.sourceId, source.targetsBoardRevision, targets2);
 }
 function insertOptions(connection, proposal) {
   const insert = connection.prepare(`
@@ -34747,6 +40291,32 @@ var listTargets = `
   ${payloadVersionJoin}
   ${sceneOrder}
 `;
+function decodeImportedPayload(object3) {
+  const { payload } = object3;
+  decodeSceneObject({
+    object_id: object3.objectId,
+    kind: object3.kind,
+    label: object3.label,
+    x: object3.x,
+    y: object3.y,
+    width: object3.width,
+    height: object3.height,
+    rotation: object3.rotation,
+    geometry_version: object3.geometryVersion,
+    payload_version: payload?.version ?? null,
+    locked: object3.locked ? 1n : 0n,
+    parent_id: object3.parentId ?? null,
+    group_id: object3.groupId ?? null,
+    appearance_json: object3.appearanceJson ?? null,
+    detail_json: object3.detailJson ?? null
+  });
+  return payload && {
+    objectId: object3.objectId,
+    bodyKind: payload.kind,
+    payloadVersion: payload.version,
+    data: decodePayload(payload.json)
+  };
+}
 function readObjects(connection, statement, ...params) {
   const query = connection.prepare(statement);
   query.setReadBigInts(true);
@@ -34797,7 +40367,7 @@ function readPayloadByteSize(connection, boardId, objectIds, revision) {
   query.setReadBigInts(true);
   return storedVersion(query.get(boardId, JSON.stringify(objectIds))?.total_bytes, "total_bytes");
 }
-function readExportAsset(connection, boardId, assetId, maximumBytes) {
+function readBackupAsset(connection, boardId, assetId, maximumBytes) {
   const row = connection.prepare(`
       SELECT mime_type, CASE WHEN length(bytes) <= ? THEN bytes END AS bytes
       FROM board_archive_assets
@@ -34816,8 +40386,22 @@ function readExportAsset(connection, boardId, assetId, maximumBytes) {
     kind: "asset",
     asset: {
       mimeType: storedText(row.mime_type, "asset mime type"),
-      byteLength: row.bytes.byteLength,
-      base64: Buffer.from(row.bytes).toString("base64")
+      bytes: row.bytes
+    }
+  };
+}
+function readExportAsset(connection, boardId, assetId, maximumBytes) {
+  const result = readBackupAsset(connection, boardId, assetId, maximumBytes);
+  if (result?.kind !== "asset") {
+    return result;
+  }
+  const { mimeType, bytes } = result.asset;
+  return {
+    kind: "asset",
+    asset: {
+      mimeType,
+      byteLength: bytes.byteLength,
+      base64: Buffer.from(bytes).toString("base64")
     }
   };
 }
@@ -34899,6 +40483,8 @@ function createReader2(connection) {
     },
     getBoard: (boardId) => readBoard2(connection, boardId),
     getBackupMetadata: (boardId, actorId2) => readBackupMetadata(connection, boardId, actorId2),
+    getBackupDetails: (boardId) => readBackupDetails(connection, boardId),
+    getBackupAsset: (boardId, assetId, maximumBytes) => readBackupAsset(connection, boardId, assetId, maximumBytes),
     listObjects: (boardId, limit) => limit === void 0 ? readObjects(connection, listScene, boardId) : readObjects(connection, listScene + " LIMIT ?", boardId, limit),
     getObjects: (boardId, objectIds) => objectIds.length === 0 ? [] : readObjects(connection, listTargets, JSON.stringify(objectIds), boardId),
     getPayloads: (boardId, objectIds) => readPayloads(connection, boardId, objectIds),
@@ -34936,8 +40522,8 @@ function readRelatedConnectors(connection, boardId, ids) {
     ${payloadVersionJoin}
     ${sceneOrder}
   `;
-  const targets = JSON.stringify(ids);
-  return readObjects(connection, query, targets, boardId, targets, boardId, boardId);
+  const targets2 = JSON.stringify(ids);
+  return readObjects(connection, query, targets2, boardId, targets2, boardId, boardId);
 }
 function createPlanningReader(connection) {
   const reader2 = createReader2(connection);
@@ -35023,13 +40609,13 @@ function readReceipt5(connection, actorId2, key) {
   if (!row) {
     return void 0;
   }
-  const { signature, version, duration_ms: duration, remaining_ms: remaining } = row;
+  const { signature, version: version2, duration_ms: duration, remaining_ms: remaining } = row;
   const enoughData = typeof duration === "bigint" && typeof remaining === "bigint";
-  if (typeof signature !== "string" || typeof version !== "bigint" || !enoughData) {
+  if (typeof signature !== "string" || typeof version2 !== "bigint" || !enoughData) {
     throw new Error("Invalid saved room timer receipt");
   }
   const timer = {
-    version,
+    version: version2,
     durationMs: Number(duration),
     phase: readPhase(row.phase),
     deadlineUnixMs: typeof row.deadline_ms === "bigint" ? Number(row.deadline_ms) : void 0,
@@ -35104,7 +40690,7 @@ function readAccess(connection, membership, boardId, actorId2) {
     boardRevision: row.revision,
     canEdit,
     role: role ?? (isOwner ? "owner" : fallbackRole),
-    displayName: name?.trim() || (isOwner ? "\u623F\u4E3B" : actorId2)
+    displayName: name?.trim() || (isOwner ? "\u6240\u6709\u8005" : "\u534F\u4F5C\u8005")
   };
 }
 function readTimer(connection, boardId) {
@@ -35116,12 +40702,12 @@ function readTimer(connection, boardId) {
   if (!row) {
     return void 0;
   }
-  const { version, duration_ms: duration, deadline_ms: deadline, paused_ms: paused } = row;
-  if (typeof version !== "bigint" || typeof duration !== "bigint") {
+  const { version: version2, duration_ms: duration, deadline_ms: deadline, paused_ms: paused } = row;
+  if (typeof version2 !== "bigint" || typeof duration !== "bigint") {
     throw new Error("Invalid saved room timer");
   }
   return {
-    version,
+    version: version2,
     durationMs: Number(duration),
     deadlineUnixMs: typeof deadline === "bigint" ? Number(deadline) : void 0,
     pausedRemainingMs: typeof paused === "bigint" ? Number(paused) : void 0
@@ -35227,7 +40813,8 @@ function readMember(row) {
     nameKey: readText2(row.name_key, "name_key"),
     role: readRole(row.role),
     invitationVersion: readVersion2(row.invitation_version, "invitation_version"),
-    removed: readFlag2(row.removed, "removed")
+    removed: readFlag2(row.removed, "removed"),
+    lastSeenAtMillis: row.last_seen_at_millis === null ? void 0 : Number(readVersion2(row.last_seen_at_millis, "last_seen_at_millis"))
   };
 }
 function readSession(row) {
@@ -35238,7 +40825,7 @@ function readSession(row) {
   return { actorId: readText2(row.actor_id, "actor_id"), expiresAt };
 }
 var inviteColumns = "role, seed, enabled, version";
-var memberColumns = "actor_id, name, name_key, role, invitation_version, removed";
+var memberColumns = "actor_id, name, name_key, role, invitation_version, removed, last_seen_at_millis";
 function createSharingReader(connection) {
   return {
     activeSharingScopes() {
@@ -35392,6 +40979,7 @@ var sharingSchema = `
     role TEXT NOT NULL CHECK (role IN ('editor', 'commenter', 'viewer')),
     invitation_version INTEGER NOT NULL CHECK (invitation_version >= 0),
     removed INTEGER NOT NULL CHECK (removed IN (0, 1)),
+    last_seen_at_millis INTEGER CHECK (last_seen_at_millis >= 0),
     PRIMARY KEY (board_id, actor_id),
     UNIQUE (board_id, name_key)
   ) STRICT;
@@ -35410,28 +40998,47 @@ var sharingSchema = `
 function createSharingWriter(connection) {
   return {
     ...createSharingReader(connection),
-    saveSettings(boardId, { enabled, scope: scope2, version }) {
+    saveSettings(boardId, { enabled, scope: scope2, version: version2 }) {
       connection.prepare(`
         INSERT INTO board_sharing (board_id, enabled, scope, version) VALUES (?, ?, ?, ?)
         ON CONFLICT (board_id) DO UPDATE SET
           enabled = excluded.enabled, scope = excluded.scope, version = excluded.version
-      `).run(boardId, Number(enabled), scope2, version);
+      `).run(boardId, Number(enabled), scope2, version2);
     },
-    saveInvitation(boardId, { role, enabled, version, seed }) {
+    saveInvitation(boardId, { role, enabled, version: version2, seed }) {
       connection.prepare(`
         INSERT INTO board_sharing_invites (board_id, role, enabled, version, seed)
         VALUES (?, ?, ?, ?, ?)
         ON CONFLICT (board_id, role) DO UPDATE SET enabled = excluded.enabled,
           version = excluded.version, seed = excluded.seed
-      `).run(boardId, role, Number(enabled), version, seed);
+      `).run(boardId, role, Number(enabled), version2, seed);
     },
-    saveMember(boardId, { actorId: actorId2, name, nameKey, role, invitationVersion, removed }) {
+    saveMember(boardId, { actorId: actorId2, name, nameKey, role, invitationVersion, removed, lastSeenAtMillis }) {
       connection.prepare(`
-        INSERT INTO board_sharing_members (board_id, actor_id, name, name_key, role, invitation_version, removed)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO board_sharing_members (
+          board_id, actor_id, name, name_key, role, invitation_version, removed, last_seen_at_millis
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (board_id, actor_id) DO UPDATE SET name = excluded.name, name_key = excluded.name_key,
-          role = excluded.role, invitation_version = excluded.invitation_version, removed = excluded.removed
-      `).run(boardId, actorId2, name, nameKey, role, invitationVersion, Number(removed));
+          role = excluded.role, invitation_version = excluded.invitation_version, removed = excluded.removed,
+          last_seen_at_millis = COALESCE(excluded.last_seen_at_millis, board_sharing_members.last_seen_at_millis)
+      `).run(
+        boardId,
+        actorId2,
+        name,
+        nameKey,
+        role,
+        invitationVersion,
+        Number(removed),
+        lastSeenAtMillis ?? null
+      );
+    },
+    touchMember(boardId, actorId2, now) {
+      connection.prepare(`
+        UPDATE board_sharing_members SET last_seen_at_millis = ?
+        WHERE board_id = ? AND actor_id = ? AND removed = 0
+          AND (last_seen_at_millis IS NULL OR last_seen_at_millis < ?)
+      `).run(now, boardId, actorId2, now);
     },
     deleteMember(boardId, actorId2) {
       connection.prepare("DELETE FROM board_sharing_members WHERE board_id = ? AND actor_id = ?").run(boardId, actorId2);
@@ -35454,7 +41061,13 @@ function createSharingWriter(connection) {
   };
 }
 function createSharingRepository(database) {
-  database.write((connection) => connection.exec(sharingSchema));
+  database.write((connection) => {
+    connection.exec(sharingSchema);
+    const columns = connection.prepare("PRAGMA table_info(board_sharing_members)").all();
+    if (!columns.some(({ name }) => name === "last_seen_at_millis")) {
+      connection.exec("ALTER TABLE board_sharing_members ADD COLUMN last_seen_at_millis INTEGER");
+    }
+  });
   return {
     read: (work) => database.read((connection) => work(createSharingReader(connection))),
     write: (work) => database.write((connection) => work(createSharingWriter(connection)))
@@ -35541,6 +41154,7 @@ function stopListening(server) {
 }
 function createWhiteboardServer(options) {
   const database = openSqliteDatabase(options.databasePath);
+  const ownerDisplayName = options.sharing?.ownerDisplayName?.trim() || void 0;
   let server;
   let httpOptions;
   let rooms;
@@ -35552,10 +41166,16 @@ function createWhiteboardServer(options) {
       exportArchive: createBoardBackup(
         repository,
         packWhiteboardBackup,
-        (time) => new Date(time).toISOString()
+        (time) => new Date(time).toISOString(),
+        ownerDisplayName
       )
     });
-    const archives = createArchiveImportRepository(database);
+    const archives = createArchiveImportRepository(database, (object3) => {
+      const payload = decodeImportedPayload(object3);
+      if (payload) {
+        toPayloadResult({ kind: "payload", payload });
+      }
+    });
     const catalog = createCatalogRepository(database);
     const catalogApplication = createCatalogApplication(catalog, {
       newBoardId: randomUUID,
@@ -35566,22 +41186,28 @@ function createWhiteboardServer(options) {
       now: Date.now
     });
     const feedbackRepository = createFeedbackRepository(database);
-    const feedback = createFeedbackApplication(feedbackRepository, { now: Date.now, digest });
+    const feedback = createFeedbackApplication(feedbackRepository, {
+      now: Date.now,
+      digest,
+      ownerDisplayName,
+      onChanged: (boardId) => rooms.publishDiscussionChange(boardId, "feedbackChanged")
+    });
     const suggestions = createBoardSuggestionApplication(
       createBoardSuggestionRepository(database),
       {
         now: Date.now,
         newId: randomUUID,
         digest,
+        onChanged: (boardId) => rooms.publishDiscussionChange(boardId, "suggestionsChanged"),
         readFeedbackSource(actor, boardId, feedbackThreadId) {
           try {
             const { thread } = feedback.getThread(actor, boardId, feedbackThreadId, {
               pageSize: 1
             });
-            const anchor = thread.anchor;
+            const anchor2 = thread.anchor;
             return {
-              capturedBoardRevision: anchor.sourceBoardRevision,
-              objectId: anchor.target.kind === "board" ? void 0 : anchor.target.objectId
+              capturedBoardRevision: anchor2.sourceBoardRevision,
+              objectId: anchor2.target.kind === "board" ? void 0 : anchor2.target.objectId
             };
           } catch (error) {
             if (error instanceof FeedbackThreadNotFoundError) {
@@ -35602,7 +41228,10 @@ function createWhiteboardServer(options) {
       inviteOrigin: options.sharing?.inviteOrigin ?? (() => void 0)
     });
     rooms = createRoomsApplication(
-      createRoomsRepository(database, readBoardAccess),
+      createRoomsRepository(database, (connection, boardId, actorId2) => {
+        const access = readBoardAccess(connection, boardId, actorId2);
+        return access?.isOwner && !access.name ? { ...access, name: ownerDisplayName } : access;
+      }),
       { nowMillis: Date.now },
       randomUUID(),
       { mintGeneration: randomUUID, resolveScope: createRoomWorkspaceScope(repository) }
@@ -35612,7 +41241,7 @@ function createWhiteboardServer(options) {
       catalogApplication,
       archiveApplication,
       features: {
-        editor: createBoardEditorApplication(repository, Date.now, renderSvgUpload),
+        editor: createBoardEditorApplication(repository, Date.now, validateSvgUpload),
         history: createBoardHistoryApplication(repository, Date.now, renderSvgPng),
         feedback,
         rooms,
@@ -35623,7 +41252,7 @@ function createWhiteboardServer(options) {
         application: sharing,
         activateScope: options.sharing?.activateScope,
         onlineActorIds: (boardId) => rooms.onlineActorIds(boardId),
-        ownerDisplayName: options.sharing?.ownerDisplayName,
+        ownerDisplayName,
         newBrowserToken: () => randomBytes(32).toString("base64url"),
         onActivationError: options.onError,
         onAccessChanged: (boardId) => rooms.notifyAccessChanged(boardId)

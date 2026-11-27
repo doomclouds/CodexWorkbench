@@ -3268,8 +3268,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path2) {
-      let input2 = path2;
+    function removeDotSegments(path3) {
+      let input2 = path3;
       const output2 = [];
       let nextSlash = -1;
       let len = 0;
@@ -3343,11 +3343,11 @@ var require_utils = __commonJS({
       }
       return output2.join("");
     }
-    function removeDotSegmentsRelative(path2) {
-      if (path2 === "" || path2[0] === "/") {
-        return removeDotSegments(path2);
+    function removeDotSegmentsRelative(path3) {
+      if (path3 === "" || path3[0] === "/") {
+        return removeDotSegments(path3);
       }
-      const segments = path2.split("/");
+      const segments = path3.split("/");
       const last = segments.length - 1;
       const output2 = [];
       let trailingDirectory = false;
@@ -3710,8 +3710,8 @@ var require_schemes = __commonJS({
       }
       if (wsComponent.resourceName) {
         const queryIndex = wsComponent.resourceName.indexOf("?");
-        const path2 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
-        wsComponent.path = path2 && path2 !== "/" ? path2 : void 0;
+        const path3 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
+        wsComponent.path = path3 && path3 !== "/" ? path3 : void 0;
         wsComponent.query = queryIndex === -1 ? void 0 : wsComponent.resourceName.slice(queryIndex + 1);
         wsComponent.resourceName = void 0;
       }
@@ -4625,8 +4625,8 @@ var require_core = __commonJS({
         }
       }
       // add "vocabulary" - a collection of keywords
-      addVocabulary(definitions) {
-        for (const def of definitions)
+      addVocabulary(definitions2) {
+        for (const def of definitions2)
           this.addKeyword(def);
         return this;
       }
@@ -7313,14 +7313,14 @@ var require_polyfills = __commonJS({
       fs.fstatSync = statFixSync(fs.fstatSync);
       fs.lstatSync = statFixSync(fs.lstatSync);
       if (fs.chmod && !fs.lchmod) {
-        fs.lchmod = function(path2, mode, cb) {
+        fs.lchmod = function(path3, mode, cb) {
           if (cb) process.nextTick(cb);
         };
         fs.lchmodSync = function() {
         };
       }
       if (fs.chown && !fs.lchown) {
-        fs.lchown = function(path2, uid, gid, cb) {
+        fs.lchown = function(path3, uid, gid, cb) {
           if (cb) process.nextTick(cb);
         };
         fs.lchownSync = function() {
@@ -7387,9 +7387,9 @@ var require_polyfills = __commonJS({
         };
       })(fs.readSync);
       function patchLchmod(fs2) {
-        fs2.lchmod = function(path2, mode, callback) {
+        fs2.lchmod = function(path3, mode, callback) {
           fs2.open(
-            path2,
+            path3,
             constants.O_WRONLY | constants.O_SYMLINK,
             mode,
             function(err, fd) {
@@ -7405,8 +7405,8 @@ var require_polyfills = __commonJS({
             }
           );
         };
-        fs2.lchmodSync = function(path2, mode) {
-          var fd = fs2.openSync(path2, constants.O_WRONLY | constants.O_SYMLINK, mode);
+        fs2.lchmodSync = function(path3, mode) {
+          var fd = fs2.openSync(path3, constants.O_WRONLY | constants.O_SYMLINK, mode);
           var threw = true;
           var ret;
           try {
@@ -7427,8 +7427,8 @@ var require_polyfills = __commonJS({
       }
       function patchLutimes(fs2) {
         if (constants.hasOwnProperty("O_SYMLINK") && fs2.futimes) {
-          fs2.lutimes = function(path2, at, mt, cb) {
-            fs2.open(path2, constants.O_SYMLINK, function(er, fd) {
+          fs2.lutimes = function(path3, at, mt, cb) {
+            fs2.open(path3, constants.O_SYMLINK, function(er, fd) {
               if (er) {
                 if (cb) cb(er);
                 return;
@@ -7440,8 +7440,8 @@ var require_polyfills = __commonJS({
               });
             });
           };
-          fs2.lutimesSync = function(path2, at, mt) {
-            var fd = fs2.openSync(path2, constants.O_SYMLINK);
+          fs2.lutimesSync = function(path3, at, mt) {
+            var fd = fs2.openSync(path3, constants.O_SYMLINK);
             var ret;
             var threw = true;
             try {
@@ -7559,11 +7559,11 @@ var require_legacy_streams = __commonJS({
         ReadStream,
         WriteStream
       };
-      function ReadStream(path2, options) {
-        if (!(this instanceof ReadStream)) return new ReadStream(path2, options);
+      function ReadStream(path3, options) {
+        if (!(this instanceof ReadStream)) return new ReadStream(path3, options);
         Stream.call(this);
         var self = this;
-        this.path = path2;
+        this.path = path3;
         this.fd = null;
         this.readable = true;
         this.paused = false;
@@ -7608,10 +7608,10 @@ var require_legacy_streams = __commonJS({
           self._read();
         });
       }
-      function WriteStream(path2, options) {
-        if (!(this instanceof WriteStream)) return new WriteStream(path2, options);
+      function WriteStream(path3, options) {
+        if (!(this instanceof WriteStream)) return new WriteStream(path3, options);
         Stream.call(this);
-        this.path = path2;
+        this.path = path3;
         this.fd = null;
         this.writable = true;
         this.flags = "w";
@@ -7754,14 +7754,14 @@ var require_graceful_fs = __commonJS({
       fs2.createWriteStream = createWriteStream;
       var fs$readFile = fs2.readFile;
       fs2.readFile = readFile2;
-      function readFile2(path2, options, cb) {
+      function readFile2(path3, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
-        return go$readFile(path2, options, cb);
-        function go$readFile(path3, options2, cb2, startTime) {
-          return fs$readFile(path3, options2, function(err) {
+        return go$readFile(path3, options, cb);
+        function go$readFile(path4, options2, cb2, startTime) {
+          return fs$readFile(path4, options2, function(err) {
             if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
-              enqueue([go$readFile, [path3, options2, cb2], err, startTime || Date.now(), Date.now()]);
+              enqueue([go$readFile, [path4, options2, cb2], err, startTime || Date.now(), Date.now()]);
             else {
               if (typeof cb2 === "function")
                 cb2.apply(this, arguments);
@@ -7771,14 +7771,14 @@ var require_graceful_fs = __commonJS({
       }
       var fs$writeFile = fs2.writeFile;
       fs2.writeFile = writeFile2;
-      function writeFile2(path2, data, options, cb) {
+      function writeFile2(path3, data, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
-        return go$writeFile(path2, data, options, cb);
-        function go$writeFile(path3, data2, options2, cb2, startTime) {
-          return fs$writeFile(path3, data2, options2, function(err) {
+        return go$writeFile(path3, data, options, cb);
+        function go$writeFile(path4, data2, options2, cb2, startTime) {
+          return fs$writeFile(path4, data2, options2, function(err) {
             if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
-              enqueue([go$writeFile, [path3, data2, options2, cb2], err, startTime || Date.now(), Date.now()]);
+              enqueue([go$writeFile, [path4, data2, options2, cb2], err, startTime || Date.now(), Date.now()]);
             else {
               if (typeof cb2 === "function")
                 cb2.apply(this, arguments);
@@ -7789,14 +7789,14 @@ var require_graceful_fs = __commonJS({
       var fs$appendFile = fs2.appendFile;
       if (fs$appendFile)
         fs2.appendFile = appendFile;
-      function appendFile(path2, data, options, cb) {
+      function appendFile(path3, data, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
-        return go$appendFile(path2, data, options, cb);
-        function go$appendFile(path3, data2, options2, cb2, startTime) {
-          return fs$appendFile(path3, data2, options2, function(err) {
+        return go$appendFile(path3, data, options, cb);
+        function go$appendFile(path4, data2, options2, cb2, startTime) {
+          return fs$appendFile(path4, data2, options2, function(err) {
             if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
-              enqueue([go$appendFile, [path3, data2, options2, cb2], err, startTime || Date.now(), Date.now()]);
+              enqueue([go$appendFile, [path4, data2, options2, cb2], err, startTime || Date.now(), Date.now()]);
             else {
               if (typeof cb2 === "function")
                 cb2.apply(this, arguments);
@@ -7827,31 +7827,31 @@ var require_graceful_fs = __commonJS({
       var fs$readdir = fs2.readdir;
       fs2.readdir = readdir;
       var noReaddirOptionVersions = /^v[0-5]\./;
-      function readdir(path2, options, cb) {
+      function readdir(path3, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
-        var go$readdir = noReaddirOptionVersions.test(process.version) ? function go$readdir2(path3, options2, cb2, startTime) {
-          return fs$readdir(path3, fs$readdirCallback(
-            path3,
+        var go$readdir = noReaddirOptionVersions.test(process.version) ? function go$readdir2(path4, options2, cb2, startTime) {
+          return fs$readdir(path4, fs$readdirCallback(
+            path4,
             options2,
             cb2,
             startTime
           ));
-        } : function go$readdir2(path3, options2, cb2, startTime) {
-          return fs$readdir(path3, options2, fs$readdirCallback(
-            path3,
+        } : function go$readdir2(path4, options2, cb2, startTime) {
+          return fs$readdir(path4, options2, fs$readdirCallback(
+            path4,
             options2,
             cb2,
             startTime
           ));
         };
-        return go$readdir(path2, options, cb);
-        function fs$readdirCallback(path3, options2, cb2, startTime) {
+        return go$readdir(path3, options, cb);
+        function fs$readdirCallback(path4, options2, cb2, startTime) {
           return function(err, files) {
             if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
               enqueue([
                 go$readdir,
-                [path3, options2, cb2],
+                [path4, options2, cb2],
                 err,
                 startTime || Date.now(),
                 Date.now()
@@ -7922,7 +7922,7 @@ var require_graceful_fs = __commonJS({
         enumerable: true,
         configurable: true
       });
-      function ReadStream(path2, options) {
+      function ReadStream(path3, options) {
         if (this instanceof ReadStream)
           return fs$ReadStream.apply(this, arguments), this;
         else
@@ -7942,7 +7942,7 @@ var require_graceful_fs = __commonJS({
           }
         });
       }
-      function WriteStream(path2, options) {
+      function WriteStream(path3, options) {
         if (this instanceof WriteStream)
           return fs$WriteStream.apply(this, arguments), this;
         else
@@ -7960,22 +7960,22 @@ var require_graceful_fs = __commonJS({
           }
         });
       }
-      function createReadStream(path2, options) {
-        return new fs2.ReadStream(path2, options);
+      function createReadStream(path3, options) {
+        return new fs2.ReadStream(path3, options);
       }
-      function createWriteStream(path2, options) {
-        return new fs2.WriteStream(path2, options);
+      function createWriteStream(path3, options) {
+        return new fs2.WriteStream(path3, options);
       }
       var fs$open = fs2.open;
       fs2.open = open4;
-      function open4(path2, flags, mode, cb) {
+      function open4(path3, flags, mode, cb) {
         if (typeof mode === "function")
           cb = mode, mode = null;
-        return go$open(path2, flags, mode, cb);
-        function go$open(path3, flags2, mode2, cb2, startTime) {
-          return fs$open(path3, flags2, mode2, function(err, fd) {
+        return go$open(path3, flags, mode, cb);
+        function go$open(path4, flags2, mode2, cb2, startTime) {
+          return fs$open(path4, flags2, mode2, function(err, fd) {
             if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
-              enqueue([go$open, [path3, flags2, mode2, cb2], err, startTime || Date.now(), Date.now()]);
+              enqueue([go$open, [path4, flags2, mode2, cb2], err, startTime || Date.now(), Date.now()]);
             else {
               if (typeof cb2 === "function")
                 cb2.apply(this, arguments);
@@ -8230,9 +8230,9 @@ var require_retry = __commonJS({
         }
       }
       for (var i = 0; i < methods.length; i++) {
-        var method2 = methods[i];
-        var original = obj[method2];
-        obj[method2] = function retryWrapper(original2) {
+        var method4 = methods[i];
+        var original = obj[method4];
+        obj[method4] = function retryWrapper(original2) {
           var op = exports.operation(options);
           var args = Array.prototype.slice.call(arguments, 1);
           var callback = args.pop();
@@ -8249,7 +8249,7 @@ var require_retry = __commonJS({
             original2.apply(obj, args);
           });
         }.bind(obj, original);
-        obj[method2].options = options;
+        obj[method4].options = options;
       }
     };
   }
@@ -8504,7 +8504,7 @@ var require_mtime_precision = __commonJS({
 var require_lockfile = __commonJS({
   "../../../../node_modules/.pnpm/proper-lockfile@4.1.2/node_modules/proper-lockfile/lib/lockfile.js"(exports, module) {
     "use strict";
-    var path2 = __require("path");
+    var path3 = __require("path");
     var fs = require_graceful_fs();
     var retry = require_retry2();
     var onExit = require_signal_exit();
@@ -8515,7 +8515,7 @@ var require_lockfile = __commonJS({
     }
     function resolveCanonicalPath(file2, options, callback) {
       if (!options.realpath) {
-        return callback(null, path2.resolve(file2));
+        return callback(null, path3.resolve(file2));
       }
       options.fs.realpath(file2, callback);
     }
@@ -8745,12 +8745,12 @@ var require_adapter = __commonJS({
     function createSyncFs(fs2) {
       const methods = ["mkdir", "realpath", "stat", "rmdir", "utimes"];
       const newFs = { ...fs2 };
-      methods.forEach((method2) => {
-        newFs[method2] = (...args) => {
+      methods.forEach((method4) => {
+        newFs[method4] = (...args) => {
           const callback = args.pop();
           let ret;
           try {
-            ret = fs2[`${method2}Sync`](...args);
+            ret = fs2[`${method4}Sync`](...args);
           } catch (err) {
             return callback(err);
           }
@@ -8759,7 +8759,7 @@ var require_adapter = __commonJS({
       });
       return newFs;
     }
-    function toPromise(method2) {
+    function toPromise(method4) {
       return (...args) => new Promise((resolve, reject) => {
         args.push((err, result) => {
           if (err) {
@@ -8768,10 +8768,10 @@ var require_adapter = __commonJS({
             resolve(result);
           }
         });
-        method2(...args);
+        method4(...args);
       });
     }
-    function toSync(method2) {
+    function toSync(method4) {
       return (...args) => {
         let err;
         let result;
@@ -8779,7 +8779,7 @@ var require_adapter = __commonJS({
           err = _err;
           result = _result;
         });
-        method2(...args);
+        method4(...args);
         if (err) {
           throw err;
         }
@@ -8848,6 +8848,331 @@ import { fileURLToPath } from "node:url";
 // src/modules/archives/application/index.ts
 var MAX_ARCHIVE_IMPORT_BYTES = 128 * 1024 * 1024;
 
+// ../../packages/contracts/whiteboard/stickers.ts
+var yellow = "#f5c75e";
+var orange = "#e99662";
+var red = "#e87970";
+var blue = "#8eb5dc";
+var green = "#b3c894";
+var pink = "#e9a9c7";
+var purple = "#bab0da";
+function path(d, fill = "none") {
+  return { kind: "path", d, fill };
+}
+function circle(cx, cy, r, fill) {
+  return { kind: "circle", cx, cy, r, fill };
+}
+function rect(x, y, width, height, fill, rx = 1) {
+  return { kind: "rect", x, y, width, height, rx, fill };
+}
+function sticker(id2, label, keywords, ...graphics) {
+  return { id: id2, label, keywords, graphics };
+}
+var definitions = [
+  sticker(
+    "smile",
+    "\u7B11\u8138",
+    "smile happy \u5F00\u5FC3 \u8868\u60C5",
+    circle(12, 12, 9, yellow),
+    path("M7 10q1-3 3 0m4 0q1-3 3 0M7 13h10q-1 6-5 6t-5-6Z", "#fff1be")
+  ),
+  sticker("plus", "\u52A0\u53F7", "plus add \u6DFB\u52A0 \u6B63\u5411", path("M9 3h6v6h6v6h-6v6H9v-6H3V9h6Z", green)),
+  sticker(
+    "thumbs-up",
+    "\u8D5E\u540C",
+    "thumbs up agree good like \u8D5E \u70B9\u8D5E",
+    path("M8 10c3-1 4-4 5-7 3 0 3 3 1 6h5q3 0 2 3l-2 8H8ZM3 10h5v10H3Z", yellow),
+    path("M16 12h5m-6 4h5")
+  ),
+  sticker(
+    "thumbs-down",
+    "\u4E0D\u8D5E\u540C",
+    "thumbs down disagree \u4E0D\u540C\u610F \u53CD\u5BF9",
+    path("M8 14c3 1 4 4 5 7 3 0 3-3 1-6h5q3 0 2-3l-2-8H8ZM3 4h5v10H3Z", yellow),
+    path("M16 12h5m-6-4h5")
+  ),
+  sticker(
+    "heart",
+    "\u7231\u5FC3",
+    "heart love \u559C\u6B22 \u5173\u5FC3",
+    path("M12 21C8 18 3 14 3 9 3 3 9 2 12 7c3-5 9-4 9 2 0 5-5 9-9 12Z", red)
+  ),
+  sticker(
+    "wave",
+    "\u6325\u624B",
+    "wave hand hello \u4F60\u597D \u62DB\u547C",
+    path(
+      "m7 20-3-8q0-2 2-1l2 3-2-8q0-2 2-1l2 7V4q1-2 2 0v8l2-7q2-1 2 1l-1 7 2-4q2-1 2 1l-2 8q-3 5-10 2Z",
+      yellow
+    ),
+    path("M3 5 5 3m14 1 2 2M2 8H1")
+  ),
+  sticker(
+    "clap",
+    "\u9F13\u638C",
+    "clap applause hands \u652F\u6301 \u62CD\u624B",
+    path("M4 20V9q1-2 2 0v5-8q1-2 2 0v7-9q1-2 2 0v9-7q1-2 2 0v9l2-3q2-1 2 1l-3 7Z", yellow),
+    path("m14 20 4-7V7q2-2 2 0v13ZM5 2 4 1m10 2 1-2m6 3 1-1", "#f7d98b")
+  ),
+  sticker(
+    "handshake",
+    "\u63E1\u624B",
+    "handshake agree partnership \u5408\u4F5C \u5171\u8BC6",
+    path("m2 9 5-5 5 2 5-2 5 5-4 7-5 4-8-5Z", yellow),
+    path("m8 9 4-3 4 3q0 3-3 2l-2-1-3 3m1 4 2-2m1 4 2-2m1 0 2-2")
+  ),
+  sticker(
+    "heart-hand",
+    "\u7528\u5FC3\u652F\u6301",
+    "care heart support \u5173\u6000 \u611F\u8C22",
+    path("M11 12C7 10 5 8 5 5q2-4 6 0 4-4 6 0 1 3-6 7Z", red),
+    path("M3 15h4l4 2h6q2-1 1-3l3-1q2 4-3 7H6l-3 1Z", pink)
+  ),
+  sticker(
+    "bulb",
+    "\u60F3\u6CD5",
+    "lightbulb idea insight \u7075\u611F \u70B9\u5B50",
+    path("M8 16c0-3-4-4-3-8 1-7 13-7 14 0 1 4-3 5-3 8ZM8 17h8v4H8Z", "#f8dda0"),
+    path("m10 15-1-6 3 2 3-2-1 6M9 19h6")
+  ),
+  sticker(
+    "question",
+    "\u95EE\u9898",
+    "question help why \u7591\u95EE \u5E2E\u52A9",
+    circle(12, 12, 9, purple),
+    path("M9 8q0-4 4-3 5 2 0 6-2 1-1 4m0 3h.1")
+  ),
+  sticker(
+    "alert",
+    "\u63D0\u9192",
+    "alert warning caution \u6CE8\u610F \u98CE\u9669 \u8B66\u544A",
+    path("M12 3 22 21H2Z", yellow),
+    path("M12 8v6"),
+    circle(12, 17.5, 0.65, "#273443")
+  ),
+  sticker(
+    "check",
+    "\u5B8C\u6210",
+    "check done yes success \u6210\u529F \u901A\u8FC7 \u5BF9\u52FE",
+    rect(4, 4, 16, 16, green, 2),
+    path("m7 11 4 4L22 5")
+  ),
+  sticker(
+    "cross",
+    "\u53D6\u6D88",
+    "cross no cancel stop \u62D2\u7EDD \u9519\u8BEF \u5173\u95ED",
+    circle(12, 12, 9, red),
+    path("m8 8 8 8m0-8-8 8")
+  ),
+  sticker(
+    "flag",
+    "\u65D7\u5E1C",
+    "flag milestone mark \u91CC\u7A0B\u7891 \u6807\u8BB0",
+    path("M5 21V3m1 1h15l-4 6 4 5H6Z", red),
+    circle(5, 3, 1.5, "#f7eee7")
+  ),
+  sticker(
+    "bolt",
+    "\u95EA\u7535",
+    "bolt lightning zap fast \u5FEB\u901F \u80FD\u91CF",
+    path("m14 2-11 12h7l-1 8L22 9h-8Z", yellow)
+  ),
+  sticker(
+    "pin",
+    "\u5730\u70B9",
+    "pin location map \u5B9A\u4F4D \u4F4D\u7F6E",
+    path("M12 22C8 16 4 13 4 9a8 8 0 0 1 16 0c0 4-4 7-8 13Z", red),
+    circle(12, 9, 3, "#f4aa9f")
+  ),
+  sticker(
+    "search",
+    "\u53D1\u73B0",
+    "search find discover \u641C\u7D22 \u67E5\u627E \u653E\u5927\u955C",
+    circle(9, 9, 6.5, blue),
+    path("m14 13 8 7-3 3-7-8Z", "#b9d5ec")
+  ),
+  sticker(
+    "key",
+    "\u94A5\u5319",
+    "key access important \u5173\u952E \u6743\u9650",
+    path("M14 11a6 6 0 1 0-5 4v6h4v-3h3v-3h-3Z", yellow),
+    circle(8, 8, 2.5, "#f8e1aa")
+  ),
+  sticker(
+    "party",
+    "\u5E86\u795D",
+    "party celebrate confetti \u5F69\u5E26 \u795D\u8D3A",
+    path("M4 21 7 7l10 10Z", pink),
+    path("m11 5 2-3m4 7 4-1m-7 5 5-6m1 9 3 2M7 3l1 1"),
+    circle(18, 3, 1, yellow),
+    circle(22, 12, 1, blue)
+  ),
+  sticker(
+    "trophy",
+    "\u5956\u676F",
+    "trophy win award \u51A0\u519B \u5956\u52B1",
+    path("M7 3h10v9q-1 5-5 5t-5-5Zm3 14h4v3h-4ZM7 21h10M7 5H3q0 8 5 7M17 5h4q0 8-5 7", yellow)
+  ),
+  sticker(
+    "crown",
+    "\u7687\u51A0",
+    "crown royal best \u7B2C\u4E00 \u4F18\u79C0",
+    path("M5 20 3 7l6 5 3-9 3 9 6-5-2 13Z", yellow),
+    circle(3, 6, 1.4, "#f8e1aa"),
+    circle(12, 3, 1.4, "#f8e1aa"),
+    circle(21, 6, 1.4, "#f8e1aa")
+  ),
+  sticker(
+    "gift",
+    "\u793C\u7269",
+    "gift present thanks \u8D60\u793C \u60CA\u559C",
+    rect(4, 10, 16, 11, red),
+    rect(3, 7, 18, 4, "#f2a79b"),
+    path("M12 7v14M12 7C3 8 4 1 8 3l4 4Zm0 0c9 1 8-6 4-4Z", "#f1b1bd")
+  ),
+  sticker(
+    "clock",
+    "\u65F6\u949F",
+    "clock time deadline \u65F6\u95F4 \u622A\u6B62",
+    circle(12, 12, 9, blue),
+    path("M12 6v7h5")
+  ),
+  sticker(
+    "calendar",
+    "\u65E5\u5386",
+    "calendar date plan \u65E5\u671F \u8BA1\u5212",
+    rect(3, 5, 18, 16, red, 2),
+    path("M3 10h18M8 3v5m8-5v5M8 10v11m8-11v11M3 15h18")
+  ),
+  sticker(
+    "hourglass",
+    "\u6C99\u6F0F",
+    "hourglass wait patience \u7B49\u5F85 \u5012\u8BA1\u65F6",
+    path("M5 3h14c0 6-2 6-5 9 3 3 5 3 5 9H5c0-6 2-6 5-9-3-3-5-3-5-9Z", "#f9e8ba"),
+    path("M6 6h12l-6 5Zm0 13 6-6 6 6Z", yellow),
+    path("M4 2h16M4 22h16")
+  ),
+  sticker(
+    "messages",
+    "\u8BA8\u8BBA",
+    "messages chat discuss \u5BF9\u8BDD \u6C9F\u901A",
+    path("M14 17H7l-4 3v-7a7 7 0 1 1 11 4Z", blue),
+    path("M14 10q8-2 8 5v7l-4-2q-7 1-8-5Z", "#aecbe5")
+  ),
+  sticker(
+    "megaphone",
+    "\u516C\u544A",
+    "megaphone announce broadcast \u5BA3\u5E03 \u901A\u77E5",
+    path("m3 10 13-6v16L3 14Zm3 5 2 6h4l-2-7Z", orange),
+    path("M18 8q4 4 0 8m2-10q6 6 0 12")
+  ),
+  sticker(
+    "pencil",
+    "\u94C5\u7B14",
+    "pencil edit write \u7F16\u8F91 \u4E66\u5199",
+    path("m4 15 11-12q2-2 5 1t1 4L9 20l-7 2Z", yellow),
+    path("m14 4 6 6M4 15l5 5m-6 1 2-5"),
+    path("m3 22 5-1 4 1 3-2 4 1 3-2")
+  ),
+  sticker(
+    "chart",
+    "\u589E\u957F\u56FE\u8868",
+    "chart growth graph mountain \u6570\u636E \u8FDB\u5C55",
+    path("M3 21V4h3v14h15v3Z", purple),
+    path("m7 15 4-5 4 2 6-8v14H7Z", green),
+    path("m16 4 5-1 1 5")
+  ),
+  sticker(
+    "trending-up",
+    "\u5411\u4E0A\u8D8B\u52BF",
+    "trending up progress improve \u63D0\u5347 \u8D8B\u52BF",
+    path("M3 21V13h5v-4h5V5h6V2l4 5-4 5V9h-3v5h-5v4H7v3Z", purple)
+  ),
+  sticker(
+    "send",
+    "\u7EB8\u98DE\u673A",
+    "send paper plane launch \u53D1\u9001 \u51FA\u53D1",
+    path("M2 8 22 2l-6 20-5-8Z", blue),
+    path("m3 8 8 6L22 2M11 14l-1 7 6-5")
+  ),
+  sticker(
+    "sun",
+    "\u592A\u9633",
+    "sun bright day \u9633\u5149 \u660E\u4EAE",
+    path("m12 1 2 5 4-3-1 5 5 1-4 4 4 3-5 1 1 5-5-3-3 4-1-5-5 1 3-5-4-3 5-1-1-5 5 3Z", "#f7dc8a"),
+    circle(12, 12, 4.5, yellow)
+  ),
+  sticker(
+    "sprout",
+    "\u840C\u82BD",
+    "sprout plant grow \u65B0\u82BD \u6210\u957F",
+    path("M12 22V11M12 13C1 13 1 3 6 5c6 0 6 8 6 8Zm0-2C12 0 23 1 22 6c-1 6-10 5-10 5Z", green),
+    path("M5 22h14")
+  ),
+  sticker(
+    "flower",
+    "\u82B1\u6735",
+    "flower bloom beauty \u9C9C\u82B1 \u7EFD\u653E",
+    path("M12 22V9m0 8q-9 0-9-6 7-1 9 6Zm0 3q9-1 9-7-7-1-9 7Z", green),
+    path("M12 3q4-4 5 1 5-1 3 4 2 4-4 4-3 4-5-1-6 0-4-4-3-4 1-5Z", pink),
+    circle(13, 6.5, 2, "#f6d58a")
+  ),
+  sticker(
+    "coffee",
+    "\u5496\u5561",
+    "coffee break cup \u4F11\u606F \u5496\u5561\u676F",
+    path("M4 8h13v9q-1 4-6 4t-7-4Zm13 1h3q4 5-3 7Z", "#c8a589"),
+    path("M2 22h18M7 5q-2-2 0-4m5 4q-2-2 0-4")
+  ),
+  sticker(
+    "piggy-bank",
+    "\u50A8\u84C4\u7F50",
+    "piggy bank save money \u5B58\u94B1 \u9884\u7B97",
+    path("M6 7q-2-5 3-3l2 2q9-2 9 5l3 1v5l-4 1v4h-4v-3H9v3H5v-5Q0 15 3 10L1 8q3-2 5-1Z", pink),
+    path("M10 8h5"),
+    circle(18, 11, 0.6, "#273443")
+  ),
+  sticker(
+    "arrow-right",
+    "\u5411\u53F3",
+    "arrow right next forward \u4E0B\u4E00\u6B65 \u524D\u8FDB",
+    path("M3 9h11V3l8 9-8 9v-6H3Z", blue)
+  ),
+  sticker("arrow-up", "\u5411\u4E0A", "arrow up top \u4E0A\u5347 \u9876\u90E8", path("M9 22V11H3l9-9 9 9h-6v11Z", green)),
+  sticker(
+    "repeat",
+    "\u5FAA\u73AF",
+    "repeat loop cycle \u8FED\u4EE3 \u5FAA\u73AF",
+    path("M5 9q1-7 10-5l2-2v6h-6l2-2q-5-1-6 4ZM19 15q-1 7-10 5l-2 2v-6h6l-2 2q5 1 6-4Z", green)
+  ),
+  sticker(
+    "target",
+    "\u76EE\u6807",
+    "target aim focus \u4E13\u6CE8 \u9776\u5FC3",
+    circle(12, 12, 9, red),
+    circle(12, 12, 6, "#f9e8db"),
+    circle(12, 12, 3, red),
+    path("m12 12 9-9m-5 0h5v5")
+  ),
+  sticker(
+    "rocket",
+    "\u706B\u7BAD",
+    "rocket launch release \u53D1\u5E03 \u542F\u52A8",
+    path("M9 16 5 19l-1-7 4-3m7 6 0 5-6 1 3-4", orange),
+    path("M7 15Q7 3 21 2q1 13-11 15Z", blue),
+    circle(15, 8, 2.5, "#dcebf5"),
+    path("m7 17-4 4 5-1", yellow)
+  )
+];
+var byId = new Map(definitions.map((definition) => [definition.id, definition]));
+var stickerCatalog = definitions.map(
+  ({ id: id2, label, keywords }) => ({
+    id: id2,
+    label,
+    keywords
+  })
+);
+
 // src/modules/catalog/domain/thumbnail.ts
 var previewBytes = 128 * 1024;
 
@@ -8869,14 +9194,22 @@ var initialTimer = Object.freeze({
 var leaseMs = 10 * 6e4;
 var invalidLabel = new RegExp("\\p{Cc}", "u");
 
+// src/modules/rooms/application/room-event-journal.ts
+var maxReplayContentBytes = 256 * 1024;
+
 // src/modules/rooms/application/index.ts
 var maxChangedMetadataBytes = 48 * 1024;
 
 // src/modules/whiteboard/domain/export-types.ts
 var maxExportFileBytes = 32 * 1024 * 1024;
+var maxBoardBackupBytes = 128 * 1024 * 1024;
+var maxBoardBackupAssetBytes = 20 * 1024 * 1024;
 
 // src/modules/whiteboard/domain/section.ts
 var radiansPerDegree = Math.PI / 180;
+
+// src/modules/whiteboard/domain/backup-elements.ts
+var maxLegacyVersion = BigInt(Number.MAX_SAFE_INTEGER);
 
 // src/modules/whiteboard/domain/movement.ts
 var maxStoredVersion = (1n << 63n) - 1n;
@@ -8914,13 +9247,13 @@ var maxStickerFallbackLength = 64 * 1024;
 // src/modules/whiteboard/domain/gif-image.ts
 var maximumFramePixels = 256 * 1024 * 1024;
 
+// src/modules/whiteboard/domain/svg-image.ts
+var invalidXmlCharacters = new RegExp("(?:(?![\\t\\n\\r])\\p{Cc}|[\\ufffe\\uffff])", "u");
+
 // src/modules/whiteboard/domain/image-edits.ts
 var unsafeName = new RegExp("[/\\\\]|\\p{Cc}|^[A-Za-z]:", "u");
-var maximumImageBytes = 8 * 1024 * 1024;
+var maximumBoardImageBytes = 20 * 1024 * 1024;
 var maximumPixels = 32 * 1024 * 1024;
-
-// src/modules/whiteboard/domain/svg-image.ts
-var maximumSvgBytes = 1024 * 1024;
 
 // src/modules/whiteboard/domain/video-webm.ts
 var decoder = new TextDecoder();
@@ -8937,10 +9270,10 @@ var encoder4 = new TextEncoder();
 
 // src/modules/whiteboard/application/export-assets.ts
 var maxAssetBytes = 20 * 1024 * 1024;
+var encodingChunkBytes = 24 * 1024;
 
 // src/modules/whiteboard/application/export-backup.ts
-var maxStoredPayload = 32n * 1024n * 1024n;
-var maxAssetBytes2 = 20 * 1024 * 1024;
+var maxStoredPayload = 64n * 1024n * 1024n;
 
 // src/modules/whiteboard/application/edit-content.ts
 var maxSourceVersion = (1n << 63n) - 1n;
@@ -11839,9 +12172,9 @@ function addService(proto, file2, reg) {
   file2.services.push(desc);
   reg.add(desc);
   for (const methodProto of proto.method) {
-    const method2 = newMethod(methodProto, desc, reg);
-    desc.methods.push(method2);
-    desc.method[method2.localName] = method2;
+    const method4 = newMethod(methodProto, desc, reg);
+    desc.methods.push(method4);
+    desc.method[method4.localName] = method4;
   }
 }
 function newMethod(proto, parent, reg) {
@@ -12273,17 +12606,17 @@ function bootEnumDescriptorProto(init) {
 }
 
 // ../../../../node_modules/.pnpm/@bufbuild+protobuf@2.17.0/node_modules/@bufbuild/protobuf/dist/esm/codegenv2/message.js
-function messageDesc(file2, path2, ...paths2) {
-  return paths2.reduce((acc, cur) => acc.nestedMessages[cur], file2.messages[path2]);
+function messageDesc(file2, path3, ...paths2) {
+  return paths2.reduce((acc, cur) => acc.nestedMessages[cur], file2.messages[path3]);
 }
 
 // ../../../../node_modules/.pnpm/@bufbuild+protobuf@2.17.0/node_modules/@bufbuild/protobuf/dist/esm/codegenv2/enum.js
-function enumDesc(file2, path2, ...paths2) {
+function enumDesc(file2, path3, ...paths2) {
   if (paths2.length == 0) {
-    return file2.enums[path2];
+    return file2.enums[path3];
   }
   const e = paths2.pop();
-  return paths2.reduce((acc, cur) => acc.nestedMessages[cur], file2.messages[path2]).nestedEnums[e];
+  return paths2.reduce((acc, cur) => acc.nestedMessages[cur], file2.messages[path3]).nestedEnums[e];
 }
 function tsEnum(desc) {
   const enumObject = {};
@@ -14474,11 +14807,11 @@ function fieldMaskFromJson(fieldMask, json2) {
   if (json2 === "") {
     return;
   }
-  fieldMask.paths = json2.split(",").map((path2) => {
-    if (path2.includes("_")) {
+  fieldMask.paths = json2.split(",").map((path3) => {
+    if (path3.includes("_")) {
       throw new Error(`cannot decode message ${fieldMask.$typeName} from JSON: path names must be lowerCamelCase`);
     }
-    return protoSnakeCase(path2);
+    return protoSnakeCase(path3);
   });
 }
 function structFromJson(struct, json2, ctx) {
@@ -14538,11 +14871,11 @@ function listValueFromJson(listValue, json2, ctx) {
 }
 
 // ../../../../node_modules/.pnpm/@bufbuild+protobuf@2.17.0/node_modules/@bufbuild/protobuf/dist/esm/codegenv2/service.js
-function serviceDesc(file2, path2, ...paths2) {
+function serviceDesc(file2, path3, ...paths2) {
   if (paths2.length > 0) {
     throw new Error();
   }
-  return file2.services[path2];
+  return file2.services[path3];
 }
 
 // ../../packages/contracts/dist/proto/luming/studio/v1/board_archive_service_pb.js
@@ -14700,10 +15033,10 @@ var {
   getBoardEditReceipt
 } = BoardEditService.method;
 var boardImageRoutePath = "/" + BoardEditService.typeName + "/" + attachBoardImage.name;
-var boardImageRequestLimit = 8 * 1024 * 1024 + 32 * 1024;
+var boardImageRequestLimit = 20 * 1024 * 1024 + 32 * 1024;
 
 // ../../packages/contracts/dist/proto/luming/studio/v1/feedback_service_pb.js
-var file_luming_studio_v1_feedback_service = /* @__PURE__ */ fileDesc("CidsdW1pbmcvc3R1ZGlvL3YxL2ZlZWRiYWNrX3NlcnZpY2UucHJvdG8SEGx1bWluZy5zdHVkaW8udjEiJQoNRmVlZGJhY2tQb2ludBIJCgF4GAEgASgBEgkKAXkYAiABKAEicgoTRmVlZGJhY2tPYmplY3RQb2ludBIRCglvYmplY3RfaWQYASABKAkSCQoBdRgCIAEoARIJCgF2GAMgASgBEh0KEGdlb21ldHJ5X3ZlcnNpb24YBCABKARIAIgBAUITChFfZ2VvbWV0cnlfdmVyc2lvbiIrChZGZWVkYmFja0RvY3VtZW50QW5jaG9yEhEKCWJsb2NrX2lkcxgBIAMoCSJYChJGZWVkYmFja0h0bWxBbmNob3ISEAoIbm9kZV9pZHMYASADKAkSHAoPc291cmNlX3JldmlzaW9uGAIgASgESACIAQFCEgoQX3NvdXJjZV9yZXZpc2lvbiK8AgoURmVlZGJhY2tDb250ZW50UG9pbnQSEQoJb2JqZWN0X2lkGAEgASgJEgkKAXUYAiABKAESCQoBdhgDIAEoARIdChBnZW9tZXRyeV92ZXJzaW9uGAQgASgESAGIAQESHAoPcGF5bG9hZF92ZXJzaW9uGAUgASgESAKIAQESPAoIZG9jdW1lbnQYBiABKAsyKC5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrRG9jdW1lbnRBbmNob3JIABIWCgx0b2RvX2l0ZW1faWQYByABKAlIABI0CgRodG1sGAggASgLMiQubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja0h0bWxBbmNob3JIAEIJCgdjb250ZW50QhMKEV9nZW9tZXRyeV92ZXJzaW9uQhIKEF9wYXlsb2FkX3ZlcnNpb24i2AEKFEZlZWRiYWNrQW5jaG9yVGFyZ2V0EjYKC2JvYXJkX3BvaW50GAEgASgLMh8ubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1BvaW50SAASPQoMb2JqZWN0X3BvaW50GAIgASgLMiUubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja09iamVjdFBvaW50SAASPwoNY29udGVudF9wb2ludBgDIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tDb250ZW50UG9pbnRIAEIICgZ0YXJnZXQiegoURmVlZGJhY2tGcm96ZW5PYmplY3QSDAoEa2luZBgBIAEoCRINCgVsYWJlbBgCIAEoCRIJCgF4GAMgASgBEgkKAXkYBCABKAESDQoFd2lkdGgYBSABKAESDgoGaGVpZ2h0GAYgASgBEhAKCHJvdGF0aW9uGAcgASgBIqUCCg5GZWVkYmFja0FuY2hvchI2CgZ0YXJnZXQYASABKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrQW5jaG9yVGFyZ2V0Eh0KFXNvdXJjZV9ib2FyZF9yZXZpc2lvbhgCIAEoBBI1Cgxmcm96ZW5fcG9pbnQYAyABKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrUG9pbnQSPQoNZnJvemVuX29iamVjdBgEIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tGcm96ZW5PYmplY3QSFgoOdGFyZ2V0X21pc3NpbmcYBSABKAgSGwoOZnJvemVuX2V4Y2VycHQYBiABKAlIAIgBAUIRCg9fZnJvemVuX2V4Y2VycHQiwQEKD0ZlZWRiYWNrTWVzc2FnZRISCgptZXNzYWdlX2lkGAEgASgJEhcKD2F1dGhvcl9hY3Rvcl9pZBgCIAEoCRIaChJhdXRob3JlZF9ieV92aWV3ZXIYAyABKAgSDAoEdGV4dBgEIAEoCRIZChFjcmVhdGVkX2F0X21pbGxpcxgFIAEoBBIZChF1cGRhdGVkX2F0X21pbGxpcxgGIAEoBBIPCgd2ZXJzaW9uGAcgASgEEhAKCGNhbl9lZGl0GAggASgIIqkCCg5GZWVkYmFja1RocmVhZBIRCgl0aHJlYWRfaWQYASABKAkSNgoGc3RhdHVzGAIgASgOMiYubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1RocmVhZFN0YXR1cxIwCgZhbmNob3IYAyABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrQW5jaG9yEjAKBWZpcnN0GAQgASgLMiEubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja01lc3NhZ2USDwoHdmVyc2lvbhgFIAEoBBIZChF1cGRhdGVkX2F0X21pbGxpcxgGIAEoBBITCgtyZXBseV9jb3VudBgHIAEoDRITCgtjYW5fcmVzb2x2ZRgIIAEoCBISCgpjYW5fZGVsZXRlGAkgASgIIsMBChJMaXN0VGhyZWFkc1JlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEQoJcGFnZV9zaXplGAIgASgNEhMKBmN1cnNvchgDIAEoCUgAiAEBEjYKBnN0YXR1cxgEIAEoDjImLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tUaHJlYWRTdGF0dXMSHAoPYXV0aG9yX2FjdG9yX2lkGAUgASgJSAGIAQFCCQoHX2N1cnNvckISChBfYXV0aG9yX2FjdG9yX2lkIoUBChNMaXN0VGhyZWFkc1Jlc3BvbnNlEjEKB3RocmVhZHMYASADKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrVGhyZWFkEhgKC25leHRfY3Vyc29yGAIgASgJSACIAQESEQoJY2FuX3dyaXRlGAMgASgIQg4KDF9uZXh0X2N1cnNvciJqChBHZXRUaHJlYWRSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhEKCXRocmVhZF9pZBgCIAEoCRIRCglwYWdlX3NpemUYAyABKA0SEwoGY3Vyc29yGAQgASgJSACIAQFCCQoHX2N1cnNvciK2AQoRR2V0VGhyZWFkUmVzcG9uc2USMAoGdGhyZWFkGAEgASgLMiAubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1RocmVhZBIyCgdyZXBsaWVzGAIgAygLMiEubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja01lc3NhZ2USGAoLbmV4dF9jdXJzb3IYAyABKAlIAIgBARIRCgljYW5fd3JpdGUYBCABKAhCDgoMX25leHRfY3Vyc29yIlYKDkZlZWRiYWNrQ3JlYXRlEjYKBmFuY2hvchgBIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tBbmNob3JUYXJnZXQSDAoEdGV4dBgCIAEoCSIwCg1GZWVkYmFja1JlcGx5EhEKCXRocmVhZF9pZBgBIAEoCRIMCgR0ZXh0GAIgASgJIocBCgxGZWVkYmFja0VkaXQSEQoJdGhyZWFkX2lkGAEgASgJEhIKCm1lc3NhZ2VfaWQYAiABKAkSJQoYZXhwZWN0ZWRfbWVzc2FnZV92ZXJzaW9uGAMgASgESACIAQESDAoEdGV4dBgEIAEoCUIbChlfZXhwZWN0ZWRfbWVzc2FnZV92ZXJzaW9uImsKFEZlZWRiYWNrVGhyZWFkQ2hhbmdlEhEKCXRocmVhZF9pZBgBIAEoCRIkChdleHBlY3RlZF90aHJlYWRfdmVyc2lvbhgCIAEoBEgAiAEBQhoKGF9leHBlY3RlZF90aHJlYWRfdmVyc2lvbiKOAwoUQXBwbHlGZWVkYmFja1JlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCRIyCgZjcmVhdGUYAyABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrQ3JlYXRlSAASMAoFcmVwbHkYBCABKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrUmVwbHlIABIuCgRlZGl0GAUgASgLMh4ubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja0VkaXRIABI5CgdyZXNvbHZlGAYgASgLMiYubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1RocmVhZENoYW5nZUgAEjgKBnJlb3BlbhgHIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tUaHJlYWRDaGFuZ2VIABI4CgZkZWxldGUYCCABKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrVGhyZWFkQ2hhbmdlSABCCwoJb3BlcmF0aW9uIksKFUFwcGx5RmVlZGJhY2tSZXNwb25zZRIyCgdyZWNlaXB0GAEgASgLMiEubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1JlY2VpcHQipwEKD0ZlZWRiYWNrQXBwbGllZBIRCgl0aHJlYWRfaWQYASABKAkSFgoOdGhyZWFkX3ZlcnNpb24YAiABKAQSFwoKbWVzc2FnZV9pZBgDIAEoCUgAiAEBEhwKD21lc3NhZ2VfdmVyc2lvbhgEIAEoBEgBiAEBEg8KB2RlbGV0ZWQYBSABKAhCDQoLX21lc3NhZ2VfaWRCEgoQX21lc3NhZ2VfdmVyc2lvbiJ/ChBGZWVkYmFja1JlamVjdGVkEjkKBnJlYXNvbhgBIAEoDjIpLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tSZWplY3Rpb25SZWFzb24SHAoPY3VycmVudF92ZXJzaW9uGAIgASgESACIAQFCEgoQX2N1cnJlbnRfdmVyc2lvbiKwAQoPRmVlZGJhY2tSZWNlaXB0EhAKCGJvYXJkX2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkSNAoHYXBwbGllZBgDIAEoCzIhLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tBcHBsaWVkSAASNgoIcmVqZWN0ZWQYBCABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrUmVqZWN0ZWRIAEIJCgdvdXRjb21lIkEKGUdldEZlZWRiYWNrUmVjZWlwdFJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCSIwChpGZWVkYmFja1JlY2VpcHROb3RSZWNvcmRlZBISCgpjb21tYW5kX2lkGAEgASgJIqIBChpHZXRGZWVkYmFja1JlY2VpcHRSZXNwb25zZRI0CgdyZWNlaXB0GAEgASgLMiEubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1JlY2VpcHRIABJECgxub3RfcmVjb3JkZWQYAiABKAsyLC5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrUmVjZWlwdE5vdFJlY29yZGVkSABCCAoGcmVzdWx0KoQBChRGZWVkYmFja1RocmVhZFN0YXR1cxImCiJGRUVEQkFDS19USFJFQURfU1RBVFVTX1VOU1BFQ0lGSUVEEAASHwobRkVFREJBQ0tfVEhSRUFEX1NUQVRVU19PUEVOEAESIwofRkVFREJBQ0tfVEhSRUFEX1NUQVRVU19SRVNPTFZFRBACKv0CChdGZWVkYmFja1JlamVjdGlvblJlYXNvbhIpCiVGRUVEQkFDS19SRUpFQ1RJT05fUkVBU09OX1VOU1BFQ0lGSUVEEAASKgomRkVFREJBQ0tfUkVKRUNUSU9OX1JFQVNPTl9JTlZBTElEX1RFWFQQARIsCihGRUVEQkFDS19SRUpFQ1RJT05fUkVBU09OX0lOVkFMSURfQU5DSE9SEAISLAooRkVFREJBQ0tfUkVKRUNUSU9OX1JFQVNPTl9UQVJHRVRfQ0hBTkdFRBADEicKI0ZFRURCQUNLX1JFSkVDVElPTl9SRUFTT05fTk9UX0ZPVU5EEAQSJwojRkVFREJBQ0tfUkVKRUNUSU9OX1JFQVNPTl9GT1JCSURERU4QBRItCilGRUVEQkFDS19SRUpFQ1RJT05fUkVBU09OX1ZFUlNJT05fQ0hBTkdFRBAGEi4KKkZFRURCQUNLX1JFSkVDVElPTl9SRUFTT05fQ09NTUFORF9JRF9SRVVTRRAHMpYDCg9GZWVkYmFja1NlcnZpY2USWgoLTGlzdFRocmVhZHMSJC5sdW1pbmcuc3R1ZGlvLnYxLkxpc3RUaHJlYWRzUmVxdWVzdBolLmx1bWluZy5zdHVkaW8udjEuTGlzdFRocmVhZHNSZXNwb25zZRJUCglHZXRUaHJlYWQSIi5sdW1pbmcuc3R1ZGlvLnYxLkdldFRocmVhZFJlcXVlc3QaIy5sdW1pbmcuc3R1ZGlvLnYxLkdldFRocmVhZFJlc3BvbnNlEmAKDUFwcGx5RmVlZGJhY2sSJi5sdW1pbmcuc3R1ZGlvLnYxLkFwcGx5RmVlZGJhY2tSZXF1ZXN0GicubHVtaW5nLnN0dWRpby52MS5BcHBseUZlZWRiYWNrUmVzcG9uc2USbwoSR2V0RmVlZGJhY2tSZWNlaXB0EisubHVtaW5nLnN0dWRpby52MS5HZXRGZWVkYmFja1JlY2VpcHRSZXF1ZXN0GiwubHVtaW5nLnN0dWRpby52MS5HZXRGZWVkYmFja1JlY2VpcHRSZXNwb25zZWIGcHJvdG8z");
+var file_luming_studio_v1_feedback_service = /* @__PURE__ */ fileDesc("CidsdW1pbmcvc3R1ZGlvL3YxL2ZlZWRiYWNrX3NlcnZpY2UucHJvdG8SEGx1bWluZy5zdHVkaW8udjEiJQoNRmVlZGJhY2tQb2ludBIJCgF4GAEgASgBEgkKAXkYAiABKAEicgoTRmVlZGJhY2tPYmplY3RQb2ludBIRCglvYmplY3RfaWQYASABKAkSCQoBdRgCIAEoARIJCgF2GAMgASgBEh0KEGdlb21ldHJ5X3ZlcnNpb24YBCABKARIAIgBAUITChFfZ2VvbWV0cnlfdmVyc2lvbiIrChZGZWVkYmFja0RvY3VtZW50QW5jaG9yEhEKCWJsb2NrX2lkcxgBIAMoCSJYChJGZWVkYmFja0h0bWxBbmNob3ISEAoIbm9kZV9pZHMYASADKAkSHAoPc291cmNlX3JldmlzaW9uGAIgASgESACIAQFCEgoQX3NvdXJjZV9yZXZpc2lvbiK8AgoURmVlZGJhY2tDb250ZW50UG9pbnQSEQoJb2JqZWN0X2lkGAEgASgJEgkKAXUYAiABKAESCQoBdhgDIAEoARIdChBnZW9tZXRyeV92ZXJzaW9uGAQgASgESAGIAQESHAoPcGF5bG9hZF92ZXJzaW9uGAUgASgESAKIAQESPAoIZG9jdW1lbnQYBiABKAsyKC5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrRG9jdW1lbnRBbmNob3JIABIWCgx0b2RvX2l0ZW1faWQYByABKAlIABI0CgRodG1sGAggASgLMiQubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja0h0bWxBbmNob3JIAEIJCgdjb250ZW50QhMKEV9nZW9tZXRyeV92ZXJzaW9uQhIKEF9wYXlsb2FkX3ZlcnNpb24i2AEKFEZlZWRiYWNrQW5jaG9yVGFyZ2V0EjYKC2JvYXJkX3BvaW50GAEgASgLMh8ubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1BvaW50SAASPQoMb2JqZWN0X3BvaW50GAIgASgLMiUubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja09iamVjdFBvaW50SAASPwoNY29udGVudF9wb2ludBgDIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tDb250ZW50UG9pbnRIAEIICgZ0YXJnZXQiegoURmVlZGJhY2tGcm96ZW5PYmplY3QSDAoEa2luZBgBIAEoCRINCgVsYWJlbBgCIAEoCRIJCgF4GAMgASgBEgkKAXkYBCABKAESDQoFd2lkdGgYBSABKAESDgoGaGVpZ2h0GAYgASgBEhAKCHJvdGF0aW9uGAcgASgBIqUCCg5GZWVkYmFja0FuY2hvchI2CgZ0YXJnZXQYASABKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrQW5jaG9yVGFyZ2V0Eh0KFXNvdXJjZV9ib2FyZF9yZXZpc2lvbhgCIAEoBBI1Cgxmcm96ZW5fcG9pbnQYAyABKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrUG9pbnQSPQoNZnJvemVuX29iamVjdBgEIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tGcm96ZW5PYmplY3QSFgoOdGFyZ2V0X21pc3NpbmcYBSABKAgSGwoOZnJvemVuX2V4Y2VycHQYBiABKAlIAIgBAUIRCg9fZnJvemVuX2V4Y2VycHQi6wEKD0ZlZWRiYWNrTWVzc2FnZRISCgptZXNzYWdlX2lkGAEgASgJEhcKD2F1dGhvcl9hY3Rvcl9pZBgCIAEoCRIaChJhdXRob3JlZF9ieV92aWV3ZXIYAyABKAgSDAoEdGV4dBgEIAEoCRIZChFjcmVhdGVkX2F0X21pbGxpcxgFIAEoBBIZChF1cGRhdGVkX2F0X21pbGxpcxgGIAEoBBIPCgd2ZXJzaW9uGAcgASgEEhAKCGNhbl9lZGl0GAggASgIEhgKC2F1dGhvcl9uYW1lGAkgASgJSACIAQFCDgoMX2F1dGhvcl9uYW1lIqkCCg5GZWVkYmFja1RocmVhZBIRCgl0aHJlYWRfaWQYASABKAkSNgoGc3RhdHVzGAIgASgOMiYubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1RocmVhZFN0YXR1cxIwCgZhbmNob3IYAyABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrQW5jaG9yEjAKBWZpcnN0GAQgASgLMiEubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja01lc3NhZ2USDwoHdmVyc2lvbhgFIAEoBBIZChF1cGRhdGVkX2F0X21pbGxpcxgGIAEoBBITCgtyZXBseV9jb3VudBgHIAEoDRITCgtjYW5fcmVzb2x2ZRgIIAEoCBISCgpjYW5fZGVsZXRlGAkgASgIIsMBChJMaXN0VGhyZWFkc1JlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEQoJcGFnZV9zaXplGAIgASgNEhMKBmN1cnNvchgDIAEoCUgAiAEBEjYKBnN0YXR1cxgEIAEoDjImLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tUaHJlYWRTdGF0dXMSHAoPYXV0aG9yX2FjdG9yX2lkGAUgASgJSAGIAQFCCQoHX2N1cnNvckISChBfYXV0aG9yX2FjdG9yX2lkIoUBChNMaXN0VGhyZWFkc1Jlc3BvbnNlEjEKB3RocmVhZHMYASADKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrVGhyZWFkEhgKC25leHRfY3Vyc29yGAIgASgJSACIAQESEQoJY2FuX3dyaXRlGAMgASgIQg4KDF9uZXh0X2N1cnNvciJqChBHZXRUaHJlYWRSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhEKCXRocmVhZF9pZBgCIAEoCRIRCglwYWdlX3NpemUYAyABKA0SEwoGY3Vyc29yGAQgASgJSACIAQFCCQoHX2N1cnNvciK2AQoRR2V0VGhyZWFkUmVzcG9uc2USMAoGdGhyZWFkGAEgASgLMiAubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1RocmVhZBIyCgdyZXBsaWVzGAIgAygLMiEubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja01lc3NhZ2USGAoLbmV4dF9jdXJzb3IYAyABKAlIAIgBARIRCgljYW5fd3JpdGUYBCABKAhCDgoMX25leHRfY3Vyc29yIlYKDkZlZWRiYWNrQ3JlYXRlEjYKBmFuY2hvchgBIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tBbmNob3JUYXJnZXQSDAoEdGV4dBgCIAEoCSIwCg1GZWVkYmFja1JlcGx5EhEKCXRocmVhZF9pZBgBIAEoCRIMCgR0ZXh0GAIgASgJIocBCgxGZWVkYmFja0VkaXQSEQoJdGhyZWFkX2lkGAEgASgJEhIKCm1lc3NhZ2VfaWQYAiABKAkSJQoYZXhwZWN0ZWRfbWVzc2FnZV92ZXJzaW9uGAMgASgESACIAQESDAoEdGV4dBgEIAEoCUIbChlfZXhwZWN0ZWRfbWVzc2FnZV92ZXJzaW9uImsKFEZlZWRiYWNrVGhyZWFkQ2hhbmdlEhEKCXRocmVhZF9pZBgBIAEoCRIkChdleHBlY3RlZF90aHJlYWRfdmVyc2lvbhgCIAEoBEgAiAEBQhoKGF9leHBlY3RlZF90aHJlYWRfdmVyc2lvbiKOAwoUQXBwbHlGZWVkYmFja1JlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCRIyCgZjcmVhdGUYAyABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrQ3JlYXRlSAASMAoFcmVwbHkYBCABKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrUmVwbHlIABIuCgRlZGl0GAUgASgLMh4ubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja0VkaXRIABI5CgdyZXNvbHZlGAYgASgLMiYubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1RocmVhZENoYW5nZUgAEjgKBnJlb3BlbhgHIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tUaHJlYWRDaGFuZ2VIABI4CgZkZWxldGUYCCABKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrVGhyZWFkQ2hhbmdlSABCCwoJb3BlcmF0aW9uIksKFUFwcGx5RmVlZGJhY2tSZXNwb25zZRIyCgdyZWNlaXB0GAEgASgLMiEubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1JlY2VpcHQipwEKD0ZlZWRiYWNrQXBwbGllZBIRCgl0aHJlYWRfaWQYASABKAkSFgoOdGhyZWFkX3ZlcnNpb24YAiABKAQSFwoKbWVzc2FnZV9pZBgDIAEoCUgAiAEBEhwKD21lc3NhZ2VfdmVyc2lvbhgEIAEoBEgBiAEBEg8KB2RlbGV0ZWQYBSABKAhCDQoLX21lc3NhZ2VfaWRCEgoQX21lc3NhZ2VfdmVyc2lvbiJ/ChBGZWVkYmFja1JlamVjdGVkEjkKBnJlYXNvbhgBIAEoDjIpLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tSZWplY3Rpb25SZWFzb24SHAoPY3VycmVudF92ZXJzaW9uGAIgASgESACIAQFCEgoQX2N1cnJlbnRfdmVyc2lvbiKwAQoPRmVlZGJhY2tSZWNlaXB0EhAKCGJvYXJkX2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkSNAoHYXBwbGllZBgDIAEoCzIhLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tBcHBsaWVkSAASNgoIcmVqZWN0ZWQYBCABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrUmVqZWN0ZWRIAEIJCgdvdXRjb21lIkEKGUdldEZlZWRiYWNrUmVjZWlwdFJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCSIwChpGZWVkYmFja1JlY2VpcHROb3RSZWNvcmRlZBISCgpjb21tYW5kX2lkGAEgASgJIqIBChpHZXRGZWVkYmFja1JlY2VpcHRSZXNwb25zZRI0CgdyZWNlaXB0GAEgASgLMiEubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1JlY2VpcHRIABJECgxub3RfcmVjb3JkZWQYAiABKAsyLC5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrUmVjZWlwdE5vdFJlY29yZGVkSABCCAoGcmVzdWx0KoQBChRGZWVkYmFja1RocmVhZFN0YXR1cxImCiJGRUVEQkFDS19USFJFQURfU1RBVFVTX1VOU1BFQ0lGSUVEEAASHwobRkVFREJBQ0tfVEhSRUFEX1NUQVRVU19PUEVOEAESIwofRkVFREJBQ0tfVEhSRUFEX1NUQVRVU19SRVNPTFZFRBACKv0CChdGZWVkYmFja1JlamVjdGlvblJlYXNvbhIpCiVGRUVEQkFDS19SRUpFQ1RJT05fUkVBU09OX1VOU1BFQ0lGSUVEEAASKgomRkVFREJBQ0tfUkVKRUNUSU9OX1JFQVNPTl9JTlZBTElEX1RFWFQQARIsCihGRUVEQkFDS19SRUpFQ1RJT05fUkVBU09OX0lOVkFMSURfQU5DSE9SEAISLAooRkVFREJBQ0tfUkVKRUNUSU9OX1JFQVNPTl9UQVJHRVRfQ0hBTkdFRBADEicKI0ZFRURCQUNLX1JFSkVDVElPTl9SRUFTT05fTk9UX0ZPVU5EEAQSJwojRkVFREJBQ0tfUkVKRUNUSU9OX1JFQVNPTl9GT1JCSURERU4QBRItCilGRUVEQkFDS19SRUpFQ1RJT05fUkVBU09OX1ZFUlNJT05fQ0hBTkdFRBAGEi4KKkZFRURCQUNLX1JFSkVDVElPTl9SRUFTT05fQ09NTUFORF9JRF9SRVVTRRAHMpYDCg9GZWVkYmFja1NlcnZpY2USWgoLTGlzdFRocmVhZHMSJC5sdW1pbmcuc3R1ZGlvLnYxLkxpc3RUaHJlYWRzUmVxdWVzdBolLmx1bWluZy5zdHVkaW8udjEuTGlzdFRocmVhZHNSZXNwb25zZRJUCglHZXRUaHJlYWQSIi5sdW1pbmcuc3R1ZGlvLnYxLkdldFRocmVhZFJlcXVlc3QaIy5sdW1pbmcuc3R1ZGlvLnYxLkdldFRocmVhZFJlc3BvbnNlEmAKDUFwcGx5RmVlZGJhY2sSJi5sdW1pbmcuc3R1ZGlvLnYxLkFwcGx5RmVlZGJhY2tSZXF1ZXN0GicubHVtaW5nLnN0dWRpby52MS5BcHBseUZlZWRiYWNrUmVzcG9uc2USbwoSR2V0RmVlZGJhY2tSZWNlaXB0EisubHVtaW5nLnN0dWRpby52MS5HZXRGZWVkYmFja1JlY2VpcHRSZXF1ZXN0GiwubHVtaW5nLnN0dWRpby52MS5HZXRGZWVkYmFja1JlY2VpcHRSZXNwb25zZWIGcHJvdG8z");
 var FeedbackRejectionReasonSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_feedback_service, 1);
 var FeedbackRejectionReason = /* @__PURE__ */ tsEnum(FeedbackRejectionReasonSchema);
 var FeedbackService = /* @__PURE__ */ serviceDesc(file_luming_studio_v1_feedback_service, 0);
@@ -14750,7 +15083,7 @@ var versionKind = {
 };
 
 // ../../packages/contracts/dist/proto/luming/studio/v1/board_room_service_pb.js
-var file_luming_studio_v1_board_room_service = /* @__PURE__ */ fileDesc("CilsdW1pbmcvc3R1ZGlvL3YxL2JvYXJkX3Jvb21fc2VydmljZS5wcm90bxIQbHVtaW5nLnN0dWRpby52MSInChNHZXRCb2FyZFJvb21SZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJIkcKFEdldEJvYXJkUm9vbVJlc3BvbnNlEi8KBWV2ZW50GAEgASgLMiAubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21FdmVudCJkChFCb2FyZFJvb21WaWV3cG9ydBIQCghjZW50ZXJfeBgBIAEoARIQCghjZW50ZXJfeRgCIAEoARIMCgR6b29tGAMgASgBEg0KBXdpZHRoGAQgASgBEg4KBmhlaWdodBgFIAEoASI8ChdCb2FyZFJvb21QYXJ0aWNpcGFudEtleRIQCghhY3Rvcl9pZBgBIAEoCRIPCgd2aWV3X2lkGAIgASgJIqEBChhCb2FyZFJvb21HZXN0dXJlR2VvbWV0cnkSEQoJb2JqZWN0X2lkGAEgASgJEiYKGWV4cGVjdGVkX2dlb21ldHJ5X3ZlcnNpb24YAiABKARIAIgBARIsCghnZW9tZXRyeRgDIAEoCzIaLmx1bWluZy5zdHVkaW8udjEuR2VvbWV0cnlCHAoaX2V4cGVjdGVkX2dlb21ldHJ5X3ZlcnNpb24ijAEKF0JvYXJkUm9vbUdlc3R1cmVQcmV2aWV3EjQKBGtpbmQYASABKA4yJi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbUdlc3R1cmVLaW5kEjsKB2NoYW5nZXMYAiADKAsyKi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbUdlc3R1cmVHZW9tZXRyeSLFAwoUQm9hcmRSb29tUGFydGljaXBhbnQSNgoDa2V5GAEgASgLMikubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21QYXJ0aWNpcGFudEtleRIUCgxkaXNwbGF5X25hbWUYAiABKAkSDAoEcm9sZRgDIAEoCRIVCghzZXF1ZW5jZRgEIAEoBEgAiAEBEh8KEmV4cGlyZXNfYXRfdW5peF9tcxgFIAEoBEgBiAEBEicKBmN1cnNvchgGIAEoCzIXLmx1bWluZy5zdHVkaW8udjEuUG9pbnQSNQoIdmlld3BvcnQYByABKAsyIy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVZpZXdwb3J0EhEKCWZvbGxvd2luZxgIIAEoCBI6CgdnZXN0dXJlGAkgASgLMikubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21HZXN0dXJlUHJldmlldxInChpnZXN0dXJlX2V4cGlyZXNfYXRfdW5peF9tcxgKIAEoBEgCiAEBQgsKCV9zZXF1ZW5jZUIVChNfZXhwaXJlc19hdF91bml4X21zQh0KG19nZXN0dXJlX2V4cGlyZXNfYXRfdW5peF9tcyKSAgoaVXBkYXRlQm9hcmRQcmVzZW5jZVJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSDwoHdmlld19pZBgCIAEoCRIVCghzZXF1ZW5jZRgDIAEoBEgAiAEBEicKBmN1cnNvchgEIAEoCzIXLmx1bWluZy5zdHVkaW8udjEuUG9pbnQSNQoIdmlld3BvcnQYBSABKAsyIy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVZpZXdwb3J0EhEKCWZvbGxvd2luZxgGIAEoCBI6CgdnZXN0dXJlGAcgASgLMikubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21HZXN0dXJlUHJldmlld0ILCglfc2VxdWVuY2UiLwobVXBkYXRlQm9hcmRQcmVzZW5jZVJlc3BvbnNlEhAKCGFjY2VwdGVkGAEgASgIImIKGUxlYXZlQm9hcmRQcmVzZW5jZVJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSDwoHdmlld19pZBgCIAEoCRIVCghzZXF1ZW5jZRgDIAEoBEgAiAEBQgsKCV9zZXF1ZW5jZSIuChpMZWF2ZUJvYXJkUHJlc2VuY2VSZXNwb25zZRIQCghhY2NlcHRlZBgBIAEoCCK6AgoRQm9hcmRSb29tU25hcHNob3QSEAoIYWN0b3JfaWQYASABKAkSEAoIY2FuX2VkaXQYAiABKAgSGwoOYm9hcmRfcmV2aXNpb24YAyABKARIAIgBARI8CgxwYXJ0aWNpcGFudHMYBCADKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVBhcnRpY2lwYW50Ei8KBXRpbWVyGAUgASgLMiAubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21UaW1lchI+ChBhZ2VudF93b3Jrc3BhY2VzGAYgAygLMiQubHVtaW5nLnN0dWRpby52MS5Sb29tQWdlbnRXb3Jrc3BhY2USIgoaY2FuX3JlbGVhc2VfYWdlbnRfYWN0aXZpdHkYByABKAhCEQoPX2JvYXJkX3JldmlzaW9uIo0BChVCb2FyZFJvb21QYXJ0aWNpcGFudHMSNwoHdXBzZXJ0cxgBIAMoCzImLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tUGFydGljaXBhbnQSOwoIcmVtb3ZhbHMYAiADKAsyKS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVBhcnRpY2lwYW50S2V5ItMBChdCb2FyZFJvb21Db250ZW50Q2hhbmdlZBIbCg5ib2FyZF9yZXZpc2lvbhgBIAEoBEgAiAEBEhoKEmNoYW5nZWRfb2JqZWN0X2lkcxgCIAMoCRIaChJyZW1vdmVkX29iamVjdF9pZHMYAyADKAkSFQoNcmVmcmVzaF9zY2VuZRgEIAEoCBI5Cg9jaGFuZ2VkX29iamVjdHMYBSADKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLk9iamVjdE1ldGFkYXRhQhEKD19ib2FyZF9yZXZpc2lvbiIVChNCb2FyZFJvb21BY2Nlc3NMb3N0IpwECg5Cb2FyZFJvb21FdmVudBIQCghib2FyZF9pZBgBIAEoCRIYChByb29tX2luc3RhbmNlX2lkGAIgASgJEhUKCHNlcXVlbmNlGAMgASgESAGIAQESIAoTc2VydmVyX3RpbWVfdW5peF9tcxgEIAEoBEgCiAEBEjcKCHNuYXBzaG90GAUgASgLMiMubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21TbmFwc2hvdEgAEj8KDHBhcnRpY2lwYW50cxgGIAEoCzInLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tUGFydGljaXBhbnRzSAASMQoFdGltZXIYByABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVRpbWVySAASRAoPY29udGVudF9jaGFuZ2VkGAggASgLMikubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21Db250ZW50Q2hhbmdlZEgAEjwKC2FjY2Vzc19sb3N0GAkgASgLMiUubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21BY2Nlc3NMb3N0SAASRAoQYWdlbnRfd29ya3NwYWNlcxgKIAEoCzIoLmx1bWluZy5zdHVkaW8udjEuUm9vbUFnZW50V29ya3NwYWNlTGlzdEgAQgkKB3BheWxvYWRCCwoJX3NlcXVlbmNlQhYKFF9zZXJ2ZXJfdGltZV91bml4X21zIscBCg5Cb2FyZFJvb21UaW1lchIUCgd2ZXJzaW9uGAEgASgESACIAQESNAoFcGhhc2UYAiABKA4yJS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVRpbWVyUGhhc2USEwoLZHVyYXRpb25fbXMYAyABKA0SHQoQZGVhZGxpbmVfdW5peF9tcxgEIAEoBEgBiAEBEhQKDHJlbWFpbmluZ19tcxgFIAEoDUIKCghfdmVyc2lvbkITChFfZGVhZGxpbmVfdW5peF9tcyISChBCb2FyZFRpbWVyQWN0aW9uIosDChdDaGFuZ2VCb2FyZFRpbWVyUmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJEh0KEGV4cGVjdGVkX3ZlcnNpb24YAyABKARIAYgBARIzCgVzdGFydBgEIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuQm9hcmRUaW1lckFjdGlvbkgAEjMKBXBhdXNlGAUgASgLMiIubHVtaW5nLnN0dWRpby52MS5Cb2FyZFRpbWVyQWN0aW9uSAASNAoGcmVzdW1lGAYgASgLMiIubHVtaW5nLnN0dWRpby52MS5Cb2FyZFRpbWVyQWN0aW9uSAASMwoFcmVzZXQYByABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkVGltZXJBY3Rpb25IABIZCg9zZXRfZHVyYXRpb25fbXMYCCABKA1IABIcChJhZGp1c3RfZHVyYXRpb25fbXMYCSABKBFIAEIICgZhY3Rpb25CEwoRX2V4cGVjdGVkX3ZlcnNpb24iRAoRQm9hcmRUaW1lckFwcGxpZWQSLwoFdGltZXIYASABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVRpbWVyIkUKEkJvYXJkVGltZXJDb25mbGljdBIvCgV0aW1lchgBIAEoCzIgLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tVGltZXIiSwoSQm9hcmRUaW1lclJlamVjdGVkEjUKBnJlYXNvbhgBIAEoDjIlLmx1bWluZy5zdHVkaW8udjEuQm9hcmRUaW1lclJlamVjdGlvbiLwAQoRQm9hcmRUaW1lclJlY2VpcHQSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCRI2CgdhcHBsaWVkGAMgASgLMiMubHVtaW5nLnN0dWRpby52MS5Cb2FyZFRpbWVyQXBwbGllZEgAEjgKCGNvbmZsaWN0GAQgASgLMiQubHVtaW5nLnN0dWRpby52MS5Cb2FyZFRpbWVyQ29uZmxpY3RIABI4CghyZWplY3RlZBgFIAEoCzIkLmx1bWluZy5zdHVkaW8udjEuQm9hcmRUaW1lclJlamVjdGVkSABCCQoHb3V0Y29tZSKKAQoYQ2hhbmdlQm9hcmRUaW1lclJlc3BvbnNlEjQKB3JlY2VpcHQYASABKAsyIy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkVGltZXJSZWNlaXB0EiAKE3NlcnZlcl90aW1lX3VuaXhfbXMYAiABKARIAIgBAUIWChRfc2VydmVyX3RpbWVfdW5peF9tcyJDChtHZXRCb2FyZFRpbWVyUmVjZWlwdFJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCSKOAQocR2V0Qm9hcmRUaW1lclJlY2VpcHRSZXNwb25zZRI0CgdyZWNlaXB0GAEgASgLMiMubHVtaW5nLnN0dWRpby52MS5Cb2FyZFRpbWVyUmVjZWlwdBIgChNzZXJ2ZXJfdGltZV91bml4X21zGAIgASgESACIAQFCFgoUX3NlcnZlcl90aW1lX3VuaXhfbXMiSgoTQWdlbnRBY3Rpdml0eUJvdW5kcxIJCgF4GAEgASgBEgkKAXkYAiABKAESDQoFd2lkdGgYAyABKAESDgoGaGVpZ2h0GAQgASgBIi4KGEFnZW50QWN0aXZpdHlPYmplY3RTY29wZRISCgpvYmplY3RfaWRzGAEgAygJIpQBChJBZ2VudEFjdGl2aXR5U2NvcGUSPQoHb2JqZWN0cxgBIAEoCzIqLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eU9iamVjdFNjb3BlSAASNQoEYXJlYRgCIAEoCzIlLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eUJvdW5kc0gAQggKBnRhcmdldCJ1ChJBZ2VudEFjdGl2aXR5QmVnaW4SMwoFc2NvcGUYASABKAsyJC5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlTY29wZRINCgVsYWJlbBgCIAEoCRIbChNwcmV2aW91c19nZW5lcmF0aW9uGAMgASgJInkKE0FnZW50QWN0aXZpdHlVcGRhdGUSEgoKZ2VuZXJhdGlvbhgBIAEoCRIzCgVwaGFzZRgCIAEoDjIkLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eVBoYXNlEhkKEWFjdGl2ZV9vYmplY3RfaWRzGAMgAygJIiYKEEFnZW50QWN0aXZpdHlFbmQSEgoKZ2VuZXJhdGlvbhgBIAEoCSIVChNBZ2VudEFjdGl2aXR5U3RhdHVzIioKFEFnZW50QWN0aXZpdHlSZWxlYXNlEhIKCmdlbmVyYXRpb24YASABKAki8gIKGkNoYW5nZUFnZW50QWN0aXZpdHlSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJEg8KB3Rhc2tfaWQYAyABKAkSNQoFYmVnaW4YBCABKAsyJC5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlCZWdpbkgAEjcKBnVwZGF0ZRgFIAEoCzIlLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eVVwZGF0ZUgAEjEKA2VuZBgGIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eUVuZEgAEjcKBnN0YXR1cxgHIAEoCzIlLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eVN0YXR1c0gAEjkKB3JlbGVhc2UYCCABKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlSZWxlYXNlSABCCAoGYWN0aW9uImsKFlJvb21BZ2VudFdvcmtzcGFjZUFyZWESCgoCaWQYASABKAkSNQoGYm91bmRzGAIgASgLMiUubHVtaW5nLnN0dWRpby52MS5BZ2VudEFjdGl2aXR5Qm91bmRzEg4KBmFjdGl2ZRgDIAEoCCK1AgoSUm9vbUFnZW50V29ya3NwYWNlEhAKCGFnZW50X2lkGAEgASgJEg8KB3Rhc2tfaWQYAiABKAkSEgoKZ2VuZXJhdGlvbhgDIAEoCRINCgVsYWJlbBgEIAEoCRIzCgVwaGFzZRgFIAEoDjIkLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eVBoYXNlEjcKBWFyZWFzGAYgAygLMigubHVtaW5nLnN0dWRpby52MS5Sb29tQWdlbnRXb3Jrc3BhY2VBcmVhEh8KEmV4cGlyZXNfYXRfdW5peF9tcxgHIAEoBEgAiAEBEjMKBXNjb3BlGAggASgLMiQubHVtaW5nLnN0dWRpby52MS5BZ2VudEFjdGl2aXR5U2NvcGVCFQoTX2V4cGlyZXNfYXRfdW5peF9tcyJSChZSb29tQWdlbnRXb3Jrc3BhY2VMaXN0EjgKCndvcmtzcGFjZXMYASADKAsyJC5sdW1pbmcuc3R1ZGlvLnYxLlJvb21BZ2VudFdvcmtzcGFjZSJiChJBZ2VudEFjdGl2aXR5RW5kZWQSEgoKZ2VuZXJhdGlvbhgBIAEoCRI4CgZyZWFzb24YAiABKA4yKC5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlFbmRSZWFzb24i1wEKG0NoYW5nZUFnZW50QWN0aXZpdHlSZXNwb25zZRI5Cgl3b3Jrc3BhY2UYASABKAsyJC5sdW1pbmcuc3R1ZGlvLnYxLlJvb21BZ2VudFdvcmtzcGFjZUgAEjUKBWVuZGVkGAIgASgLMiQubHVtaW5nLnN0dWRpby52MS5BZ2VudEFjdGl2aXR5RW5kZWRIABI8CghyZWplY3RlZBgDIAEoDjIoLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eVJlamVjdGlvbkgAQggKBnJlc3VsdCqpAQoUQm9hcmRSb29tR2VzdHVyZUtpbmQSJwojQk9BUkRfUk9PTV9HRVNUVVJFX0tJTkRfVU5TUEVDSUZJRUQQABIgChxCT0FSRF9ST09NX0dFU1RVUkVfS0lORF9NT1ZFEAESIgoeQk9BUkRfUk9PTV9HRVNUVVJFX0tJTkRfUkVTSVpFEAISIgoeQk9BUkRfUk9PTV9HRVNUVVJFX0tJTkRfUk9UQVRFEAMqxwEKE0JvYXJkUm9vbVRpbWVyUGhhc2USJgoiQk9BUkRfUk9PTV9USU1FUl9QSEFTRV9VTlNQRUNJRklFRBAAEh8KG0JPQVJEX1JPT01fVElNRVJfUEhBU0VfSURMRRABEiIKHkJPQVJEX1JPT01fVElNRVJfUEhBU0VfUlVOTklORxACEiEKHUJPQVJEX1JPT01fVElNRVJfUEhBU0VfUEFVU0VEEAMSIAocQk9BUkRfUk9PTV9USU1FUl9QSEFTRV9FTkRFRBAEKrcBChNCb2FyZFRpbWVyUmVqZWN0aW9uEiUKIUJPQVJEX1RJTUVSX1JFSkVDVElPTl9VTlNQRUNJRklFRBAAEiMKH0JPQVJEX1RJTUVSX1JFSkVDVElPTl9GT1JCSURERU4QARIoCiRCT0FSRF9USU1FUl9SRUpFQ1RJT05fSU5WQUxJRF9BQ1RJT04QAhIqCiZCT0FSRF9USU1FUl9SRUpFQ1RJT05fQ09NTUFORF9JRF9SRVVTRRADKqQBChJBZ2VudEFjdGl2aXR5UGhhc2USJAogQUdFTlRfQUNUSVZJVFlfUEhBU0VfVU5TUEVDSUZJRUQQABIiCh5BR0VOVF9BQ1RJVklUWV9QSEFTRV9QUkVQQVJJTkcQARIgChxBR0VOVF9BQ1RJVklUWV9QSEFTRV9XUklUSU5HEAISIgoeQUdFTlRfQUNUSVZJVFlfUEhBU0VfVkVSSUZZSU5HEAMqvwIKFkFnZW50QWN0aXZpdHlSZWplY3Rpb24SKAokQUdFTlRfQUNUSVZJVFlfUkVKRUNUSU9OX1VOU1BFQ0lGSUVEEAASJAogQUdFTlRfQUNUSVZJVFlfUkVKRUNUSU9OX0lOVkFMSUQQARIkCiBBR0VOVF9BQ1RJVklUWV9SRUpFQ1RJT05fT1ZFUkxBUBACEiUKIUFHRU5UX0FDVElWSVRZX1JFSkVDVElPTl9DQVBBQ0lUWRADEiYKIkFHRU5UX0FDVElWSVRZX1JFSkVDVElPTl9OT1RfRk9VTkQQBBIvCitBR0VOVF9BQ1RJVklUWV9SRUpFQ1RJT05fR0VORVJBVElPTl9DSEFOR0VEEAUSLworQUdFTlRfQUNUSVZJVFlfUkVKRUNUSU9OX1dPUktTUEFDRV9SRUxFQVNFRBAGKrsBChZBZ2VudEFjdGl2aXR5RW5kUmVhc29uEikKJUFHRU5UX0FDVElWSVRZX0VORF9SRUFTT05fVU5TUEVDSUZJRUQQABInCiNBR0VOVF9BQ1RJVklUWV9FTkRfUkVBU09OX0NPTVBMRVRFRBABEiYKIkFHRU5UX0FDVElWSVRZX0VORF9SRUFTT05fUkVMRUFTRUQQAhIlCiFBR0VOVF9BQ1RJVklUWV9FTkRfUkVBU09OX0VYUElSRUQQAzKsBQoQQm9hcmRSb29tU2VydmljZRJdCgxHZXRCb2FyZFJvb20SJS5sdW1pbmcuc3R1ZGlvLnYxLkdldEJvYXJkUm9vbVJlcXVlc3QaJi5sdW1pbmcuc3R1ZGlvLnYxLkdldEJvYXJkUm9vbVJlc3BvbnNlEnIKE1VwZGF0ZUJvYXJkUHJlc2VuY2USLC5sdW1pbmcuc3R1ZGlvLnYxLlVwZGF0ZUJvYXJkUHJlc2VuY2VSZXF1ZXN0Gi0ubHVtaW5nLnN0dWRpby52MS5VcGRhdGVCb2FyZFByZXNlbmNlUmVzcG9uc2USbwoSTGVhdmVCb2FyZFByZXNlbmNlEisubHVtaW5nLnN0dWRpby52MS5MZWF2ZUJvYXJkUHJlc2VuY2VSZXF1ZXN0GiwubHVtaW5nLnN0dWRpby52MS5MZWF2ZUJvYXJkUHJlc2VuY2VSZXNwb25zZRJpChBDaGFuZ2VCb2FyZFRpbWVyEikubHVtaW5nLnN0dWRpby52MS5DaGFuZ2VCb2FyZFRpbWVyUmVxdWVzdBoqLmx1bWluZy5zdHVkaW8udjEuQ2hhbmdlQm9hcmRUaW1lclJlc3BvbnNlEnUKFEdldEJvYXJkVGltZXJSZWNlaXB0Ei0ubHVtaW5nLnN0dWRpby52MS5HZXRCb2FyZFRpbWVyUmVjZWlwdFJlcXVlc3QaLi5sdW1pbmcuc3R1ZGlvLnYxLkdldEJvYXJkVGltZXJSZWNlaXB0UmVzcG9uc2UScgoTQ2hhbmdlQWdlbnRBY3Rpdml0eRIsLmx1bWluZy5zdHVkaW8udjEuQ2hhbmdlQWdlbnRBY3Rpdml0eVJlcXVlc3QaLS5sdW1pbmcuc3R1ZGlvLnYxLkNoYW5nZUFnZW50QWN0aXZpdHlSZXNwb25zZWIGcHJvdG8z", [file_luming_studio_v1_whiteboard_scene]);
+var file_luming_studio_v1_board_room_service = /* @__PURE__ */ fileDesc("CilsdW1pbmcvc3R1ZGlvL3YxL2JvYXJkX3Jvb21fc2VydmljZS5wcm90bxIQbHVtaW5nLnN0dWRpby52MSInChNHZXRCb2FyZFJvb21SZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJIkcKFEdldEJvYXJkUm9vbVJlc3BvbnNlEi8KBWV2ZW50GAEgASgLMiAubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21FdmVudCJPCg9Cb2FyZFJvb21DdXJzb3ISGAoQcm9vbV9pbnN0YW5jZV9pZBgBIAEoCRIVCghzZXF1ZW5jZRgCIAEoBEgAiAEBQgsKCV9zZXF1ZW5jZSJxChpXYWl0Qm9hcmRSb29tRXZlbnRzUmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRIPCgd2aWV3X2lkGAIgASgJEjAKBWFmdGVyGAMgASgLMiEubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21DdXJzb3IiTwobV2FpdEJvYXJkUm9vbUV2ZW50c1Jlc3BvbnNlEjAKBmV2ZW50cxgBIAMoCzIgLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tRXZlbnQicwocU3RyZWFtQm9hcmRSb29tRXZlbnRzUmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRIPCgd2aWV3X2lkGAIgASgJEjAKBWFmdGVyGAMgASgLMiEubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21DdXJzb3IiUAodU3RyZWFtQm9hcmRSb29tRXZlbnRzUmVzcG9uc2USLwoFZXZlbnQYASABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbUV2ZW50ImQKEUJvYXJkUm9vbVZpZXdwb3J0EhAKCGNlbnRlcl94GAEgASgBEhAKCGNlbnRlcl95GAIgASgBEgwKBHpvb20YAyABKAESDQoFd2lkdGgYBCABKAESDgoGaGVpZ2h0GAUgASgBIjwKF0JvYXJkUm9vbVBhcnRpY2lwYW50S2V5EhAKCGFjdG9yX2lkGAEgASgJEg8KB3ZpZXdfaWQYAiABKAkioQEKGEJvYXJkUm9vbUdlc3R1cmVHZW9tZXRyeRIRCglvYmplY3RfaWQYASABKAkSJgoZZXhwZWN0ZWRfZ2VvbWV0cnlfdmVyc2lvbhgCIAEoBEgAiAEBEiwKCGdlb21ldHJ5GAMgASgLMhoubHVtaW5nLnN0dWRpby52MS5HZW9tZXRyeUIcChpfZXhwZWN0ZWRfZ2VvbWV0cnlfdmVyc2lvbiKMAQoXQm9hcmRSb29tR2VzdHVyZVByZXZpZXcSNAoEa2luZBgBIAEoDjImLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tR2VzdHVyZUtpbmQSOwoHY2hhbmdlcxgCIAMoCzIqLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tR2VzdHVyZUdlb21ldHJ5Iv8DChRCb2FyZFJvb21QYXJ0aWNpcGFudBI2CgNrZXkYASABKAsyKS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVBhcnRpY2lwYW50S2V5EhQKDGRpc3BsYXlfbmFtZRgCIAEoCRIMCgRyb2xlGAMgASgJEhUKCHNlcXVlbmNlGAQgASgESACIAQESHwoSZXhwaXJlc19hdF91bml4X21zGAUgASgESAGIAQESJwoGY3Vyc29yGAYgASgLMhcubHVtaW5nLnN0dWRpby52MS5Qb2ludBI1Cgh2aWV3cG9ydBgHIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tVmlld3BvcnQSEQoJZm9sbG93aW5nGAggASgIEjoKB2dlc3R1cmUYCSABKAsyKS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbUdlc3R1cmVQcmV2aWV3EicKGmdlc3R1cmVfZXhwaXJlc19hdF91bml4X21zGAogASgESAKIAQESIAoTYWN0aXZpdHlfYXRfdW5peF9tcxgLIAEoBEgDiAEBQgsKCV9zZXF1ZW5jZUIVChNfZXhwaXJlc19hdF91bml4X21zQh0KG19nZXN0dXJlX2V4cGlyZXNfYXRfdW5peF9tc0IWChRfYWN0aXZpdHlfYXRfdW5peF9tcyKSAgoaVXBkYXRlQm9hcmRQcmVzZW5jZVJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSDwoHdmlld19pZBgCIAEoCRIVCghzZXF1ZW5jZRgDIAEoBEgAiAEBEicKBmN1cnNvchgEIAEoCzIXLmx1bWluZy5zdHVkaW8udjEuUG9pbnQSNQoIdmlld3BvcnQYBSABKAsyIy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVZpZXdwb3J0EhEKCWZvbGxvd2luZxgGIAEoCBI6CgdnZXN0dXJlGAcgASgLMikubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21HZXN0dXJlUHJldmlld0ILCglfc2VxdWVuY2UiLwobVXBkYXRlQm9hcmRQcmVzZW5jZVJlc3BvbnNlEhAKCGFjY2VwdGVkGAEgASgIImIKGUxlYXZlQm9hcmRQcmVzZW5jZVJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSDwoHdmlld19pZBgCIAEoCRIVCghzZXF1ZW5jZRgDIAEoBEgAiAEBQgsKCV9zZXF1ZW5jZSIuChpMZWF2ZUJvYXJkUHJlc2VuY2VSZXNwb25zZRIQCghhY2NlcHRlZBgBIAEoCCKoAwoRQm9hcmRSb29tU25hcHNob3QSEAoIYWN0b3JfaWQYASABKAkSEAoIY2FuX2VkaXQYAiABKAgSGwoOYm9hcmRfcmV2aXNpb24YAyABKARIAIgBARI8CgxwYXJ0aWNpcGFudHMYBCADKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVBhcnRpY2lwYW50Ei8KBXRpbWVyGAUgASgLMiAubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21UaW1lchI+ChBhZ2VudF93b3Jrc3BhY2VzGAYgAygLMiQubHVtaW5nLnN0dWRpby52MS5Sb29tQWdlbnRXb3Jrc3BhY2USIgoaY2FuX3JlbGVhc2VfYWdlbnRfYWN0aXZpdHkYByABKAgSHQoQZmVlZGJhY2tfdmVyc2lvbhgIIAEoBEgBiAEBEiAKE3N1Z2dlc3Rpb25zX3ZlcnNpb24YCSABKARIAogBAUIRCg9fYm9hcmRfcmV2aXNpb25CEwoRX2ZlZWRiYWNrX3ZlcnNpb25CFgoUX3N1Z2dlc3Rpb25zX3ZlcnNpb24ijQEKFUJvYXJkUm9vbVBhcnRpY2lwYW50cxI3Cgd1cHNlcnRzGAEgAygLMiYubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21QYXJ0aWNpcGFudBI7CghyZW1vdmFscxgCIAMoCzIpLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tUGFydGljaXBhbnRLZXki0wEKF0JvYXJkUm9vbUNvbnRlbnRDaGFuZ2VkEhsKDmJvYXJkX3JldmlzaW9uGAEgASgESACIAQESGgoSY2hhbmdlZF9vYmplY3RfaWRzGAIgAygJEhoKEnJlbW92ZWRfb2JqZWN0X2lkcxgDIAMoCRIVCg1yZWZyZXNoX3NjZW5lGAQgASgIEjkKD2NoYW5nZWRfb2JqZWN0cxgFIAMoCzIgLmx1bWluZy5zdHVkaW8udjEuT2JqZWN0TWV0YWRhdGFCEQoPX2JvYXJkX3JldmlzaW9uIhUKE0JvYXJkUm9vbUFjY2Vzc0xvc3QiPgoaQm9hcmRSb29tRGlzY3Vzc2lvbkNoYW5nZWQSFAoHdmVyc2lvbhgBIAEoBEgAiAEBQgoKCF92ZXJzaW9uIrMFCg5Cb2FyZFJvb21FdmVudBIQCghib2FyZF9pZBgBIAEoCRIYChByb29tX2luc3RhbmNlX2lkGAIgASgJEhUKCHNlcXVlbmNlGAMgASgESAGIAQESIAoTc2VydmVyX3RpbWVfdW5peF9tcxgEIAEoBEgCiAEBEjcKCHNuYXBzaG90GAUgASgLMiMubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21TbmFwc2hvdEgAEj8KDHBhcnRpY2lwYW50cxgGIAEoCzInLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tUGFydGljaXBhbnRzSAASMQoFdGltZXIYByABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVRpbWVySAASRAoPY29udGVudF9jaGFuZ2VkGAggASgLMikubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21Db250ZW50Q2hhbmdlZEgAEjwKC2FjY2Vzc19sb3N0GAkgASgLMiUubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21BY2Nlc3NMb3N0SAASRAoQYWdlbnRfd29ya3NwYWNlcxgKIAEoCzIoLmx1bWluZy5zdHVkaW8udjEuUm9vbUFnZW50V29ya3NwYWNlTGlzdEgAEkgKEGZlZWRiYWNrX2NoYW5nZWQYCyABKAsyLC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbURpc2N1c3Npb25DaGFuZ2VkSAASSwoTc3VnZ2VzdGlvbnNfY2hhbmdlZBgMIAEoCzIsLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tRGlzY3Vzc2lvbkNoYW5nZWRIAEIJCgdwYXlsb2FkQgsKCV9zZXF1ZW5jZUIWChRfc2VydmVyX3RpbWVfdW5peF9tcyLHAQoOQm9hcmRSb29tVGltZXISFAoHdmVyc2lvbhgBIAEoBEgAiAEBEjQKBXBoYXNlGAIgASgOMiUubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21UaW1lclBoYXNlEhMKC2R1cmF0aW9uX21zGAMgASgNEh0KEGRlYWRsaW5lX3VuaXhfbXMYBCABKARIAYgBARIUCgxyZW1haW5pbmdfbXMYBSABKA1CCgoIX3ZlcnNpb25CEwoRX2RlYWRsaW5lX3VuaXhfbXMiEgoQQm9hcmRUaW1lckFjdGlvbiKLAwoXQ2hhbmdlQm9hcmRUaW1lclJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCRIdChBleHBlY3RlZF92ZXJzaW9uGAMgASgESAGIAQESMwoFc3RhcnQYBCABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkVGltZXJBY3Rpb25IABIzCgVwYXVzZRgFIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuQm9hcmRUaW1lckFjdGlvbkgAEjQKBnJlc3VtZRgGIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuQm9hcmRUaW1lckFjdGlvbkgAEjMKBXJlc2V0GAcgASgLMiIubHVtaW5nLnN0dWRpby52MS5Cb2FyZFRpbWVyQWN0aW9uSAASGQoPc2V0X2R1cmF0aW9uX21zGAggASgNSAASHAoSYWRqdXN0X2R1cmF0aW9uX21zGAkgASgRSABCCAoGYWN0aW9uQhMKEV9leHBlY3RlZF92ZXJzaW9uIkQKEUJvYXJkVGltZXJBcHBsaWVkEi8KBXRpbWVyGAEgASgLMiAubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21UaW1lciJFChJCb2FyZFRpbWVyQ29uZmxpY3QSLwoFdGltZXIYASABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVRpbWVyIksKEkJvYXJkVGltZXJSZWplY3RlZBI1CgZyZWFzb24YASABKA4yJS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkVGltZXJSZWplY3Rpb24i8AEKEUJvYXJkVGltZXJSZWNlaXB0EhAKCGJvYXJkX2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkSNgoHYXBwbGllZBgDIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQm9hcmRUaW1lckFwcGxpZWRIABI4Cghjb25mbGljdBgEIAEoCzIkLmx1bWluZy5zdHVkaW8udjEuQm9hcmRUaW1lckNvbmZsaWN0SAASOAoIcmVqZWN0ZWQYBSABKAsyJC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkVGltZXJSZWplY3RlZEgAQgkKB291dGNvbWUiigEKGENoYW5nZUJvYXJkVGltZXJSZXNwb25zZRI0CgdyZWNlaXB0GAEgASgLMiMubHVtaW5nLnN0dWRpby52MS5Cb2FyZFRpbWVyUmVjZWlwdBIgChNzZXJ2ZXJfdGltZV91bml4X21zGAIgASgESACIAQFCFgoUX3NlcnZlcl90aW1lX3VuaXhfbXMiQwobR2V0Qm9hcmRUaW1lclJlY2VpcHRSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkijgEKHEdldEJvYXJkVGltZXJSZWNlaXB0UmVzcG9uc2USNAoHcmVjZWlwdBgBIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQm9hcmRUaW1lclJlY2VpcHQSIAoTc2VydmVyX3RpbWVfdW5peF9tcxgCIAEoBEgAiAEBQhYKFF9zZXJ2ZXJfdGltZV91bml4X21zIkoKE0FnZW50QWN0aXZpdHlCb3VuZHMSCQoBeBgBIAEoARIJCgF5GAIgASgBEg0KBXdpZHRoGAMgASgBEg4KBmhlaWdodBgEIAEoASIuChhBZ2VudEFjdGl2aXR5T2JqZWN0U2NvcGUSEgoKb2JqZWN0X2lkcxgBIAMoCSKUAQoSQWdlbnRBY3Rpdml0eVNjb3BlEj0KB29iamVjdHMYASABKAsyKi5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlPYmplY3RTY29wZUgAEjUKBGFyZWEYAiABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlCb3VuZHNIAEIICgZ0YXJnZXQidQoSQWdlbnRBY3Rpdml0eUJlZ2luEjMKBXNjb3BlGAEgASgLMiQubHVtaW5nLnN0dWRpby52MS5BZ2VudEFjdGl2aXR5U2NvcGUSDQoFbGFiZWwYAiABKAkSGwoTcHJldmlvdXNfZ2VuZXJhdGlvbhgDIAEoCSJ5ChNBZ2VudEFjdGl2aXR5VXBkYXRlEhIKCmdlbmVyYXRpb24YASABKAkSMwoFcGhhc2UYAiABKA4yJC5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlQaGFzZRIZChFhY3RpdmVfb2JqZWN0X2lkcxgDIAMoCSImChBBZ2VudEFjdGl2aXR5RW5kEhIKCmdlbmVyYXRpb24YASABKAkiFQoTQWdlbnRBY3Rpdml0eVN0YXR1cyIqChRBZ2VudEFjdGl2aXR5UmVsZWFzZRISCgpnZW5lcmF0aW9uGAEgASgJIvICChpDaGFuZ2VBZ2VudEFjdGl2aXR5UmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRIQCghhZ2VudF9pZBgCIAEoCRIPCgd0YXNrX2lkGAMgASgJEjUKBWJlZ2luGAQgASgLMiQubHVtaW5nLnN0dWRpby52MS5BZ2VudEFjdGl2aXR5QmVnaW5IABI3CgZ1cGRhdGUYBSABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlVcGRhdGVIABIxCgNlbmQYBiABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlFbmRIABI3CgZzdGF0dXMYByABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlTdGF0dXNIABI5CgdyZWxlYXNlGAggASgLMiYubHVtaW5nLnN0dWRpby52MS5BZ2VudEFjdGl2aXR5UmVsZWFzZUgAQggKBmFjdGlvbiJrChZSb29tQWdlbnRXb3Jrc3BhY2VBcmVhEgoKAmlkGAEgASgJEjUKBmJvdW5kcxgCIAEoCzIlLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eUJvdW5kcxIOCgZhY3RpdmUYAyABKAgitQIKElJvb21BZ2VudFdvcmtzcGFjZRIQCghhZ2VudF9pZBgBIAEoCRIPCgd0YXNrX2lkGAIgASgJEhIKCmdlbmVyYXRpb24YAyABKAkSDQoFbGFiZWwYBCABKAkSMwoFcGhhc2UYBSABKA4yJC5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlQaGFzZRI3CgVhcmVhcxgGIAMoCzIoLmx1bWluZy5zdHVkaW8udjEuUm9vbUFnZW50V29ya3NwYWNlQXJlYRIfChJleHBpcmVzX2F0X3VuaXhfbXMYByABKARIAIgBARIzCgVzY29wZRgIIAEoCzIkLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eVNjb3BlQhUKE19leHBpcmVzX2F0X3VuaXhfbXMiUgoWUm9vbUFnZW50V29ya3NwYWNlTGlzdBI4Cgp3b3Jrc3BhY2VzGAEgAygLMiQubHVtaW5nLnN0dWRpby52MS5Sb29tQWdlbnRXb3Jrc3BhY2UiYgoSQWdlbnRBY3Rpdml0eUVuZGVkEhIKCmdlbmVyYXRpb24YASABKAkSOAoGcmVhc29uGAIgASgOMigubHVtaW5nLnN0dWRpby52MS5BZ2VudEFjdGl2aXR5RW5kUmVhc29uItcBChtDaGFuZ2VBZ2VudEFjdGl2aXR5UmVzcG9uc2USOQoJd29ya3NwYWNlGAEgASgLMiQubHVtaW5nLnN0dWRpby52MS5Sb29tQWdlbnRXb3Jrc3BhY2VIABI1CgVlbmRlZBgCIAEoCzIkLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eUVuZGVkSAASPAoIcmVqZWN0ZWQYAyABKA4yKC5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlSZWplY3Rpb25IAEIICgZyZXN1bHQqqQEKFEJvYXJkUm9vbUdlc3R1cmVLaW5kEicKI0JPQVJEX1JPT01fR0VTVFVSRV9LSU5EX1VOU1BFQ0lGSUVEEAASIAocQk9BUkRfUk9PTV9HRVNUVVJFX0tJTkRfTU9WRRABEiIKHkJPQVJEX1JPT01fR0VTVFVSRV9LSU5EX1JFU0laRRACEiIKHkJPQVJEX1JPT01fR0VTVFVSRV9LSU5EX1JPVEFURRADKscBChNCb2FyZFJvb21UaW1lclBoYXNlEiYKIkJPQVJEX1JPT01fVElNRVJfUEhBU0VfVU5TUEVDSUZJRUQQABIfChtCT0FSRF9ST09NX1RJTUVSX1BIQVNFX0lETEUQARIiCh5CT0FSRF9ST09NX1RJTUVSX1BIQVNFX1JVTk5JTkcQAhIhCh1CT0FSRF9ST09NX1RJTUVSX1BIQVNFX1BBVVNFRBADEiAKHEJPQVJEX1JPT01fVElNRVJfUEhBU0VfRU5ERUQQBCq3AQoTQm9hcmRUaW1lclJlamVjdGlvbhIlCiFCT0FSRF9USU1FUl9SRUpFQ1RJT05fVU5TUEVDSUZJRUQQABIjCh9CT0FSRF9USU1FUl9SRUpFQ1RJT05fRk9SQklEREVOEAESKAokQk9BUkRfVElNRVJfUkVKRUNUSU9OX0lOVkFMSURfQUNUSU9OEAISKgomQk9BUkRfVElNRVJfUkVKRUNUSU9OX0NPTU1BTkRfSURfUkVVU0UQAyqkAQoSQWdlbnRBY3Rpdml0eVBoYXNlEiQKIEFHRU5UX0FDVElWSVRZX1BIQVNFX1VOU1BFQ0lGSUVEEAASIgoeQUdFTlRfQUNUSVZJVFlfUEhBU0VfUFJFUEFSSU5HEAESIAocQUdFTlRfQUNUSVZJVFlfUEhBU0VfV1JJVElORxACEiIKHkFHRU5UX0FDVElWSVRZX1BIQVNFX1ZFUklGWUlORxADKr8CChZBZ2VudEFjdGl2aXR5UmVqZWN0aW9uEigKJEFHRU5UX0FDVElWSVRZX1JFSkVDVElPTl9VTlNQRUNJRklFRBAAEiQKIEFHRU5UX0FDVElWSVRZX1JFSkVDVElPTl9JTlZBTElEEAESJAogQUdFTlRfQUNUSVZJVFlfUkVKRUNUSU9OX09WRVJMQVAQAhIlCiFBR0VOVF9BQ1RJVklUWV9SRUpFQ1RJT05fQ0FQQUNJVFkQAxImCiJBR0VOVF9BQ1RJVklUWV9SRUpFQ1RJT05fTk9UX0ZPVU5EEAQSLworQUdFTlRfQUNUSVZJVFlfUkVKRUNUSU9OX0dFTkVSQVRJT05fQ0hBTkdFRBAFEi8KK0FHRU5UX0FDVElWSVRZX1JFSkVDVElPTl9XT1JLU1BBQ0VfUkVMRUFTRUQQBiq7AQoWQWdlbnRBY3Rpdml0eUVuZFJlYXNvbhIpCiVBR0VOVF9BQ1RJVklUWV9FTkRfUkVBU09OX1VOU1BFQ0lGSUVEEAASJwojQUdFTlRfQUNUSVZJVFlfRU5EX1JFQVNPTl9DT01QTEVURUQQARImCiJBR0VOVF9BQ1RJVklUWV9FTkRfUkVBU09OX1JFTEVBU0VEEAISJQohQUdFTlRfQUNUSVZJVFlfRU5EX1JFQVNPTl9FWFBJUkVEEAMynAcKEEJvYXJkUm9vbVNlcnZpY2USXQoMR2V0Qm9hcmRSb29tEiUubHVtaW5nLnN0dWRpby52MS5HZXRCb2FyZFJvb21SZXF1ZXN0GiYubHVtaW5nLnN0dWRpby52MS5HZXRCb2FyZFJvb21SZXNwb25zZRJyChNXYWl0Qm9hcmRSb29tRXZlbnRzEiwubHVtaW5nLnN0dWRpby52MS5XYWl0Qm9hcmRSb29tRXZlbnRzUmVxdWVzdBotLmx1bWluZy5zdHVkaW8udjEuV2FpdEJvYXJkUm9vbUV2ZW50c1Jlc3BvbnNlEnoKFVN0cmVhbUJvYXJkUm9vbUV2ZW50cxIuLmx1bWluZy5zdHVkaW8udjEuU3RyZWFtQm9hcmRSb29tRXZlbnRzUmVxdWVzdBovLmx1bWluZy5zdHVkaW8udjEuU3RyZWFtQm9hcmRSb29tRXZlbnRzUmVzcG9uc2UwARJyChNVcGRhdGVCb2FyZFByZXNlbmNlEiwubHVtaW5nLnN0dWRpby52MS5VcGRhdGVCb2FyZFByZXNlbmNlUmVxdWVzdBotLmx1bWluZy5zdHVkaW8udjEuVXBkYXRlQm9hcmRQcmVzZW5jZVJlc3BvbnNlEm8KEkxlYXZlQm9hcmRQcmVzZW5jZRIrLmx1bWluZy5zdHVkaW8udjEuTGVhdmVCb2FyZFByZXNlbmNlUmVxdWVzdBosLmx1bWluZy5zdHVkaW8udjEuTGVhdmVCb2FyZFByZXNlbmNlUmVzcG9uc2USaQoQQ2hhbmdlQm9hcmRUaW1lchIpLmx1bWluZy5zdHVkaW8udjEuQ2hhbmdlQm9hcmRUaW1lclJlcXVlc3QaKi5sdW1pbmcuc3R1ZGlvLnYxLkNoYW5nZUJvYXJkVGltZXJSZXNwb25zZRJ1ChRHZXRCb2FyZFRpbWVyUmVjZWlwdBItLmx1bWluZy5zdHVkaW8udjEuR2V0Qm9hcmRUaW1lclJlY2VpcHRSZXF1ZXN0Gi4ubHVtaW5nLnN0dWRpby52MS5HZXRCb2FyZFRpbWVyUmVjZWlwdFJlc3BvbnNlEnIKE0NoYW5nZUFnZW50QWN0aXZpdHkSLC5sdW1pbmcuc3R1ZGlvLnYxLkNoYW5nZUFnZW50QWN0aXZpdHlSZXF1ZXN0Gi0ubHVtaW5nLnN0dWRpby52MS5DaGFuZ2VBZ2VudEFjdGl2aXR5UmVzcG9uc2ViBnByb3RvMw", [file_luming_studio_v1_whiteboard_scene]);
 var BoardRoomGestureKindSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_board_room_service, 0);
 var BoardRoomGestureKind = /* @__PURE__ */ tsEnum(BoardRoomGestureKindSchema);
 var BoardRoomTimerPhaseSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_board_room_service, 1);
@@ -14766,7 +15099,7 @@ var AgentActivityEndReason = /* @__PURE__ */ tsEnum(AgentActivityEndReasonSchema
 var BoardRoomService = /* @__PURE__ */ serviceDesc(file_luming_studio_v1_board_room_service, 0);
 
 // ../../packages/contracts/dist/proto/luming/studio/v1/board_sharing_service_pb.js
-var file_luming_studio_v1_board_sharing_service = /* @__PURE__ */ fileDesc("CixsdW1pbmcvc3R1ZGlvL3YxL2JvYXJkX3NoYXJpbmdfc2VydmljZS5wcm90bxIQbHVtaW5nLnN0dWRpby52MSIqChZHZXRCb2FyZFNoYXJpbmdSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJIkoKF0dldEJvYXJkU2hhcmluZ1Jlc3BvbnNlEi8KB3NoYXJpbmcYASABKAsyHi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU2hhcmluZyKCAwoMQm9hcmRTaGFyaW5nEhAKCGJvYXJkX2lkGAEgASgJEg8KB2VuYWJsZWQYAiABKAgSLQoFc2NvcGUYAyABKA4yHi5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdTY29wZRIUCgd2ZXJzaW9uGAQgASgESACIAQESKwoEcm9sZRgFIAEoDjIdLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ1JvbGUSEAoIY2FuX2VkaXQYBiABKAgSEwoLY2FuX2NvbW1lbnQYByABKAgSLAoFbGlua3MYCCADKAsyHS5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdMaW5rEjAKB21lbWJlcnMYCSADKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdNZW1iZXISEgoKbWVtYmVyX3VybBgKIAEoCRIfChJvd25lcl9kaXNwbGF5X25hbWUYCyABKAlIAYgBAUIKCghfdmVyc2lvbkIVChNfb3duZXJfZGlzcGxheV9uYW1lIlgKC1NoYXJpbmdMaW5rEisKBHJvbGUYASABKA4yHS5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdSb2xlEg8KB2VuYWJsZWQYAiABKAgSCwoDdXJsGAMgASgJIp0BCg1TaGFyaW5nTWVtYmVyEhAKCGFjdG9yX2lkGAEgASgJEgwKBG5hbWUYAiABKAkSKwoEcm9sZRgDIAEoDjIdLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ1JvbGUSDwoHcmVtb3ZlZBgEIAEoCBIOCgZhY3RpdmUYBSABKAgSEwoGb25saW5lGAYgASgISACIAQFCCQoHX29ubGluZSKEBQoZVXBkYXRlQm9hcmRTaGFyaW5nUmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJEh0KEGV4cGVjdGVkX3ZlcnNpb24YAyABKARIAYgBARI2CglzZXRfc2NvcGUYBCABKAsyIS5sdW1pbmcuc3R1ZGlvLnYxLlNldFNoYXJpbmdTY29wZUgAEjIKBHN0b3AYBSABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLlN0b3BCb2FyZFNoYXJpbmdIABJACg5zZXRfaW52aXRhdGlvbhgGIAEoCzImLmx1bWluZy5zdHVkaW8udjEuU2V0U2hhcmluZ0ludml0YXRpb25IABJEChByZXNldF9pbnZpdGF0aW9uGAcgASgLMigubHVtaW5nLnN0dWRpby52MS5SZXNldFNoYXJpbmdJbnZpdGF0aW9uSAASRwoSY2hhbmdlX21lbWJlcl9yb2xlGAggASgLMikubHVtaW5nLnN0dWRpby52MS5DaGFuZ2VTaGFyaW5nTWVtYmVyUm9sZUgAEj4KDXJlbW92ZV9tZW1iZXIYCSABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdNZW1iZXJUYXJnZXRIABJDCg5yZXN0b3JlX21lbWJlchgKIAEoCzIpLmx1bWluZy5zdHVkaW8udjEuQ2hhbmdlU2hhcmluZ01lbWJlclJvbGVIABI+Cg1mb3JnZXRfbWVtYmVyGAsgASgLMiUubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nTWVtYmVyVGFyZ2V0SABCCwoJb3BlcmF0aW9uQhMKEV9leHBlY3RlZF92ZXJzaW9uIkAKD1NldFNoYXJpbmdTY29wZRItCgVzY29wZRgBIAEoDjIeLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ1Njb3BlIhIKEFN0b3BCb2FyZFNoYXJpbmciVAoUU2V0U2hhcmluZ0ludml0YXRpb24SKwoEcm9sZRgBIAEoDjIdLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ1JvbGUSDwoHZW5hYmxlZBgCIAEoCCJFChZSZXNldFNoYXJpbmdJbnZpdGF0aW9uEisKBHJvbGUYASABKA4yHS5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdSb2xlIlgKF0NoYW5nZVNoYXJpbmdNZW1iZXJSb2xlEhAKCGFjdG9yX2lkGAEgASgJEisKBHJvbGUYAiABKA4yHS5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdSb2xlIicKE1NoYXJpbmdNZW1iZXJUYXJnZXQSEAoIYWN0b3JfaWQYASABKAkiVgoaVXBkYXRlQm9hcmRTaGFyaW5nUmVzcG9uc2USOAoHcmVjZWlwdBgBIAEoCzInLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ0NvbW1hbmRSZWNlaXB0IkUKHUdldEJvYXJkU2hhcmluZ1JlY2VpcHRSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkiWgoeR2V0Qm9hcmRTaGFyaW5nUmVjZWlwdFJlc3BvbnNlEjgKB3JlY2VpcHQYASABKAsyJy5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdDb21tYW5kUmVjZWlwdCLCAQoVU2hhcmluZ0NvbW1hbmRSZWNlaXB0EhAKCGJvYXJkX2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkSOgoHYXBwbGllZBgDIAEoCzInLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ0NvbW1hbmRBcHBsaWVkSAASPAoIcmVqZWN0ZWQYBCABKAsyKC5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdDb21tYW5kUmVqZWN0ZWRIAEIJCgdvdXRjb21lIjkKFVNoYXJpbmdDb21tYW5kQXBwbGllZBIUCgd2ZXJzaW9uGAEgASgESACIAQFCCgoIX3ZlcnNpb24iUgoWU2hhcmluZ0NvbW1hbmRSZWplY3RlZBI4CgZyZWFzb24YASABKA4yKC5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdSZWplY3Rpb25SZWFzb24iSwodSW5zcGVjdEJvYXJkSW52aXRhdGlvblJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSGAoQaW52aXRhdGlvbl90b2tlbhgCIAEoCSLMAQoeSW5zcGVjdEJvYXJkSW52aXRhdGlvblJlc3BvbnNlEjUKCmludml0YXRpb24YASABKAsyIS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkSW52aXRhdGlvbhI7CglyZWplY3Rpb24YAiABKA4yKC5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdSZWplY3Rpb25SZWFzb24SNgoHc2Vzc2lvbhgDIAEoCzIlLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ0d1ZXN0U2Vzc2lvbiJfCg9Cb2FyZEludml0YXRpb24SEAoIYm9hcmRfaWQYASABKAkSDQoFdGl0bGUYAiABKAkSKwoEcm9sZRgDIAEoDjIdLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ1JvbGUiVgoaSm9pbkJvYXJkSW52aXRhdGlvblJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSGAoQaW52aXRhdGlvbl90b2tlbhgCIAEoCRIMCgRuYW1lGAMgASgJIpIBChtKb2luQm9hcmRJbnZpdGF0aW9uUmVzcG9uc2USNgoHc2Vzc2lvbhgBIAEoCzIlLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ0d1ZXN0U2Vzc2lvbhI7CglyZWplY3Rpb24YAiABKA4yKC5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdSZWplY3Rpb25SZWFzb24ivQEKE1NoYXJpbmdHdWVzdFNlc3Npb24SEAoIYm9hcmRfaWQYASABKAkSEAoIYWN0b3JfaWQYAiABKAkSDAoEbmFtZRgDIAEoCRIrCgRyb2xlGAQgASgOMh0ubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nUm9sZRIUCgd2ZXJzaW9uGAUgASgESACIAQESEAoIY2FuX2VkaXQYBiABKAgSEwoLY2FuX2NvbW1lbnQYByABKAhCCgoIX3ZlcnNpb24qkQEKC1NoYXJpbmdSb2xlEhwKGFNIQVJJTkdfUk9MRV9VTlNQRUNJRklFRBAAEhYKElNIQVJJTkdfUk9MRV9PV05FUhABEhcKE1NIQVJJTkdfUk9MRV9FRElUT1IQAhIaChZTSEFSSU5HX1JPTEVfQ09NTUVOVEVSEAMSFwoTU0hBUklOR19ST0xFX1ZJRVdFUhAEKl0KDFNoYXJpbmdTY29wZRIdChlTSEFSSU5HX1NDT1BFX1VOU1BFQ0lGSUVEEAASFwoTU0hBUklOR19TQ09QRV9MT0NBTBABEhUKEVNIQVJJTkdfU0NPUEVfTEFOEAIq3gMKFlNoYXJpbmdSZWplY3Rpb25SZWFzb24SKAokU0hBUklOR19SRUpFQ1RJT05fUkVBU09OX1VOU1BFQ0lGSUVEEAASJgoiU0hBUklOR19SRUpFQ1RJT05fUkVBU09OX0ZPUkJJRERFThABEiwKKFNIQVJJTkdfUkVKRUNUSU9OX1JFQVNPTl9WRVJTSU9OX0NIQU5HRUQQAhItCilTSEFSSU5HX1JFSkVDVElPTl9SRUFTT05fQ09NTUFORF9JRF9SRVVTRRADEiwKKFNIQVJJTkdfUkVKRUNUSU9OX1JFQVNPTl9JTlZBTElEX0NPTU1BTkQQBBIsCihTSEFSSU5HX1JFSkVDVElPTl9SRUFTT05fTEFOX1VOQVZBSUxBQkxFEAUSMwovU0hBUklOR19SRUpFQ1RJT05fUkVBU09OX0lOVklUQVRJT05fVU5BVkFJTEFCTEUQBhInCiNTSEFSSU5HX1JFSkVDVElPTl9SRUFTT05fTkFNRV9UQUtFThAHEi8KK1NIQVJJTkdfUkVKRUNUSU9OX1JFQVNPTl9NRU1CRVJfVU5BVkFJTEFCTEUQCBIqCiZTSEFSSU5HX1JFSkVDVElPTl9SRUFTT05fUk9MRV9ESVNBQkxFRBAJMtwEChNCb2FyZFNoYXJpbmdTZXJ2aWNlEmYKD0dldEJvYXJkU2hhcmluZxIoLmx1bWluZy5zdHVkaW8udjEuR2V0Qm9hcmRTaGFyaW5nUmVxdWVzdBopLmx1bWluZy5zdHVkaW8udjEuR2V0Qm9hcmRTaGFyaW5nUmVzcG9uc2USbwoSVXBkYXRlQm9hcmRTaGFyaW5nEisubHVtaW5nLnN0dWRpby52MS5VcGRhdGVCb2FyZFNoYXJpbmdSZXF1ZXN0GiwubHVtaW5nLnN0dWRpby52MS5VcGRhdGVCb2FyZFNoYXJpbmdSZXNwb25zZRJ7ChZHZXRCb2FyZFNoYXJpbmdSZWNlaXB0Ei8ubHVtaW5nLnN0dWRpby52MS5HZXRCb2FyZFNoYXJpbmdSZWNlaXB0UmVxdWVzdBowLmx1bWluZy5zdHVkaW8udjEuR2V0Qm9hcmRTaGFyaW5nUmVjZWlwdFJlc3BvbnNlEnsKFkluc3BlY3RCb2FyZEludml0YXRpb24SLy5sdW1pbmcuc3R1ZGlvLnYxLkluc3BlY3RCb2FyZEludml0YXRpb25SZXF1ZXN0GjAubHVtaW5nLnN0dWRpby52MS5JbnNwZWN0Qm9hcmRJbnZpdGF0aW9uUmVzcG9uc2UScgoTSm9pbkJvYXJkSW52aXRhdGlvbhIsLmx1bWluZy5zdHVkaW8udjEuSm9pbkJvYXJkSW52aXRhdGlvblJlcXVlc3QaLS5sdW1pbmcuc3R1ZGlvLnYxLkpvaW5Cb2FyZEludml0YXRpb25SZXNwb25zZWIGcHJvdG8z");
+var file_luming_studio_v1_board_sharing_service = /* @__PURE__ */ fileDesc("CixsdW1pbmcvc3R1ZGlvL3YxL2JvYXJkX3NoYXJpbmdfc2VydmljZS5wcm90bxIQbHVtaW5nLnN0dWRpby52MSIqChZHZXRCb2FyZFNoYXJpbmdSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJIkoKF0dldEJvYXJkU2hhcmluZ1Jlc3BvbnNlEi8KB3NoYXJpbmcYASABKAsyHi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU2hhcmluZyKCAwoMQm9hcmRTaGFyaW5nEhAKCGJvYXJkX2lkGAEgASgJEg8KB2VuYWJsZWQYAiABKAgSLQoFc2NvcGUYAyABKA4yHi5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdTY29wZRIUCgd2ZXJzaW9uGAQgASgESACIAQESKwoEcm9sZRgFIAEoDjIdLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ1JvbGUSEAoIY2FuX2VkaXQYBiABKAgSEwoLY2FuX2NvbW1lbnQYByABKAgSLAoFbGlua3MYCCADKAsyHS5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdMaW5rEjAKB21lbWJlcnMYCSADKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdNZW1iZXISEgoKbWVtYmVyX3VybBgKIAEoCRIfChJvd25lcl9kaXNwbGF5X25hbWUYCyABKAlIAYgBAUIKCghfdmVyc2lvbkIVChNfb3duZXJfZGlzcGxheV9uYW1lIlgKC1NoYXJpbmdMaW5rEisKBHJvbGUYASABKA4yHS5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdSb2xlEg8KB2VuYWJsZWQYAiABKAgSCwoDdXJsGAMgASgJItcBCg1TaGFyaW5nTWVtYmVyEhAKCGFjdG9yX2lkGAEgASgJEgwKBG5hbWUYAiABKAkSKwoEcm9sZRgDIAEoDjIdLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ1JvbGUSDwoHcmVtb3ZlZBgEIAEoCBIOCgZhY3RpdmUYBSABKAgSEwoGb25saW5lGAYgASgISACIAQESIAoTbGFzdF9zZWVuX2F0X21pbGxpcxgHIAEoBEgBiAEBQgkKB19vbmxpbmVCFgoUX2xhc3Rfc2Vlbl9hdF9taWxsaXMihAUKGVVwZGF0ZUJvYXJkU2hhcmluZ1JlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCRIdChBleHBlY3RlZF92ZXJzaW9uGAMgASgESAGIAQESNgoJc2V0X3Njb3BlGAQgASgLMiEubHVtaW5nLnN0dWRpby52MS5TZXRTaGFyaW5nU2NvcGVIABIyCgRzdG9wGAUgASgLMiIubHVtaW5nLnN0dWRpby52MS5TdG9wQm9hcmRTaGFyaW5nSAASQAoOc2V0X2ludml0YXRpb24YBiABKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLlNldFNoYXJpbmdJbnZpdGF0aW9uSAASRAoQcmVzZXRfaW52aXRhdGlvbhgHIAEoCzIoLmx1bWluZy5zdHVkaW8udjEuUmVzZXRTaGFyaW5nSW52aXRhdGlvbkgAEkcKEmNoYW5nZV9tZW1iZXJfcm9sZRgIIAEoCzIpLmx1bWluZy5zdHVkaW8udjEuQ2hhbmdlU2hhcmluZ01lbWJlclJvbGVIABI+Cg1yZW1vdmVfbWVtYmVyGAkgASgLMiUubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nTWVtYmVyVGFyZ2V0SAASQwoOcmVzdG9yZV9tZW1iZXIYCiABKAsyKS5sdW1pbmcuc3R1ZGlvLnYxLkNoYW5nZVNoYXJpbmdNZW1iZXJSb2xlSAASPgoNZm9yZ2V0X21lbWJlchgLIAEoCzIlLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ01lbWJlclRhcmdldEgAQgsKCW9wZXJhdGlvbkITChFfZXhwZWN0ZWRfdmVyc2lvbiJACg9TZXRTaGFyaW5nU2NvcGUSLQoFc2NvcGUYASABKA4yHi5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdTY29wZSISChBTdG9wQm9hcmRTaGFyaW5nIlQKFFNldFNoYXJpbmdJbnZpdGF0aW9uEisKBHJvbGUYASABKA4yHS5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdSb2xlEg8KB2VuYWJsZWQYAiABKAgiRQoWUmVzZXRTaGFyaW5nSW52aXRhdGlvbhIrCgRyb2xlGAEgASgOMh0ubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nUm9sZSJYChdDaGFuZ2VTaGFyaW5nTWVtYmVyUm9sZRIQCghhY3Rvcl9pZBgBIAEoCRIrCgRyb2xlGAIgASgOMh0ubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nUm9sZSInChNTaGFyaW5nTWVtYmVyVGFyZ2V0EhAKCGFjdG9yX2lkGAEgASgJIlYKGlVwZGF0ZUJvYXJkU2hhcmluZ1Jlc3BvbnNlEjgKB3JlY2VpcHQYASABKAsyJy5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdDb21tYW5kUmVjZWlwdCJFCh1HZXRCb2FyZFNoYXJpbmdSZWNlaXB0UmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJIloKHkdldEJvYXJkU2hhcmluZ1JlY2VpcHRSZXNwb25zZRI4CgdyZWNlaXB0GAEgASgLMicubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nQ29tbWFuZFJlY2VpcHQiwgEKFVNoYXJpbmdDb21tYW5kUmVjZWlwdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJEjoKB2FwcGxpZWQYAyABKAsyJy5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdDb21tYW5kQXBwbGllZEgAEjwKCHJlamVjdGVkGAQgASgLMigubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nQ29tbWFuZFJlamVjdGVkSABCCQoHb3V0Y29tZSI5ChVTaGFyaW5nQ29tbWFuZEFwcGxpZWQSFAoHdmVyc2lvbhgBIAEoBEgAiAEBQgoKCF92ZXJzaW9uIlIKFlNoYXJpbmdDb21tYW5kUmVqZWN0ZWQSOAoGcmVhc29uGAEgASgOMigubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nUmVqZWN0aW9uUmVhc29uIksKHUluc3BlY3RCb2FyZEludml0YXRpb25SZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhgKEGludml0YXRpb25fdG9rZW4YAiABKAkizAEKHkluc3BlY3RCb2FyZEludml0YXRpb25SZXNwb25zZRI1CgppbnZpdGF0aW9uGAEgASgLMiEubHVtaW5nLnN0dWRpby52MS5Cb2FyZEludml0YXRpb24SOwoJcmVqZWN0aW9uGAIgASgOMigubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nUmVqZWN0aW9uUmVhc29uEjYKB3Nlc3Npb24YAyABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdHdWVzdFNlc3Npb24iXwoPQm9hcmRJbnZpdGF0aW9uEhAKCGJvYXJkX2lkGAEgASgJEg0KBXRpdGxlGAIgASgJEisKBHJvbGUYAyABKA4yHS5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdSb2xlIlYKGkpvaW5Cb2FyZEludml0YXRpb25SZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhgKEGludml0YXRpb25fdG9rZW4YAiABKAkSDAoEbmFtZRgDIAEoCSKSAQobSm9pbkJvYXJkSW52aXRhdGlvblJlc3BvbnNlEjYKB3Nlc3Npb24YASABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdHdWVzdFNlc3Npb24SOwoJcmVqZWN0aW9uGAIgASgOMigubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nUmVqZWN0aW9uUmVhc29uIr0BChNTaGFyaW5nR3Vlc3RTZXNzaW9uEhAKCGJvYXJkX2lkGAEgASgJEhAKCGFjdG9yX2lkGAIgASgJEgwKBG5hbWUYAyABKAkSKwoEcm9sZRgEIAEoDjIdLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ1JvbGUSFAoHdmVyc2lvbhgFIAEoBEgAiAEBEhAKCGNhbl9lZGl0GAYgASgIEhMKC2Nhbl9jb21tZW50GAcgASgIQgoKCF92ZXJzaW9uKpEBCgtTaGFyaW5nUm9sZRIcChhTSEFSSU5HX1JPTEVfVU5TUEVDSUZJRUQQABIWChJTSEFSSU5HX1JPTEVfT1dORVIQARIXChNTSEFSSU5HX1JPTEVfRURJVE9SEAISGgoWU0hBUklOR19ST0xFX0NPTU1FTlRFUhADEhcKE1NIQVJJTkdfUk9MRV9WSUVXRVIQBCpdCgxTaGFyaW5nU2NvcGUSHQoZU0hBUklOR19TQ09QRV9VTlNQRUNJRklFRBAAEhcKE1NIQVJJTkdfU0NPUEVfTE9DQUwQARIVChFTSEFSSU5HX1NDT1BFX0xBThACKt4DChZTaGFyaW5nUmVqZWN0aW9uUmVhc29uEigKJFNIQVJJTkdfUkVKRUNUSU9OX1JFQVNPTl9VTlNQRUNJRklFRBAAEiYKIlNIQVJJTkdfUkVKRUNUSU9OX1JFQVNPTl9GT1JCSURERU4QARIsCihTSEFSSU5HX1JFSkVDVElPTl9SRUFTT05fVkVSU0lPTl9DSEFOR0VEEAISLQopU0hBUklOR19SRUpFQ1RJT05fUkVBU09OX0NPTU1BTkRfSURfUkVVU0UQAxIsCihTSEFSSU5HX1JFSkVDVElPTl9SRUFTT05fSU5WQUxJRF9DT01NQU5EEAQSLAooU0hBUklOR19SRUpFQ1RJT05fUkVBU09OX0xBTl9VTkFWQUlMQUJMRRAFEjMKL1NIQVJJTkdfUkVKRUNUSU9OX1JFQVNPTl9JTlZJVEFUSU9OX1VOQVZBSUxBQkxFEAYSJwojU0hBUklOR19SRUpFQ1RJT05fUkVBU09OX05BTUVfVEFLRU4QBxIvCitTSEFSSU5HX1JFSkVDVElPTl9SRUFTT05fTUVNQkVSX1VOQVZBSUxBQkxFEAgSKgomU0hBUklOR19SRUpFQ1RJT05fUkVBU09OX1JPTEVfRElTQUJMRUQQCTLcBAoTQm9hcmRTaGFyaW5nU2VydmljZRJmCg9HZXRCb2FyZFNoYXJpbmcSKC5sdW1pbmcuc3R1ZGlvLnYxLkdldEJvYXJkU2hhcmluZ1JlcXVlc3QaKS5sdW1pbmcuc3R1ZGlvLnYxLkdldEJvYXJkU2hhcmluZ1Jlc3BvbnNlEm8KElVwZGF0ZUJvYXJkU2hhcmluZxIrLmx1bWluZy5zdHVkaW8udjEuVXBkYXRlQm9hcmRTaGFyaW5nUmVxdWVzdBosLmx1bWluZy5zdHVkaW8udjEuVXBkYXRlQm9hcmRTaGFyaW5nUmVzcG9uc2USewoWR2V0Qm9hcmRTaGFyaW5nUmVjZWlwdBIvLmx1bWluZy5zdHVkaW8udjEuR2V0Qm9hcmRTaGFyaW5nUmVjZWlwdFJlcXVlc3QaMC5sdW1pbmcuc3R1ZGlvLnYxLkdldEJvYXJkU2hhcmluZ1JlY2VpcHRSZXNwb25zZRJ7ChZJbnNwZWN0Qm9hcmRJbnZpdGF0aW9uEi8ubHVtaW5nLnN0dWRpby52MS5JbnNwZWN0Qm9hcmRJbnZpdGF0aW9uUmVxdWVzdBowLmx1bWluZy5zdHVkaW8udjEuSW5zcGVjdEJvYXJkSW52aXRhdGlvblJlc3BvbnNlEnIKE0pvaW5Cb2FyZEludml0YXRpb24SLC5sdW1pbmcuc3R1ZGlvLnYxLkpvaW5Cb2FyZEludml0YXRpb25SZXF1ZXN0Gi0ubHVtaW5nLnN0dWRpby52MS5Kb2luQm9hcmRJbnZpdGF0aW9uUmVzcG9uc2ViBnByb3RvMw");
 var SharingRoleSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_board_sharing_service, 0);
 var SharingRole = /* @__PURE__ */ tsEnum(SharingRoleSchema);
 var SharingRejectionReasonSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_board_sharing_service, 2);
@@ -14858,41 +15191,59 @@ var wireRejection = {
 
 // src/entrypoints/http/guest-sharing.ts
 var invitationBodyLimit = 16 * 1024;
-function path(method2) {
-  return "/" + method2.parent.typeName + "/" + method2.name;
+function path2(method4) {
+  return "/" + method4.parent.typeName + "/" + method4.name;
 }
 var paths = /* @__PURE__ */ new Map([
-  [path(WhiteboardService.method.getBoardScene), "read"],
-  [path(WhiteboardService.method.getObjectPayloads), "read"],
-  [path(WhiteboardService.method.exportBoard), "read"],
-  [path(WhiteboardService.method.moveObjects), "edit"],
-  [path(WhiteboardService.method.getCommandReceipt), "edit"],
-  [path(BoardEditService.method.editBoardGeometry), "edit"],
-  [path(BoardEditService.method.editObjectContent), "edit"],
-  [path(BoardEditService.method.attachBoardImage), "edit"],
-  [path(BoardEditService.method.attachBoardVideo), "edit"],
-  [path(BoardEditService.method.uploadBoardDocumentImage), "edit"],
-  [path(BoardEditService.method.reverseBoardEdit), "edit"],
-  [path(BoardEditService.method.getBoardEditReceipt), "edit"],
-  [path(BoardHistoryService.method.listBoardVersions), "read"],
-  [path(BoardHistoryService.method.getBoardVersionScene), "read"],
-  [path(BoardHistoryService.method.getBoardVersionPayloads), "read"],
-  [path(BoardHistoryService.method.exportBoardVersion), "read"],
-  [path(BoardHistoryService.method.restoreBoardVersion), "edit"],
-  [path(FeedbackService.method.listThreads), "read"],
-  [path(FeedbackService.method.getThread), "read"],
-  [path(FeedbackService.method.applyFeedback), "comment"],
-  [path(FeedbackService.method.getFeedbackReceipt), "comment"],
-  [path(BoardSharingService.method.getBoardSharing), "read"],
-  [path(BoardRoomService.method.getBoardRoom), "read"],
-  [path(BoardRoomService.method.updateBoardPresence), "read"],
-  [path(BoardRoomService.method.leaveBoardPresence), "read"],
-  [path(BoardRoomService.method.changeBoardTimer), "edit"],
-  [path(BoardRoomService.method.getBoardTimerReceipt), "edit"]
+  [path2(WhiteboardService.method.getBoardScene), "read"],
+  [path2(WhiteboardService.method.getObjectPayloads), "read"],
+  [path2(WhiteboardService.method.exportBoard), "read"],
+  [path2(WhiteboardService.method.moveObjects), "edit"],
+  [path2(WhiteboardService.method.getCommandReceipt), "edit"],
+  [path2(BoardEditService.method.editBoardGeometry), "edit"],
+  [path2(BoardEditService.method.editObjectContent), "edit"],
+  [path2(BoardEditService.method.attachBoardImage), "edit"],
+  [path2(BoardEditService.method.attachBoardVideo), "edit"],
+  [path2(BoardEditService.method.uploadBoardDocumentImage), "edit"],
+  [path2(BoardEditService.method.reverseBoardEdit), "edit"],
+  [path2(BoardEditService.method.getBoardEditReceipt), "edit"],
+  [path2(BoardHistoryService.method.listBoardVersions), "read"],
+  [path2(BoardHistoryService.method.getBoardVersionScene), "read"],
+  [path2(BoardHistoryService.method.getBoardVersionPayloads), "read"],
+  [path2(BoardHistoryService.method.exportBoardVersion), "read"],
+  [path2(BoardHistoryService.method.restoreBoardVersion), "edit"],
+  [path2(FeedbackService.method.listThreads), "read"],
+  [path2(FeedbackService.method.getThread), "read"],
+  [path2(FeedbackService.method.applyFeedback), "comment"],
+  [path2(FeedbackService.method.getFeedbackReceipt), "comment"],
+  [path2(BoardSharingService.method.getBoardSharing), "read"],
+  [path2(BoardRoomService.method.getBoardRoom), "read"],
+  [path2(BoardRoomService.method.streamBoardRoomEvents), "read"],
+  [path2(BoardRoomService.method.updateBoardPresence), "read"],
+  [path2(BoardRoomService.method.leaveBoardPresence), "read"],
+  [path2(BoardRoomService.method.changeBoardTimer), "edit"],
+  [path2(BoardRoomService.method.getBoardTimerReceipt), "edit"]
 ]);
 var { inspectBoardInvitation, joinBoardInvitation } = BoardSharingService.method;
-var inspectPath = path(inspectBoardInvitation);
-var joinPath = path(joinBoardInvitation);
+var inspectPath = path2(inspectBoardInvitation);
+var joinPath = path2(joinBoardInvitation);
+
+// ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/context-values.js
+function createContextKey(defaultValue, options) {
+  return { id: Symbol(options === null || options === void 0 ? void 0 : options.description), defaultValue };
+}
+
+// src/entrypoints/http/room-event-stream.ts
+var method2 = BoardRoomService.method.streamBoardRoomEvents;
+var roomEventStreamPath = `/${method2.parent.typeName}/${method2.name}`;
+var maxEventBytes = 96 * 1024;
+var maxQueuedBytes = 512 * 1024;
+var roomStreamRequest = createContextKey(void 0);
+
+// src/entrypoints/http/room-event-wait.ts
+var method3 = BoardRoomService.method.waitBoardRoomEvents;
+var roomEventWaitPath = `/${method3.parent.typeName}/${method3.name}`;
+var maxResponseBytes = 96 * 1024;
 
 // src/entrypoints/http/receipt.ts
 var REJECTION_REASONS = {
@@ -15373,8 +15724,8 @@ function getErrorMap() {
 
 // ../../../../node_modules/.pnpm/zod@4.6.7/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path2, errorMaps, issueData } = params;
-  const fullPath = [...path2, ...issueData.path || []];
+  const { data, path: path3, errorMaps, issueData } = params;
+  const fullPath = [...path3, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -15489,11 +15840,11 @@ var errorUtil;
 
 // ../../../../node_modules/.pnpm/zod@4.6.7/node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path2, key) {
+  constructor(parent, value, path3, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path2;
+    this._path = path3;
     this._key = key;
   }
   get path() {
@@ -19448,10 +19799,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path2) {
-  if (!path2)
+function getElementAtPath(obj, path3) {
+  if (!path3)
     return obj;
-  return path2.reduce((acc, key) => acc?.[key], obj);
+  return path3.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -19791,11 +20142,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path2, issues) {
+function prefixIssues(path3, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path2);
+    iss.path.unshift(path3);
     return iss;
   });
 }
@@ -20257,16 +20608,16 @@ function flattenError(error62, mapper = (issue2) => issue2.message) {
 }
 function formatError(error62, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error63, path2 = []) => {
+  const processError = (error63, path3 = []) => {
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path2, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path3, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path2, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path3, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path2, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path3, ...issue2.path]);
       } else {
-        const fullpath = [...path2, ...issue2.path];
+        const fullpath = [...path3, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -20305,17 +20656,17 @@ function formatError(error62, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error62, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error63, path2 = []) => {
+  const processError = (error63, path3 = []) => {
     var _a3;
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path2, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path3, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path2, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path3, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path2, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path3, ...issue2.path]);
       } else {
-        const fullpath = [...path2, ...issue2.path];
+        const fullpath = [...path3, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -20354,8 +20705,8 @@ function treeifyError(error62, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path2 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path2) {
+  const path3 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path3) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -35906,11 +36257,11 @@ function normalizeObjectSchema(schema) {
   }
   return void 0;
 }
-function getDotPath(path2) {
-  if (path2.length === 0) {
+function getDotPath(path3) {
+  if (path3.length === 0) {
     return "object root";
   }
-  return path2.reduce((acc, seg, index) => {
+  return path3.reduce((acc, seg, index) => {
     if (index === 0) {
       return String(seg);
     }
@@ -38137,13 +38488,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path2 = ref.slice(1).split("/").filter(Boolean);
-  if (path2.length === 0) {
+  const path3 = ref.slice(1).split("/").filter(Boolean);
+  if (path3.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path2[0] === defsKey) {
-    const key = path2[1] === void 0 ? void 0 : decodeJSONPointerSegment(path2[1]);
+  if (path3[0] === defsKey) {
+    const key = path3[1] === void 0 ? void 0 : decodeJSONPointerSegment(path3[1]);
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -41598,7 +41949,7 @@ var addMeta = (def, refs, jsonSchema) => {
 // ../../../../node_modules/.pnpm/zod-to-json-schema@3.25.2_zod@4.6.7/node_modules/zod-to-json-schema/dist/esm/zodToJsonSchema.js
 var zodToJsonSchema = (schema, options) => {
   const refs = getRefs(options);
-  let definitions = typeof options === "object" && options.definitions ? Object.entries(options.definitions).reduce((acc, [name3, schema2]) => ({
+  let definitions2 = typeof options === "object" && options.definitions ? Object.entries(options.definitions).reduce((acc, [name3, schema2]) => ({
     ...acc,
     [name3]: parseDef(schema2._def, {
       ...refs,
@@ -41615,11 +41966,11 @@ var zodToJsonSchema = (schema, options) => {
     main.title = title;
   }
   if (refs.flags.hasReferencedOpenAiAnyType) {
-    if (!definitions) {
-      definitions = {};
+    if (!definitions2) {
+      definitions2 = {};
     }
-    if (!definitions[refs.openAiAnyTypeName]) {
-      definitions[refs.openAiAnyTypeName] = {
+    if (!definitions2[refs.openAiAnyTypeName]) {
+      definitions2[refs.openAiAnyTypeName] = {
         // Skipping "object" as no properties can be defined and additionalProperties must be "false"
         type: ["string", "number", "integer", "boolean", "array", "null"],
         items: {
@@ -41632,9 +41983,9 @@ var zodToJsonSchema = (schema, options) => {
       };
     }
   }
-  const combined = name2 === void 0 ? definitions ? {
+  const combined = name2 === void 0 ? definitions2 ? {
     ...main,
-    [refs.definitionPath]: definitions
+    [refs.definitionPath]: definitions2
   } : main : {
     $ref: [
       ...refs.$refStrategy === "relative" ? [] : refs.basePath,
@@ -41642,7 +41993,7 @@ var zodToJsonSchema = (schema, options) => {
       name2
     ].join("/"),
     [refs.definitionPath]: {
-      ...definitions,
+      ...definitions2,
       [name2]: main
     }
   };
@@ -42471,9 +42822,9 @@ var Protocol = class {
    * Note that this will replace any previous request handler for the same method.
    */
   setRequestHandler(requestSchema, handler) {
-    const method2 = getMethodLiteral(requestSchema);
-    this.assertRequestHandlerCapability(method2);
-    this._requestHandlers.set(method2, (request, extra) => {
+    const method4 = getMethodLiteral(requestSchema);
+    this.assertRequestHandlerCapability(method4);
+    this._requestHandlers.set(method4, (request, extra) => {
       const parsed = parseWithCompat(requestSchema, request);
       return Promise.resolve(handler(parsed, extra));
     });
@@ -42481,15 +42832,15 @@ var Protocol = class {
   /**
    * Removes the request handler for the given method.
    */
-  removeRequestHandler(method2) {
-    this._requestHandlers.delete(method2);
+  removeRequestHandler(method4) {
+    this._requestHandlers.delete(method4);
   }
   /**
    * Asserts that a request handler has not already been set for the given method, in preparation for a new one being automatically installed.
    */
-  assertCanSetRequestHandler(method2) {
-    if (this._requestHandlers.has(method2)) {
-      throw new Error(`A request handler for ${method2} already exists, which would be overridden`);
+  assertCanSetRequestHandler(method4) {
+    if (this._requestHandlers.has(method4)) {
+      throw new Error(`A request handler for ${method4} already exists, which would be overridden`);
     }
   }
   /**
@@ -42498,8 +42849,8 @@ var Protocol = class {
    * Note that this will replace any previous notification handler for the same method.
    */
   setNotificationHandler(notificationSchema, handler) {
-    const method2 = getMethodLiteral(notificationSchema);
-    this._notificationHandlers.set(method2, (notification) => {
+    const method4 = getMethodLiteral(notificationSchema);
+    this._notificationHandlers.set(method4, (notification) => {
       const parsed = parseWithCompat(notificationSchema, notification);
       return Promise.resolve(handler(parsed));
     });
@@ -42507,8 +42858,8 @@ var Protocol = class {
   /**
    * Removes the notification handler for the given method.
    */
-  removeNotificationHandler(method2) {
-    this._notificationHandlers.delete(method2);
+  removeNotificationHandler(method4) {
+    this._notificationHandlers.delete(method4);
   }
   /**
    * Cleans up the progress handler associated with a task.
@@ -42958,33 +43309,33 @@ var ExperimentalServerTasks = class {
 };
 
 // ../../../../node_modules/.pnpm/@modelcontextprotocol+sdk@1_ce399f1e4e31d6809a54d35f78d374fe/node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/helpers.js
-function assertToolsCallTaskCapability(requests, method2, entityName) {
+function assertToolsCallTaskCapability(requests, method4, entityName) {
   if (!requests) {
-    throw new Error(`${entityName} does not support task creation (required for ${method2})`);
+    throw new Error(`${entityName} does not support task creation (required for ${method4})`);
   }
-  switch (method2) {
+  switch (method4) {
     case "tools/call":
       if (!requests.tools?.call) {
-        throw new Error(`${entityName} does not support task creation for tools/call (required for ${method2})`);
+        throw new Error(`${entityName} does not support task creation for tools/call (required for ${method4})`);
       }
       break;
     default:
       break;
   }
 }
-function assertClientRequestTaskCapability(requests, method2, entityName) {
+function assertClientRequestTaskCapability(requests, method4, entityName) {
   if (!requests) {
-    throw new Error(`${entityName} does not support task creation (required for ${method2})`);
+    throw new Error(`${entityName} does not support task creation (required for ${method4})`);
   }
-  switch (method2) {
+  switch (method4) {
     case "sampling/createMessage":
       if (!requests.sampling?.createMessage) {
-        throw new Error(`${entityName} does not support task creation for sampling/createMessage (required for ${method2})`);
+        throw new Error(`${entityName} does not support task creation for sampling/createMessage (required for ${method4})`);
       }
       break;
     case "elicitation/create":
       if (!requests.elicitation?.create) {
-        throw new Error(`${entityName} does not support task creation for elicitation/create (required for ${method2})`);
+        throw new Error(`${entityName} does not support task creation for elicitation/create (required for ${method4})`);
       }
       break;
     default:
@@ -43062,8 +43413,8 @@ var Server = class extends Protocol {
     if (typeof methodValue !== "string") {
       throw new Error("Schema method literal must be a string");
     }
-    const method2 = methodValue;
-    if (method2 === "tools/call") {
+    const method4 = methodValue;
+    if (method4 === "tools/call") {
       const wrappedHandler = async (request, extra) => {
         const validatedRequest = safeParse2(CallToolRequestSchema, request);
         if (!validatedRequest.success) {
@@ -43091,53 +43442,53 @@ var Server = class extends Protocol {
     }
     return super.setRequestHandler(requestSchema, handler);
   }
-  assertCapabilityForMethod(method2) {
-    switch (method2) {
+  assertCapabilityForMethod(method4) {
+    switch (method4) {
       case "sampling/createMessage":
         if (!this._clientCapabilities?.sampling) {
-          throw new Error(`Client does not support sampling (required for ${method2})`);
+          throw new Error(`Client does not support sampling (required for ${method4})`);
         }
         break;
       case "elicitation/create":
         if (!this._clientCapabilities?.elicitation) {
-          throw new Error(`Client does not support elicitation (required for ${method2})`);
+          throw new Error(`Client does not support elicitation (required for ${method4})`);
         }
         break;
       case "roots/list":
         if (!this._clientCapabilities?.roots) {
-          throw new Error(`Client does not support listing roots (required for ${method2})`);
+          throw new Error(`Client does not support listing roots (required for ${method4})`);
         }
         break;
       case "ping":
         break;
     }
   }
-  assertNotificationCapability(method2) {
-    switch (method2) {
+  assertNotificationCapability(method4) {
+    switch (method4) {
       case "notifications/message":
         if (!this._capabilities.logging) {
-          throw new Error(`Server does not support logging (required for ${method2})`);
+          throw new Error(`Server does not support logging (required for ${method4})`);
         }
         break;
       case "notifications/resources/updated":
       case "notifications/resources/list_changed":
         if (!this._capabilities.resources) {
-          throw new Error(`Server does not support notifying about resources (required for ${method2})`);
+          throw new Error(`Server does not support notifying about resources (required for ${method4})`);
         }
         break;
       case "notifications/tools/list_changed":
         if (!this._capabilities.tools) {
-          throw new Error(`Server does not support notifying of tool list changes (required for ${method2})`);
+          throw new Error(`Server does not support notifying of tool list changes (required for ${method4})`);
         }
         break;
       case "notifications/prompts/list_changed":
         if (!this._capabilities.prompts) {
-          throw new Error(`Server does not support notifying of prompt list changes (required for ${method2})`);
+          throw new Error(`Server does not support notifying of prompt list changes (required for ${method4})`);
         }
         break;
       case "notifications/elicitation/complete":
         if (!this._clientCapabilities?.elicitation?.url) {
-          throw new Error(`Client does not support URL elicitation (required for ${method2})`);
+          throw new Error(`Client does not support URL elicitation (required for ${method4})`);
         }
         break;
       case "notifications/cancelled":
@@ -43146,38 +43497,38 @@ var Server = class extends Protocol {
         break;
     }
   }
-  assertRequestHandlerCapability(method2) {
+  assertRequestHandlerCapability(method4) {
     if (!this._capabilities) {
       return;
     }
-    switch (method2) {
+    switch (method4) {
       case "completion/complete":
         if (!this._capabilities.completions) {
-          throw new Error(`Server does not support completions (required for ${method2})`);
+          throw new Error(`Server does not support completions (required for ${method4})`);
         }
         break;
       case "logging/setLevel":
         if (!this._capabilities.logging) {
-          throw new Error(`Server does not support logging (required for ${method2})`);
+          throw new Error(`Server does not support logging (required for ${method4})`);
         }
         break;
       case "prompts/get":
       case "prompts/list":
         if (!this._capabilities.prompts) {
-          throw new Error(`Server does not support prompts (required for ${method2})`);
+          throw new Error(`Server does not support prompts (required for ${method4})`);
         }
         break;
       case "resources/list":
       case "resources/templates/list":
       case "resources/read":
         if (!this._capabilities.resources) {
-          throw new Error(`Server does not support resources (required for ${method2})`);
+          throw new Error(`Server does not support resources (required for ${method4})`);
         }
         break;
       case "tools/call":
       case "tools/list":
         if (!this._capabilities.tools) {
-          throw new Error(`Server does not support tools (required for ${method2})`);
+          throw new Error(`Server does not support tools (required for ${method4})`);
         }
         break;
       case "tasks/get":
@@ -43185,7 +43536,7 @@ var Server = class extends Protocol {
       case "tasks/result":
       case "tasks/cancel":
         if (!this._capabilities.tasks) {
-          throw new Error(`Server does not support tasks capability (required for ${method2})`);
+          throw new Error(`Server does not support tasks capability (required for ${method4})`);
         }
         break;
       case "ping":
@@ -43193,14 +43544,14 @@ var Server = class extends Protocol {
         break;
     }
   }
-  assertTaskCapability(method2) {
-    assertClientRequestTaskCapability(this._clientCapabilities?.tasks?.requests, method2, "Client");
+  assertTaskCapability(method4) {
+    assertClientRequestTaskCapability(this._clientCapabilities?.tasks?.requests, method4, "Client");
   }
-  assertTaskHandlerCapability(method2) {
+  assertTaskHandlerCapability(method4) {
     if (!this._capabilities) {
       return;
     }
-    assertToolsCallTaskCapability(this._capabilities.tasks?.requests, method2, "Server");
+    assertToolsCallTaskCapability(this._capabilities.tasks?.requests, method4, "Server");
   }
   async _oninitialize(request) {
     const requestedVersion = request.params.protocolVersion;
@@ -44691,9 +45042,10 @@ function registerAgentActivity(server2, options) {
 // src/entrypoints/mcp/schema.ts
 var bridgeChunkBytes = 128 * 1024;
 var bridgeMaximumBytes = 128 * 1024 * 1024;
+var bridgeMaximumResponseBytes = bridgeMaximumBytes + 32 * 1024;
 var id = external_exports.string().regex(/^[A-Za-z0-9_-]{1,128}$/u);
 var base64Chunk = external_exports.string().max(Math.ceil(bridgeChunkBytes / 3) * 4);
-var offset = external_exports.number().int().min(0).max(bridgeMaximumBytes);
+var offset = external_exports.number().int().min(0);
 var version2 = external_exports.literal(1);
 var sessionId = external_exports.uuid();
 var openSchema = external_exports.object({ boardId: id.optional() }).strict();
@@ -44721,7 +45073,7 @@ var bridgeSchema = external_exports.discriminatedUnion("action", [
     action: external_exports.literal("upload"),
     sessionId,
     transferId: external_exports.uuid().optional(),
-    offset,
+    offset: offset.max(bridgeMaximumBytes),
     size: external_exports.number().int().min(1).max(bridgeMaximumBytes),
     data: base64Chunk
   }).strict(),
@@ -44730,7 +45082,7 @@ var bridgeSchema = external_exports.discriminatedUnion("action", [
     action: external_exports.literal("download"),
     sessionId,
     transferId: external_exports.uuid(),
-    offset
+    offset: offset.max(bridgeMaximumResponseBytes)
   }).strict(),
   external_exports.object({
     version: version2,
@@ -44746,7 +45098,7 @@ var protobufMediaType = "application/protobuf";
 var archiveMediaType = "application/zip";
 var normalRequestBytes = 1024 * 1024;
 var activityRequestBytes = 32 * 1024;
-var imageRequestBytes = 8 * 1024 * 1024 + 32 * 1024;
+var imageRequestBytes = 20 * 1024 * 1024 + 32 * 1024;
 var videoRequestBytes = 20 * 1024 * 1024 + 32 * 1024;
 var largeEditRequests = /* @__PURE__ */ new Map([
   ["AttachBoardImage", imageRequestBytes],
@@ -44797,6 +45149,7 @@ var boardMethods = [
     "BoardRoomService",
     [
       "GetBoardRoom",
+      "WaitBoardRoomEvents",
       "UpdateBoardPresence",
       "LeaveBoardPresence",
       "ChangeBoardTimer",
@@ -44843,14 +45196,14 @@ operations2.set(archiveOperation, {
   mediaType: archiveMediaType,
   maximumBytes: bridgeMaximumBytes
 });
-function appOperation(service, method2) {
-  return operations2.get(service + "/" + method2);
+function appOperation(service, method4) {
+  return operations2.get(service + "/" + method4);
 }
 
 // src/entrypoints/mcp/transfers.ts
 import { Buffer as Buffer2 } from "node:buffer";
 var maxTransfers = 8;
-var maxBudget = bridgeMaximumBytes * 2;
+var maxBudget = bridgeMaximumResponseBytes * 2;
 function decodeChunk(data) {
   const bytes = Buffer2.from(data, "base64");
   if (bytes.byteLength > bridgeChunkBytes || bytes.toString("base64") !== data) {
@@ -44868,7 +45221,7 @@ async function declaredLength(response, body) {
     await body.cancel();
     throw invalidArgument("\u672C\u673A\u670D\u52A1\u8FD4\u56DE\u7684\u6587\u4EF6\u957F\u5EA6\u65E0\u6548\u3002");
   }
-  if (size > bridgeMaximumBytes) {
+  if (size > bridgeMaximumResponseBytes) {
     await body.cancel();
     throw tooLarge("\u672C\u673A\u670D\u52A1\u54CD\u5E94\u8D85\u8FC7\u9762\u677F\u4F20\u8F93\u9650\u5236\u3002");
   }
@@ -45014,7 +45367,7 @@ function createTransfers(allocateId, createFile) {
           break;
         }
         const next = size + value.byteLength;
-        if (next > bridgeMaximumBytes) {
+        if (next > bridgeMaximumResponseBytes) {
           throw tooLarge("\u672C\u673A\u670D\u52A1\u54CD\u5E94\u8D85\u8FC7\u9762\u677F\u4F20\u8F93\u9650\u5236\u3002");
         }
         if (declared !== void 0 && next > declared) {
@@ -45023,7 +45376,7 @@ function createTransfers(allocateId, createFile) {
         if (transfer) {
           await use(transfer, (file2) => file2.append(value));
         } else if (next > bridgeChunkBytes) {
-          transfer = reserve(sessionId2, "download", declared || bridgeMaximumBytes);
+          transfer = reserve(sessionId2, "download", declared || bridgeMaximumResponseBytes);
           const prefix = inline.subarray(0, size);
           await use(transfer, async (file2) => {
             await file2.append(prefix);
@@ -45248,8 +45601,8 @@ function appError(error62, report) {
   };
 }
 async function listBoards(options, input2, signal) {
-  const method2 = BoardCatalogService.method.listBoards;
-  const wire = create(method2.input, {
+  const method4 = BoardCatalogService.method.listBoards;
+  const wire = create(method4.input, {
     query: input2.query ?? "",
     cursor: input2.cursor,
     order: BoardSortOrder.RECENT,
@@ -45257,10 +45610,10 @@ async function listBoards(options, input2, signal) {
   });
   const response = await options.dispatch(
     {
-      route: "/" + BoardCatalogService.typeName + "/" + method2.name,
+      route: "/" + BoardCatalogService.typeName + "/" + method4.name,
       method: "POST",
       mediaType: protobufMediaType,
-      body: toBinary(method2.input, wire)
+      body: toBinary(method4.input, wire)
     },
     signal
   );
@@ -45273,7 +45626,7 @@ async function listBoards(options, input2, signal) {
   if (body.byteLength > boardListBytes) {
     throw new BridgeError("TOO_LARGE", "\u4F5C\u54C1\u5217\u8868\u8D85\u8FC7\u5355\u9875\u5927\u5C0F\u9650\u5236\u3002");
   }
-  const { boards, nextCursor } = fromBinary(method2.output, body, { readUnknownFields: false });
+  const { boards, nextCursor } = fromBinary(method4.output, body, { readUnknownFields: false });
   const artifacts = boards.map(({ boardId: boardId2, title, pinned }) => ({
     id: boardId2,
     title,
@@ -45487,10 +45840,10 @@ function readVersion(value) {
   }
   return value.version;
 }
-async function readService(path2) {
+async function readService(path3) {
   let value;
   try {
-    value = JSON.parse(await readFile(path2, "utf8"));
+    value = JSON.parse(await readFile(path3, "utf8"));
   } catch (error62) {
     if (systemCode(error62) === "ENOENT") {
       return void 0;
@@ -45543,20 +45896,20 @@ async function probe(service) {
     throw new Error("The existing Studio service did not confirm its loopback connection.");
   }
 }
-async function releaseFile(path2) {
+async function releaseFile(path3) {
   try {
-    await unlink(path2);
+    await unlink(path3);
   } catch (error62) {
     if (systemCode(error62) !== "ENOENT") {
       throw error62;
     }
   }
 }
-async function writeService(path2, record2) {
-  const temp = path2 + "." + randomUUID();
+async function writeService(path3, record2) {
+  const temp = path3 + "." + randomUUID();
   try {
     await writeFile(temp, JSON.stringify(record2), { flag: "wx", mode: 384 });
-    await rename(temp, path2);
+    await rename(temp, path3);
   } finally {
     await releaseFile(temp);
   }
@@ -45704,7 +46057,9 @@ async function loadMcpRuntime(input2) {
       }
       return response;
     } catch (error62) {
-      pending = void 0;
+      if (!signal.aborted || error62 !== signal.reason) {
+        pending = void 0;
+      }
       throw error62;
     }
   }
@@ -45732,9 +46087,9 @@ import { join as join2 } from "node:path";
 function isMissing(error62) {
   return error62 instanceof Error && "code" in error62 && error62.code === "ENOENT";
 }
-async function removeOwnedFile(path2, remove) {
+async function removeOwnedFile(path3, remove) {
   try {
-    await remove(path2);
+    await remove(path3);
   } catch (error62) {
     if (!isMissing(error62)) {
       throw error62;
@@ -45743,8 +46098,8 @@ async function removeOwnedFile(path2, remove) {
 }
 async function createMcpSpool() {
   const folder = await mkdtemp(join2(tmpdir(), "luming-ii-transfer-"));
-  const path2 = join2(folder, "content");
-  const file2 = await open3(path2, "wx+", 384).catch(async (error62) => {
+  const path3 = join2(folder, "content");
+  const file2 = await open3(path3, "wx+", 384).catch(async (error62) => {
     try {
       await removeOwnedFile(folder, rmdir);
     } catch (cleanupError) {
@@ -45760,7 +46115,7 @@ async function createMcpSpool() {
     try {
       await file2.close();
     } finally {
-      await removeOwnedFile(path2, unlink2);
+      await removeOwnedFile(path3, unlink2);
       await removeOwnedFile(folder, rmdir);
     }
   }
@@ -45788,7 +46143,7 @@ async function createMcpSpool() {
       }
       return target;
     },
-    body: () => openAsBlob(path2),
+    body: () => openAsBlob(path3),
     dispose: () => disposal ??= dispose()
   };
 }

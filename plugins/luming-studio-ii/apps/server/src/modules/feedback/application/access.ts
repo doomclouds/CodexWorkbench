@@ -51,20 +51,27 @@ export function viewMessage(
   actor: FeedbackActor,
   access: FeedbackBoardAccess,
   message: FeedbackMessage,
+  legacyNames?: (authorId: string) => string | undefined,
 ): FeedbackMessageView {
   const authoredByViewer = message.authorActorId === actor.id;
 
-  return { ...message, authoredByViewer, canEdit: permitsFeedback(access) && authoredByViewer };
+  return {
+    ...message,
+    authorName: message.authorName ?? legacyNames?.(message.authorActorId),
+    authoredByViewer,
+    canEdit: permitsFeedback(access) && authoredByViewer,
+  };
 }
 
 export function viewThread(
   actor: FeedbackActor,
   access: FeedbackBoardAccess,
   thread: FeedbackThread,
+  legacyNames?: (authorId: string) => string | undefined,
 ): FeedbackThreadView {
   return {
     ...thread,
-    first: viewMessage(actor, access, thread.first),
+    first: viewMessage(actor, access, thread.first, legacyNames),
     canResolve: permitsFeedback(access),
     canDelete: canDeleteThread(actor, access, thread),
   };

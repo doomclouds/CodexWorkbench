@@ -106,8 +106,12 @@ export function presenceMembers(
     const previous = members.get(actorId);
     const betterViewport =
       canFollowParticipant(participant) && previous && !canFollowParticipant(previous);
+    const newerView =
+      previous &&
+      canFollowParticipant(participant) === canFollowParticipant(previous) &&
+      (participant.activityAtMillis ?? 0) > (previous.activityAtMillis ?? 0);
 
-    if (!previous || betterViewport) {
+    if (!previous || betterViewport || newerView) {
       members.set(actorId, participant);
     }
   }

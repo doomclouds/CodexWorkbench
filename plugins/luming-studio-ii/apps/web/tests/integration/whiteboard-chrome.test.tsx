@@ -163,7 +163,44 @@ test('shows the original title bar actions and places export under the sharing e
   }
 });
 
-test('keeps the confirmed board name when the catalog rejects the edit', async () => {
+test('keeps the entered board name on failure and retries the same edit', async () => {
+  const fixture = createControlFixture();
+  const attempts: string[][] = [];
+  try {
+    const { header } = await openChrome(fixture, {
+      renameBoard: (...request) => {
+        attempts.push(request);
+
+        return attempts.length === 1
+          ? Promise.reject(new Error('名称保存结果尚未确认，请重试查询。'))
+          : Promise.resolve();
+      },
+    });
+    const field = nameField(header);
+    await act(async () => changeName(field, '  未确认的名称  '));
+    await act(async () => field.blur());
+    expect(nameField(header).value).toBe('  未确认的名称  ');
+    expect(fixture.host.textContent).toContain('名称保存结果尚未确认，请重试查询。');
+    await act(async () => {
+      field.focus();
+      field.blur();
+    });
+    expect(attempts).toHaveLength(1);
+
+    const retry = find<HTMLButtonElement>(fixture.host, '#whiteboard-rename-failed button');
+    expect(retry.textContent).toBe('重试改名');
+    await act(async () => retry.click());
+    expect(attempts).toEqual([
+      [sampleBoardId, originalTitle, '未确认的名称'],
+      [sampleBoardId, originalTitle, '未确认的名称'],
+    ]);
+    expect(fixture.host.querySelector('#whiteboard-rename-failed')).toBeNull();
+  } finally {
+    fixture.dispose();
+  }
+});
+
+test('discards the failed board name and its retry action on Escape', async () => {
   const fixture = createControlFixture();
   try {
     const { header } = await openChrome(fixture, {
@@ -171,9 +208,14 @@ test('keeps the confirmed board name when the catalog rejects the edit', async (
     });
     const field = nameField(header);
     await act(async () => changeName(field, '未确认的名称'));
-    await act(async () => field.blur());
-    expect(nameField(header).value).toBe(originalTitle);
-    expect(fixture.host.textContent).toContain('目录名称已被更改。');
+    await act(async () => press(field, 'Enter'));
+    expect(field.value).toBe('未确认的名称');
+    await act(async () => {
+      field.focus();
+      press(field, 'Escape');
+    });
+    expect(field.value).toBe(originalTitle);
+    expect(fixture.host.querySelector('#whiteboard-rename-failed')).toBeNull();
   } finally {
     fixture.dispose();
   }

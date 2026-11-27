@@ -92,7 +92,9 @@ function createScope(document: Document): DismissScope {
 
     event.preventDefault();
     event.stopPropagation();
-    layer.dismiss('escape');
+    if (!event.repeat) {
+      layer.dismiss('escape');
+    }
   }
 
   function handlePointerDown(event: PointerEvent) {

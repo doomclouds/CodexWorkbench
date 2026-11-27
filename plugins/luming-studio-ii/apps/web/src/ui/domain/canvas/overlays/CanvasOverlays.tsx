@@ -1,4 +1,3 @@
-import { useLayoutEffect, useRef, useState } from 'react';
 import type { PointerEvent, ReactNode } from 'react';
 import { connectionPortOffset, connectionPorts, portPoint } from '../connectors/geometry.js';
 import { connectionHandleBends } from '../connectors/handles.js';
@@ -13,6 +12,7 @@ import type { AlignmentGuide, ResizeHandle } from '../gestures/index.js';
 import { projectedObjectBounds, type ProjectedCanvasObject } from '../scene/index.js';
 import { boardToScreen, mergeRects, normalizeViewport } from '../viewport/index.js';
 import type { CanvasViewportSize } from '../viewport/index.js';
+import { SelectionToolbar } from './SelectionToolbar.js';
 import './CanvasOverlays.css';
 
 const handleLabels = {
@@ -92,110 +92,6 @@ function screenPosition(point: CanvasPoint, viewport: CanvasViewport) {
 
 function screenBox(geometry: CanvasGeometry, viewport: CanvasViewport) {
   return { ...screenRect(geometry, viewport), transform: 'rotate(' + geometry.rotation + 'deg)' };
-}
-
-const toolbarMargin = 12;
-const toolbarGap = 8;
-const regionTitleClearance = 16;
-
-function selectionActionBounds(
-  objects: readonly ProjectedCanvasObject[],
-  viewport: CanvasViewport,
-) {
-  const bounds = mergeRects(objects.map(projectedObjectBounds));
-  if (!bounds) {
-    return undefined;
-  }
-
-  const frame = screenRect(bounds, viewport);
-  const hasExternalTitle = objects.some(({ object }) => object.kind === 'html');
-  if (!hasExternalTitle) {
-    return frame;
-  }
-
-  return {
-    ...frame,
-    top: frame.top - regionTitleClearance,
-    height: frame.height + regionTitleClearance,
-  };
-}
-
-function selectionToolbarPosition(
-  anchor: ReturnType<typeof screenRect>,
-  toolbar: CanvasViewportSize,
-  viewport: CanvasViewportSize,
-) {
-  const right = viewport.width - toolbarMargin - toolbar.width;
-  const bottom = viewport.height - toolbarMargin - toolbar.height;
-  const measured = toolbar.width > 0 && toolbar.height > 0;
-  const fits = right >= toolbarMargin && bottom >= toolbarMargin;
-  if (!measured || !fits) {
-    return undefined;
-  }
-
-  const visibleX = anchor.left + anchor.width >= 0 && anchor.left <= viewport.width;
-  const visibleY = anchor.top + anchor.height >= 0 && anchor.top <= viewport.height;
-  if (!visibleX || !visibleY) {
-    return undefined;
-  }
-
-  const above = anchor.top - toolbarGap - toolbar.height;
-  const below = anchor.top + anchor.height + toolbarGap;
-  const preferred = above >= toolbarMargin || below > bottom ? above : below;
-  const center = anchor.left + (anchor.width - toolbar.width) / 2;
-
-  return {
-    left: Math.max(toolbarMargin, Math.min(center, right)),
-    top: Math.max(toolbarMargin, Math.min(preferred, bottom)),
-  };
-}
-
-interface SelectionToolbarProps {
-  readonly anchor: ReturnType<typeof screenRect>;
-  readonly viewportSize: CanvasViewportSize;
-  readonly children: ReactNode;
-}
-
-function SelectionToolbar({ anchor, viewportSize, children }: SelectionToolbarProps) {
-  const toolbar = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState<CanvasViewportSize>({ width: 0, height: 0 });
-
-  useLayoutEffect(() => {
-    const node = toolbar.current;
-    if (!node) {
-      return;
-    }
-
-    const measure = () => {
-      const { width, height } = node.getBoundingClientRect();
-      setSize((current) =>
-        width === current.width && height === current.height ? current : { width, height },
-      );
-    };
-
-    measure();
-    const Observer = node.ownerDocument.defaultView?.ResizeObserver;
-    const observer = Observer ? new Observer(measure) : undefined;
-    observer?.observe(node);
-
-    return () => observer?.disconnect();
-  }, []);
-
-  const position = selectionToolbarPosition(anchor, size, viewportSize);
-
-  return (
-    <div
-      ref={toolbar}
-      className="studio-ui-canvas-selection-actions"
-      data-canvas-controls=""
-      data-canvas-selection-actions=""
-      role="toolbar"
-      aria-label="选区格式"
-      style={position ?? { visibility: 'hidden' }}
-    >
-      {children}
-    </div>
-  );
 }
 
 function guideRect({ axis, at, from, to }: AlignmentGuide, viewport: CanvasViewport) {
@@ -372,7 +268,12 @@ export function CanvasOverlays(props: CanvasOverlaysProps) {
   const view = normalizeViewport(viewport);
   const portSource = visiblePortSource(source, view.zoom);
   const connection = selectedConnector?.connectorRoute;
-  const actionsBounds = selectionActions && selectionActionBounds(selected, view);
+  const selectionBounds = selectionActions && mergeRects(selected.map(projectedObjectBounds));
+  const actionsBounds = selectionBounds && {
+    ...boardToScreen(selectionBounds, view),
+    width: selectionBounds.width * view.zoom,
+    height: selectionBounds.height * view.zoom,
+  };
 
   return (
     <div className="studio-ui-canvas-overlays">
@@ -460,7 +361,11 @@ export function CanvasOverlays(props: CanvasOverlaysProps) {
         />
       )}
       {actionsBounds && viewportSize && (
-        <SelectionToolbar anchor={actionsBounds} viewportSize={viewportSize}>
+        <SelectionToolbar
+          anchor={actionsBounds}
+          selectionIds={selected.map(({ object }) => object.id)}
+          viewportSize={viewportSize}
+        >
           {selectionActions}
         </SelectionToolbar>
       )}

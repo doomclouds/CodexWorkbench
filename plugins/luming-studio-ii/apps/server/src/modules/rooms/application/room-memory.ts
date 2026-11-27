@@ -8,6 +8,7 @@ import type {
   RoomEvent,
   RoomEventPayload,
 } from '../domain/index.js';
+import { RoomEventJournal, type RoomEventCursor } from './room-event-journal.js';
 
 const maxParticipants = 64;
 const maxPresenceSlots = 256;
@@ -32,6 +33,19 @@ export interface RoomListener {
   readonly recheck?: () => void;
 }
 
+function moved(previous: Participant, next: PresenceInput): boolean {
+  const cursor = previous.cursor;
+  const view = previous.viewport;
+  return (
+    cursor?.x !== next.cursor?.x ||
+    cursor?.y !== next.cursor?.y ||
+    view?.centerX !== next.viewport?.centerX ||
+    view?.centerY !== next.viewport?.centerY ||
+    view?.zoom !== next.viewport?.zoom ||
+    previous.following !== next.following
+  );
+}
+
 function peerKey({ actorId, viewId }: ParticipantKey): string {
   return JSON.stringify([actorId, viewId]);
 }
@@ -49,12 +63,17 @@ function acceptUpdate(previous: PresenceSlot, sequence: bigint, now: number): bo
 
 export class RoomMemory {
   private readonly slots = new Map<string, PresenceSlot>();
-  private readonly listeners = new Set<RoomListener>();
-  private readonly pending: RoomEvent[] = [];
+  private readonly listeners = new Map<RoomListener, boolean>();
+  private readonly pending: { ownerEvent: RoomEvent; publicEvent?: RoomEvent }[] = [];
+  private readonly ownerJournal = new RoomEventJournal();
+  private readonly publicJournal = new RoomEventJournal();
   private delivering = false;
   private sequence = 0n;
+  private publicSequence = 0n;
   public baselineRevision: bigint;
   public agentWorkspaces: readonly AgentWorkspace[] = [];
+  public feedbackVersion = 0n;
+  public suggestionsVersion = 0n;
 
   constructor(
     private readonly boardId: string,
@@ -95,29 +114,52 @@ export class RoomMemory {
     });
   }
 
-  event(payload: RoomEventPayload, now: number): RoomEvent {
+  private cursor(owner: boolean): RoomEventCursor {
+    return {
+      roomInstanceId: this.roomInstanceId + (owner ? ':owner' : ':member'),
+      sequence: owner ? this.sequence : this.publicSequence,
+    };
+  }
+
+  event(payload: RoomEventPayload, now: number, owner = true): RoomEvent {
     return {
       boardId: this.boardId,
-      roomInstanceId: this.roomInstanceId,
-      sequence: this.sequence,
+      ...this.cursor(owner),
       serverTimeUnixMs: now,
       payload,
     };
   }
 
+  replay(cursor: RoomEventCursor, owner: boolean): readonly RoomEvent[] | undefined {
+    const journal = owner ? this.ownerJournal : this.publicJournal;
+
+    return journal.after(cursor, this.cursor(owner));
+  }
+
   publish(payload: RoomEventPayload, now: number): void {
     this.sequence++;
-    this.pending.push(this.event(payload, now));
+    const ownerEvent = this.event(payload, now);
+    this.ownerJournal.append(ownerEvent);
+    let publicEvent: RoomEvent | undefined;
+    if (payload.kind !== 'suggestionsChanged') {
+      this.publicSequence++;
+      publicEvent = this.event(payload, now, false);
+      this.publicJournal.append(publicEvent);
+    }
+    this.pending.push({ ownerEvent, publicEvent });
     if (this.delivering) {
       return;
     }
 
     this.delivering = true;
     try {
-      for (const event of this.pending) {
-        for (const listener of [...this.listeners]) {
-          listener.deliver(event);
-        }
+      for (const publication of this.pending) {
+        [...this.listeners].forEach(([listener, owner]) => {
+          const event = owner ? publication.ownerEvent : publication.publicEvent;
+          if (event) {
+            listener.deliver(event);
+          }
+        });
       }
     } finally {
       this.delivering = false;
@@ -125,12 +167,12 @@ export class RoomMemory {
     }
   }
 
-  listen(listener: RoomListener): (() => void) | undefined {
+  listen(listener: RoomListener, owner = true): (() => void) | undefined {
     if (this.listeners.size >= maxSubscriptions) {
       return undefined;
     }
 
-    this.listeners.add(listener);
+    this.listeners.set(listener, owner);
 
     return () => {
       this.listeners.delete(listener);
@@ -138,7 +180,7 @@ export class RoomMemory {
   }
 
   close(): void {
-    for (const listener of [...this.listeners]) {
+    for (const listener of [...this.listeners.keys()]) {
       listener.close();
     }
 
@@ -148,7 +190,7 @@ export class RoomMemory {
   }
 
   recheck(): void {
-    for (const listener of [...this.listeners]) {
+    for (const listener of [...this.listeners.keys()]) {
       listener.recheck?.();
     }
   }
@@ -190,12 +232,14 @@ export class RoomMemory {
       return false;
     }
 
+    const prior = previous?.participant;
     const participant = {
       key,
       displayName: access.displayName,
       role: access.role,
       sequence: input.sequence,
       expiresAtUnixMs: now + presenceTtlMs,
+      activityAtUnixMs: prior && !moved(prior, input) ? (prior.activityAtUnixMs ?? now) : now,
       cursor: input.cursor,
       viewport: input.viewport,
       following: input.following,

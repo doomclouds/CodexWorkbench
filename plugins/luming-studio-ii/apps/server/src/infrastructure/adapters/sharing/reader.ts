@@ -90,6 +90,10 @@ function readMember(row: SqliteRow): SharingMember {
     role: readRole(row.role),
     invitationVersion: readVersion(row.invitation_version, 'invitation_version'),
     removed: readFlag(row.removed, 'removed'),
+    lastSeenAtMillis:
+      row.last_seen_at_millis === null
+        ? undefined
+        : Number(readVersion(row.last_seen_at_millis, 'last_seen_at_millis')),
   };
 }
 
@@ -103,7 +107,8 @@ function readSession(row: SqliteRow): BrowserSession {
 }
 
 const inviteColumns = 'role, seed, enabled, version';
-const memberColumns = 'actor_id, name, name_key, role, invitation_version, removed';
+const memberColumns =
+  'actor_id, name, name_key, role, invitation_version, removed, last_seen_at_millis';
 
 export function createSharingReader(connection: SqliteConnection): SharingReader {
   return {

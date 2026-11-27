@@ -1,7 +1,11 @@
 import { Check } from 'lucide-react';
 import type { MouseEvent } from 'react';
 import type { FeedbackPoint, FeedbackTarget, FeedbackThread } from '../../data/feedback/index.js';
-import type { FeedbackCanvasObject, FeedbackViewport } from './contracts.js';
+import type {
+  FeedbackCanvasObject,
+  FeedbackViewport,
+  WhiteboardFeedbackSurfaceProps,
+} from './contracts.js';
 import {
   feedbackAuthorColors,
   FeedbackAuthorGlyph,
@@ -15,6 +19,7 @@ interface FeedbackPinsProps {
   readonly draft?: FeedbackTarget;
   readonly objects: ReadonlyMap<string, FeedbackCanvasObject>;
   readonly contentPoints?: ReadonlyMap<string, FeedbackPoint>;
+  readonly contentLocations?: WhiteboardFeedbackSurfaceProps['contentLocations'];
   readonly focusedObjectId?: string;
   readonly viewport: FeedbackViewport;
   readonly picking: boolean;
@@ -36,6 +41,7 @@ export function FeedbackPins({
   draft,
   objects,
   contentPoints,
+  contentLocations,
   focusedObjectId,
   viewport,
   picking,
@@ -44,11 +50,17 @@ export function FeedbackPins({
   onCancelPicking,
 }: FeedbackPinsProps) {
   const draftPoint = draft && locateDraft(draft, objects);
-  const visibleThreads = focusedObjectId
-    ? threads.filter(
-        ({ anchor: { target } }) => target.kind !== 'board' && target.objectId === focusedObjectId,
-      )
-    : threads;
+  const visibleThreads = threads.filter(({ id, anchor: { target, targetMissing } }) => {
+    const inView =
+      !focusedObjectId || (target.kind !== 'board' && target.objectId === focusedObjectId);
+    const clipped =
+      target.kind === 'content' &&
+      !targetMissing &&
+      objects.has(target.objectId) &&
+      contentLocations?.get(id)?.point === null;
+
+    return inView && !clipped;
+  });
 
   function handlePickPoint(event: MouseEvent<HTMLButtonElement>) {
     if (event.detail === 0) {
@@ -74,7 +86,11 @@ export function FeedbackPins({
           title={pinLabel(thread)}
           style={{
             ...screenPoint(
-              locateAnchor(thread.anchor, objects, contentPoints?.get(thread.id)),
+              locateAnchor(
+                thread.anchor,
+                objects,
+                contentLocations?.get(thread.id)?.point ?? contentPoints?.get(thread.id),
+              ),
               viewport,
             ),
             ...feedbackAuthorColors(thread.first.authorId),

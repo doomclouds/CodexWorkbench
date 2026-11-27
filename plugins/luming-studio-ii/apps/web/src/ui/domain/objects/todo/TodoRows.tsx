@@ -285,6 +285,7 @@ export function TodoRows(props: TodoRowsProps) {
         key={id}
         className="studio-object-todo__row"
         data-todo-item-id={id}
+        data-canvas-content-unit={id}
         data-todo-drop={position}
         onDragOver={(event) => handleDragOver(event, id)}
         onDrop={(event) => handleDrop(event, id)}

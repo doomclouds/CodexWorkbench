@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { createMcpTransport, observeMcpRoomSnapshots } from '../../src/platform/mcp/index.js';
+import { createMcpTransport, observeMcpRoomEvents } from '../../src/platform/mcp/index.js';
 
 const chunkSize = 128 * 1024;
 const boardPath = '/luming.studio.v1.WhiteboardService/GetBoardScene';
@@ -156,13 +156,38 @@ test('refuses an oversized response before downloading any bytes', async () => {
     return binaryResponse({
       status: 200,
       contentType: bodyMime,
-      size: 128 * 1024 * 1024 + 1,
+      size: 128 * 1024 * 1024 + 32 * 1024 + 1,
       downloadId: 'unsafe',
     });
   });
 
   await expect(client.postProtobuf(boardPath, new Uint8Array())).rejects.toThrow('超过大小限制');
   expect(frames).toHaveLength(1);
+});
+
+test('accepts protobuf framing around a 128 MiB backup before requesting the first chunk', async () => {
+  const frames: Frame[] = [];
+  const controller = new AbortController();
+  const { client } = transport(async (frame) => {
+    frames.push(frame);
+    if (frame.action === 'download') {
+      controller.abort();
+    }
+
+    return frame.action === 'request'
+      ? binaryResponse({
+          status: 200,
+          contentType: bodyMime,
+          size: 128 * 1024 * 1024 + 64,
+          downloadId: 'maximum-backup',
+        })
+      : { structuredContent: { ok: true } };
+  });
+
+  const path = '/luming.studio.v1.WhiteboardService/ExportBoard';
+  await expect(client.postProtobuf(path, new Uint8Array(), controller.signal)).rejects.toThrow();
+  expect(frames.map(({ action }) => action)).toEqual(['request', 'download', 'release']);
+  expect(frames[1]).toMatchObject({ transferId: 'maximum-backup', offset: 0 });
 });
 
 test('does not decode private response bytes without the host acknowledgment', async () => {
@@ -229,20 +254,12 @@ test('uses exact asset identity, rejects an expired session and leaves recovery 
   expect(invalidated).toEqual([sessionId]);
 });
 
-function panelClock(initiallyVisible: boolean) {
+function panelVisibility(initiallyVisible: boolean) {
   let visible = initiallyVisible;
-  let now = 0;
   const visibility = new Set<() => void>();
-  const tasks = new Map<() => void, number>();
   const environment = {
-    now: () => now,
     isVisible: () => visible,
-    schedule(delay: number, task: () => void) {
-      tasks.set(task, now + delay);
-
-      return () => tasks.delete(task);
-    },
-    subscribeVisibility(task: () => void) {
+    subscribe(task: () => void) {
       visibility.add(task);
 
       return () => visibility.delete(task);
@@ -256,103 +273,135 @@ function panelClock(initiallyVisible: boolean) {
     }
   }
 
-  async function advance(by: number) {
-    now += by;
-    for (const [task, at] of tasks) {
-      if (at <= now && tasks.delete(task)) {
-        task();
-      }
-    }
-    for (let turn = 0; turn < 6; turn += 1) {
-      await Promise.resolve();
-    }
-  }
-
-  return { environment, setVisibility, advance };
+  return { environment, setVisibility };
 }
 
-test('polls only while the panel is visible and never overlaps a pending snapshot', async () => {
-  const panel = panelClock(false);
+interface TestRoomEvent {
+  readonly instanceId: string;
+  readonly sequence: bigint;
+}
+
+interface TestRoomWait {
+  readonly cursor: TestRoomEvent | undefined;
+  readonly signal: AbortSignal;
+  readonly complete: (batch: readonly TestRoomEvent[]) => void;
+}
+
+test('waits once for room events and resumes from the delivered cursor after a hidden interval', async () => {
+  const panel = panelVisibility(false);
   const controller = new AbortController();
-  let complete!: (snapshot: string) => void;
-  const pending = new Promise<string>((resolve) => {
-    complete = resolve;
-  });
-  const reads: AbortSignal[] = [];
-  const snapshots: string[] = [];
+  const event = { instanceId: 'room', sequence: 42n };
+  const reads: TestRoomWait[] = [];
+  const events: TestRoomEvent[] = [];
   const errors: unknown[] = [];
   const observer = {
-    onEvent: (value: string) => snapshots.push(value),
+    onEvent: (value: TestRoomEvent) => events.push(value),
     onDisconnect: (_reason?: 'accessLost', error?: unknown) => errors.push(error),
   };
 
   try {
-    observeMcpRoomSnapshots(
-      async (signal) => {
-        reads.push(signal);
-        return pending;
-      },
+    observeMcpRoomEvents(
+      (cursor, signal) =>
+        new Promise((complete, reject) => {
+          reads.push({ cursor, signal, complete });
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+        }),
       observer,
       controller.signal,
       panel.environment,
     );
-    await panel.advance(2_000);
     expect(reads).toHaveLength(0);
 
     panel.setVisibility(true);
-    await panel.advance(0);
-    await panel.advance(2_000);
-    expect(reads).toEqual([controller.signal]);
-
-    complete('snapshot');
-    await panel.advance(0);
-    await panel.advance(599);
-    expect(snapshots).toEqual(['snapshot']);
     expect(reads).toHaveLength(1);
-    await panel.advance(1);
+    expect(reads[0]?.cursor).toBeUndefined();
+    reads[0]?.complete([event]);
+    await expect.poll(() => reads.length).toBe(2);
+    expect(events).toEqual([event]);
+    expect(reads[1]?.cursor).toEqual(event);
+
+    panel.setVisibility(false);
+    expect(reads[1]?.signal.aborted).toBe(true);
+    await Promise.resolve();
     expect(reads).toHaveLength(2);
+    panel.setVisibility(true);
+    await expect.poll(() => reads.length).toBe(3);
+    expect(reads[2]?.cursor).toEqual(event);
 
     controller.abort();
-    panel.setVisibility(true);
-    await panel.advance(2_000);
+    expect(reads[2]?.signal.aborted).toBe(true);
+    await Promise.resolve();
     expect(errors).toHaveLength(0);
-    expect(reads).toHaveLength(2);
+    expect(reads).toHaveLength(3);
+  } finally {
+    controller.abort();
+  }
+});
+
+test('retries an interrupted transport with the last delivered room cursor', async () => {
+  const panel = panelVisibility(true);
+  const controller = new AbortController();
+  const event = { instanceId: 'room', sequence: 8n };
+  const cursors: (TestRoomEvent | undefined)[] = [];
+  const errors: unknown[] = [];
+  try {
+    observeMcpRoomEvents(
+      async (cursor, signal) => {
+        cursors.push(cursor);
+        if (cursors.length === 1) {
+          return [event];
+        }
+        if (cursors.length === 2) {
+          throw new Error('Transient host interruption.');
+        }
+
+        return new Promise<never>((_resolve, reject) => {
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+        });
+      },
+      { onEvent: () => undefined, onDisconnect: (_reason, error) => errors.push(error) },
+      controller.signal,
+      panel.environment,
+    );
+
+    await expect.poll(() => cursors).toEqual([undefined, event, event]);
+    expect(errors).toEqual([]);
   } finally {
     controller.abort();
   }
 });
 
 test('ends observation when the authorized room request returns access denied', async () => {
-  const panel = panelClock(true);
+  const panel = panelVisibility(true);
   const controller = new AbortController();
   const calls: Frame[] = [];
   const { client } = transport(async (frame) => {
     calls.push(frame);
     return binaryResponse({ status: 403 });
   });
-  const snapshots: Uint8Array[] = [];
+  const events: unknown[] = [];
   const errors: { reason?: 'accessLost'; error?: unknown }[] = [];
   try {
-    observeMcpRoomSnapshots(
-      (signal) =>
-        client.postProtobuf(
-          '/luming.studio.v1.BoardRoomService/GetBoardRoom',
+    observeMcpRoomEvents(
+      async (_cursor, signal) => {
+        await client.postProtobuf(
+          '/luming.studio.v1.BoardRoomService/WaitBoardRoomEvents',
           new Uint8Array(),
           signal,
-        ),
+        );
+
+        return [];
+      },
       {
-        onEvent: (snapshot) => snapshots.push(snapshot),
+        onEvent: (event) => events.push(event),
         onDisconnect: (reason, error) => errors.push({ reason, error }),
       },
       controller.signal,
       panel.environment,
     );
-    await panel.advance(0);
-    await panel.advance(2_000);
-
-    expect(calls).toHaveLength(1);
-    expect(snapshots).toHaveLength(0);
-    expect(errors).toEqual([{ reason: 'accessLost', error: expect.any(Error) }]);
+    await expect.poll(() => errors).toEqual([{ reason: 'accessLost', error: expect.any(Error) }]);
+    expect(calls).toEqual([expect.objectContaining({ method: 'WaitBoardRoomEvents' })]);
+    expect(events).toHaveLength(0);
   } finally {
     controller.abort();
   }

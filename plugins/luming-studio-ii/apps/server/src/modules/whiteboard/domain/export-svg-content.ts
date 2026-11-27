@@ -77,17 +77,6 @@ function documentRows(data: JsonObject, count: number): string[] {
   return rows;
 }
 
-function todoRows(data: JsonObject, count: number): string[] {
-  const items = Array.isArray(data.items) ? data.items : [];
-
-  return items.slice(0, count).map((item) => {
-    const row = record(item);
-    const checked = row?.checked === true ? '✓' : '□';
-
-    return checked + ' ' + stringValue(row?.text);
-  });
-}
-
 function cellValue(cell: JsonValue): string {
   const data = record(cell);
   if (typeof data?.number === 'number') {
@@ -149,6 +138,58 @@ export function svgLabel(
   return `<text y="${y - rowHeight}" font-size="${fontSize}" text-anchor="${anchor}" fill="${fill}">${body}</text>`;
 }
 
+function todoSourceAttribute(source: JsonObject | undefined): string {
+  if (!source || typeof source.objectId !== 'string') {
+    return '';
+  }
+
+  const { objectId, boardId, blockId, itemId, version } = source;
+  const numericVersion = typeof version === 'string' ? Number(version) : version;
+  const exportedVersion = Number.isSafeInteger(numericVersion) ? numericVersion : version;
+  const reference = {
+    elementId: objectId,
+    artifactId: boardId,
+    blockId,
+    itemId,
+    version: exportedVersion,
+  };
+
+  return ` data-source-ref="${escapeXml(JSON.stringify(reference))}"`;
+}
+
+function todoCard(object: BoardObject, data: JsonObject): string {
+  const { width, height } = object.geometry;
+  const items = Array.isArray(data.items) ? data.items : [];
+  const rows = items.map(record).filter((row) => row !== undefined);
+  const count = rows.filter(({ checked }) => checked === true).length;
+  const paper = svgColor(object.appearance?.fill, '#ffffff');
+  const line = svgColor(object.appearance?.stroke, '#bfc0c0');
+  const ink = svgColor(stringValue(data.color), '#2d3142');
+  const muted = '#4f5d75';
+  const accent = '#7657c6';
+  const title = stringValue(data.title) || object.label || '任务清单';
+  const progress = rows.length ? (Math.max(width - 24, 0) * count) / rows.length : 0;
+  const heading = `<svg x="12" width="${Math.max(1, width - 72)}" height="36" overflow="hidden"><text y="25" fill="${ink}" font-size="17" font-weight="600">${escapeXml(title)}</text></svg><text x="${width - 12}" y="25" fill="${muted}" font-size="12" text-anchor="end">${count}/${rows.length}</text>`;
+  const bar = `<rect x="12" y="32" width="${Math.max(width - 24, 0)}" height="3" rx="1.5" fill="${line}"/><rect x="12" y="32" width="${progress}" height="3" rx="1.5" fill="${accent}"/>`;
+  const content = rows.map((row, index) => {
+    const checked = row.checked === true;
+    const taskId = escapeXml(stringValue(row.itemId));
+    const source = todoSourceAttribute(record(row.sourceRef));
+    const check = checked
+      ? `<path d="M17 16l3 3 5-6" fill="none" stroke="${paper}" stroke-width="1.5"/>`
+      : '';
+    const text = stringValue(row.text).replace(/\s+/gu, ' ');
+    const [caption] = compactLines(text, Math.max(0, width - (source ? 72 : 48)), 14, 1);
+    const sourceIcon = source
+      ? `<g transform="translate(${width - 24} 10)" fill="none" stroke="${accent}" stroke-width="1.4" stroke-linecap="round"><title>任务来源</title><path d="M5 8l4-4M4 5l-2 2a2.8 2.8 0 0 0 4 4l2-2M6 4l2-2a2.8 2.8 0 0 1 4 4l-2 2"/></g>`
+      : '';
+
+    return `<g transform="translate(0 ${40 + index * 32})" data-studio-task-id="${taskId}" data-checked="${checked}"${source}><title>${escapeXml(text)}</title><path d="M0 0H${width}" stroke="${line}"/><rect x="14" y="9" width="14" height="14" rx="3" fill="${checked ? accent : paper}" stroke="${checked ? accent : line}"/>${check}<text x="38" y="21" fill="${checked ? muted : ink}" font-size="14">${escapeXml(caption ?? '')}</text>${sourceIcon}</g>`;
+  });
+
+  return `<rect width="${width}" height="${height}" rx="7" fill="${paper}" stroke="${line}"/>${heading}${bar}${content.join('')}`;
+}
+
 function nativeCard(object: BoardObject, payload: PayloadRecord | undefined): string {
   const { width, height } = object.geometry;
   const data = payload?.data ?? {};
@@ -157,8 +198,6 @@ function nativeCard(object: BoardObject, payload: PayloadRecord | undefined): st
 
   if (object.kind === 'document') {
     rows = documentRows(data, count);
-  } else if (object.kind === 'todo') {
-    rows = todoRows(data, count);
   } else if (object.kind === 'table') {
     rows = tableRows(data, count);
   }
@@ -171,13 +210,16 @@ function nativeCard(object: BoardObject, payload: PayloadRecord | undefined): st
   return `<rect width="${width}" height="${height}" rx="4" fill="${fill}" stroke="${stroke}"/><g transform="translate(10 8)">${caption}</g>`;
 }
 
-function rasterUri(source: JsonValue | undefined, assets: ReadonlyMap<string, BoardExportAsset>) {
+function imageUri(source: JsonValue | undefined, assets: ReadonlyMap<string, BoardExportAsset>) {
   if (typeof source !== 'string') {
     return undefined;
   }
 
   const captured = assets.get(source);
-  if (captured && rasterMimeTypes.has(captured.mimeType)) {
+  if (
+    captured &&
+    (rasterMimeTypes.has(captured.mimeType) || captured.mimeType === 'image/svg+xml')
+  ) {
     return `data:${captured.mimeType};base64,${captured.base64}`;
   }
 
@@ -231,7 +273,7 @@ function svgImage(
     return object.kind === 'video' ? nativeCard(object, undefined) : undefined;
   }
 
-  const uri = rasterUri(source, assets);
+  const uri = imageUri(source, assets);
   if (!uri) {
     return undefined;
   }
@@ -286,11 +328,12 @@ export function svgContent(
     case 'sticker':
       return svgLabel(stringValue(data.text) || object.label, width, height, data, false);
     case 'document':
-    case 'todo':
     case 'table':
     case 'note':
     case 'link':
       return nativeCard(object, payload);
+    case 'todo':
+      return todoCard(object, data);
     default:
       return undefined;
   }

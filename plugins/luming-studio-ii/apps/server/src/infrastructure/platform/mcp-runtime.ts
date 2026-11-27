@@ -327,7 +327,9 @@ export async function loadMcpRuntime(input: RuntimeOptions) {
 
       return response;
     } catch (error) {
-      pending = undefined;
+      if (!signal.aborted || error !== signal.reason) {
+        pending = undefined;
+      }
       throw error;
     }
   }

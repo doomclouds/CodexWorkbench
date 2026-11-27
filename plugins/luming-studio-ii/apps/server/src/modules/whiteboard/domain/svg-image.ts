@@ -1,5 +1,6 @@
-const maximumSvgBytes = 1024 * 1024;
 const maximumElements = 4096;
+const maximumAttributes = 256;
+const maximumDepth = 128;
 const maximumSide = 16_384;
 const maximumPixels = 32_000_000;
 const namespace = 'http://www.w3.org/2000/svg';
@@ -10,7 +11,10 @@ const localReference = /^#[A-Za-z_][\w.:-]*$/u;
 const localPaint =
   /url\(\s*(?:"#[A-Za-z_][\w.:-]*"|'#[A-Za-z_][\w.:-]*'|#[A-Za-z_][\w.:-]*)\s*\)/giu;
 const unsafeReference = /[\\@&]|\b(?:https?|file|data|javascript|blob|ftp):|\/\/|\burl\s*\(/iu;
-const textEntity = /&(?:amp|lt|gt|quot|apos|#\d{1,7}|#x[\da-f]{1,6});/giu;
+const textEntity = /&(?:amp|lt|gt|quot|apos|#(\d{1,7})|#x([\da-fA-F]{1,6}));/gu;
+const invalidXmlCharacters = /(?:(?![\t\n\r])\p{Cc}|[\ufffe\uffff])/u;
+const xmlWhitespace = /[\t\n\r ]*/uy;
+const absoluteDimension = /^(\d+(?:\.\d+)?|\.\d+)(?:px)?$/u;
 const svgElements = new Set([
   'svg',
   'g',
@@ -55,6 +59,12 @@ interface SvgRoot {
   readonly empty: boolean;
 }
 
+export interface SafeSvgImage {
+  readonly markup: string;
+  readonly size: { readonly width: number; readonly height: number };
+  readonly originalDimensionsMarkup?: string;
+}
+
 function safeReferences(value: string): boolean {
   return !unsafeReference.test(value.replace(localPaint, ''));
 }
@@ -80,14 +90,25 @@ function safeAttribute(name: string, value: string): boolean {
 
 function readAttributes(tail: string): ReadonlyMap<string, string> | undefined {
   const attributes = new Map<string, string>();
-  const assignment = /\s+([A-Za-z_][\w:-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/guy;
+  const assignment = /[\t\n\r ]+([A-Za-z_][\w:-]*)[\t\n\r ]*=[\t\n\r ]*(?:"([^"]*)"|'([^']*)')/uy;
   let offset = 0;
-  while (tail.slice(offset).trim()) {
+  while (offset < tail.length) {
     assignment.lastIndex = offset;
     const match = assignment.exec(tail);
-    const name = match?.[1];
-    const value = match?.[2] ?? match?.[3];
-    if (name === undefined || value === undefined || attributes.has(name)) {
+    if (!match) {
+      xmlWhitespace.lastIndex = offset;
+
+      return xmlWhitespace.test(tail) && xmlWhitespace.lastIndex === tail.length
+        ? attributes
+        : undefined;
+    }
+
+    const name = match[1];
+    const value = match[2] ?? match[3];
+    if (name === undefined || value === undefined) {
+      return undefined;
+    }
+    if (attributes.has(name) || attributes.size >= maximumAttributes) {
       return undefined;
     }
     if (!safeAttribute(name, value)) {
@@ -105,13 +126,29 @@ function safeText(text: string, parent: string | undefined): boolean {
   if (parent === 'style') {
     const css = text.trim().replace(/^<!\[CDATA\[([\s\S]*)\]\]>$/u, '$1');
 
-    return !css.includes('<') && safeReferences(css);
+    return !css.includes('<') && !css.includes(']]>') && safeReferences(css);
   }
   if (!parent) {
-    return text.trim() === '';
+    return /^[\t\n\r ]*$/u.test(text);
+  }
+  if (text.includes('<') || text.includes(']]>')) {
+    return false;
   }
 
-  return !text.includes('<') && !text.replace(textEntity, '').includes('&');
+  return !text
+    .replace(textEntity, (_entity, decimal: string | undefined, hex: string | undefined) => {
+      if (decimal === undefined && hex === undefined) {
+        return '';
+      }
+
+      const point = decimal === undefined ? Number.parseInt(hex ?? '', 16) : Number(decimal);
+      const whitespace = point === 9 || point === 10 || point === 13;
+      const basic = (point >= 0x20 && point <= 0xd7ff) || (point >= 0xe000 && point <= 0xfffd);
+      const supplementary = point >= 0x10000 && point <= 0x10ffff;
+
+      return whitespace || basic || supplementary ? '' : '&';
+    })
+    .includes('&');
 }
 
 function readSvgRoot(source: string): SvgRoot | undefined {
@@ -132,17 +169,17 @@ function readSvgRoot(source: string): SvgRoot | undefined {
 
     offset = match.index + markup.length;
     if (closing) {
-      if (tail.trim() || stack.pop() !== name) {
+      if (!/^[\t\n\r ]*$/u.test(tail) || stack.pop() !== name) {
         return undefined;
       }
 
       continue;
     }
 
-    const empty = /\/\s*$/u.test(tail);
-    const parameters = readAttributes(empty ? tail.replace(/\/\s*$/u, '') : tail);
+    const empty = tail.endsWith('/');
+    const parameters = readAttributes(empty ? tail.slice(0, -1) : tail);
     elements += 1;
-    if (!parameters || elements > maximumElements) {
+    if (!parameters || elements > maximumElements || stack.length >= maximumDepth) {
       return undefined;
     }
 
@@ -169,14 +206,8 @@ function dimensions(attributes: SvgRoot['attributes']) {
     .map(Number);
   const viewWidth = viewBox?.length === 4 ? viewBox[2] : undefined;
   const viewHeight = viewBox?.length === 4 ? viewBox[3] : undefined;
-  const rawWidth = attributes
-    .get('width')
-    ?.trim()
-    .match(/^(\d+(?:\.\d+)?|\.\d+)(?:px)?$/u)?.[1];
-  const rawHeight = attributes
-    .get('height')
-    ?.trim()
-    .match(/^(\d+(?:\.\d+)?|\.\d+)(?:px)?$/u)?.[1];
+  const rawWidth = attributes.get('width')?.trim().match(absoluteDimension)?.[1];
+  const rawHeight = attributes.get('height')?.trim().match(absoluteDimension)?.[1];
   const width = Math.ceil(rawWidth === undefined ? (viewWidth ?? 300) : Number(rawWidth));
   const height = Math.ceil(rawHeight === undefined ? (viewHeight ?? 150) : Number(rawHeight));
   const validWidth = width > 0 && width <= maximumSide;
@@ -190,14 +221,10 @@ function dimensions(attributes: SvgRoot['attributes']) {
 export function looksLikeSvgImage(bytes: Uint8Array): boolean {
   const head = new TextDecoder().decode(bytes.subarray(0, 4096)).trimStart();
 
-  return head.startsWith('<');
+  return !head || head.startsWith('<');
 }
 
-export function svgForImagePreview(bytes: Uint8Array): string | undefined {
-  if (bytes.byteLength > maximumSvgBytes) {
-    return undefined;
-  }
-
+export function readSafeSvgImage(bytes: Uint8Array): SafeSvgImage | undefined {
   let decoded: string;
   try {
     decoded = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
@@ -210,6 +237,10 @@ export function svgForImagePreview(bytes: Uint8Array): string | undefined {
   }
 
   const source = decoded.replace(xmlDeclaration, '').replace(/<!--[\s\S]*?-->/gu, '');
+  if (invalidXmlCharacters.test(source)) {
+    return undefined;
+  }
+
   const root = readSvgRoot(source);
   const size = root ? dimensions(root.attributes) : undefined;
   if (!root || !size) {
@@ -218,9 +249,37 @@ export function svgForImagePreview(bytes: Uint8Array): string | undefined {
 
   const extra = [...root.attributes]
     .filter(([name]) => !['width', 'height', 'xmlns'].includes(name))
-    .map(([name, value]) => ` ${name}="${value.replaceAll('"', '&quot;')}"`)
-    .join('');
-  const start = `<svg xmlns="${namespace}" width="${size.width}" height="${size.height}"${extra}`;
+    .map(([name, value]) => {
+      const quote = value.includes('"') ? "'" : '"';
 
-  return start + (root.empty ? '/>' : '>') + source.slice(root.end);
+      return ` ${name}=${quote}${value}${quote}`;
+    })
+    .join('');
+  const xlink =
+    !root.attributes.has('xmlns:xlink') && source.includes('xlink:href')
+      ? ` xmlns:xlink="${xlinkNamespace}"`
+      : '';
+  const start = `<svg xmlns="${namespace}" width="${size.width}" height="${size.height}"${xlink}${extra}`;
+  const markup = start + (root.empty ? '/>' : '>') + source.slice(root.end);
+  const validDimensions = ['width', 'height'].every((name) => {
+    const value = root.attributes.get(name)?.trim();
+
+    return value === undefined || absoluteDimension.test(value);
+  });
+  const canKeepOriginalDimensions = root.attributes.has('xmlns') && !xlink && validDimensions;
+
+  return {
+    markup,
+    size,
+    originalDimensionsMarkup: canKeepOriginalDimensions ? source.trim() : undefined,
+  };
+}
+
+export function encodeSafeSvgImage(image: SafeSvgImage, maximumBytes: number): Uint8Array {
+  const encoder = new TextEncoder();
+  const bytes = encoder.encode(image.markup);
+
+  return bytes.byteLength > maximumBytes && image.originalDimensionsMarkup
+    ? encoder.encode(image.originalDimensionsMarkup)
+    : bytes;
 }

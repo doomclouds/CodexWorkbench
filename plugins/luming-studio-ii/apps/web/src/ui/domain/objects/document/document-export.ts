@@ -31,7 +31,14 @@ const markTags = [
   ['code', 'code'],
 ] as const;
 const alignments = new Set(['left', 'right', 'center', 'justify']);
-const mimeTypes = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/avif']);
+const mimeTypes = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'image/gif',
+  'image/avif',
+  'image/svg+xml',
+]);
 const listKinds = new Set(['bulletListItem', 'numberedListItem', 'checkListItem']);
 const base64Chunk = 32 * 1024;
 const filenameSpecial = /[<>:"/\\|?*]/gu;

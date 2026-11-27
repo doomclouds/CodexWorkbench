@@ -46,6 +46,7 @@ function createGuestSharingMock() {
   let joined = false;
   let revoked = false;
   let canComment = true;
+  let scope: SharingScope = SharingScope.LAN;
   const service = createBoardSharingService((path, body) => {
     const method = path.split('/').at(-1) ?? '';
     calls.push(method);
@@ -91,7 +92,7 @@ function createGuestSharingMock() {
       sharing: {
         boardId: sampleBoardId,
         enabled: true,
-        scope: SharingScope.LAN,
+        scope,
         version,
         role: canComment ? SharingRole.COMMENTER : SharingRole.VIEWER,
         canEdit: false,
@@ -105,6 +106,9 @@ function createGuestSharingMock() {
   return {
     service,
     calls,
+    useLocalScope() {
+      scope = SharingScope.LOCAL;
+    },
     limitToViewing() {
       canComment = false;
     },
@@ -114,9 +118,12 @@ function createGuestSharingMock() {
   };
 }
 
+type ViewReader = NonNullable<StudioAppProps['navigation']['readBoardView']>;
+
 function createGuestAppMock(
   url: string,
   createRoomSession?: NonNullable<StudioAppProps['guest']>['createRoomSession'],
+  initialBoardView?: ReturnType<ViewReader>,
 ) {
   const previousUrl = window.location.href;
   const previousState: unknown = window.history.state;
@@ -126,6 +133,7 @@ function createGuestAppMock(
   const sharing = createGuestSharingMock();
   let refreshAccess: (() => void) | undefined;
   let catalogReads = 0;
+  let savedView = initialBoardView;
   const props: StudioAppProps = {
     catalog: {
       listBoards() {
@@ -142,7 +150,15 @@ function createGuestAppMock(
       read: readStudioLocation,
       write: writeStudioLocation,
       subscribe: subscribeStudioLocation,
+      readBoardView: () => savedView,
     },
+    onViewContext:
+      initialBoardView &&
+      ((view) => {
+        if (view) {
+          savedView = view;
+        }
+      }),
     preferences: {
       layout: 'grid',
       resolvedTheme: 'dark',
@@ -150,6 +166,7 @@ function createGuestAppMock(
       rememberTheme: () => undefined,
     },
     createCommandId: () => 'guest-command',
+    copyShareLink: () => Promise.resolve(),
     guest: {
       service: createWhiteboardService(guestBoard.post),
       sharingService: sharing.service,
@@ -212,6 +229,167 @@ function enterName(host: HTMLElement, name: string): void {
   input.dispatchEvent(new InputEvent('input', { bubbles: true, data: name }));
 }
 
+function readCamera(host: HTMLElement) {
+  return host.querySelector<HTMLElement>('.studio-canvas__world')?.style.transform;
+}
+
+function mockCanvasMetrics(width: number, height: number, ratio = 1) {
+  const metric = 'getBoundingClientRect';
+  const pixelRatio = 'devicePixelRatio';
+  const originalBounds = Object.getOwnPropertyDescriptor(HTMLElement.prototype, metric);
+  const originalPixelRatio = Object.getOwnPropertyDescriptor(window, pixelRatio);
+  let bounds = new DOMRect(0, 0, width, height);
+  Object.defineProperty(HTMLElement.prototype, metric, {
+    configurable: true,
+    value: () => bounds,
+  });
+  Object.defineProperty(window, pixelRatio, { configurable: true, value: ratio });
+
+  return {
+    resize(width: number, height: number) {
+      bounds = new DOMRect(0, 0, width, height);
+    },
+    restore() {
+      if (originalBounds) {
+        Object.defineProperty(HTMLElement.prototype, metric, originalBounds);
+      } else {
+        Reflect.deleteProperty(HTMLElement.prototype, metric);
+      }
+      if (originalPixelRatio) {
+        Object.defineProperty(window, pixelRatio, originalPixelRatio);
+      } else {
+        Reflect.deleteProperty(window, pixelRatio);
+      }
+    },
+  };
+}
+
+async function afterCameraFrame() {
+  await act(async () => {
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => resolve());
+    });
+  });
+}
+
+async function resetCameraZoom(host: HTMLElement) {
+  const canvas = host.querySelector('[data-canvas-root]');
+  await act(async () =>
+    canvas?.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        bubbles: true,
+        code: 'Digit0',
+        key: ')',
+        shiftKey: true,
+      }),
+    ),
+  );
+}
+
+test.each([
+  [960, 600, 1],
+  [1440, 900, 2],
+])(
+  'fits owner and invited guest equally in a %s by %s CSS pixel canvas at DPR %s',
+  async (width, height, ratio) => {
+    const metrics = mockCanvasMetrics(width, height, ratio);
+    try {
+      const owner = createGuestAppMock(boardUrl);
+      let ownerCamera: string | undefined;
+      try {
+        await owner.open('owner');
+        await afterCameraFrame();
+        const expectedZoom = (width - 144) / 6160;
+        ownerCamera = readCamera(owner.host);
+        expect(ownerCamera).toContain('scale(' + expectedZoom + ')');
+      } finally {
+        owner.dispose();
+      }
+
+      const guest = createGuestAppMock(boardUrl + '#invite=' + invitationToken);
+      try {
+        await guest.open('invited');
+        await act(async () => enterName(guest.host, guestName));
+        await act(async () => guestButton(guest.host, '打开白板').click());
+        await afterCameraFrame();
+        expect(readCamera(guest.host)).toBe(ownerCamera);
+        expect(guest.host.querySelector('[aria-label="返回 Luming Studio"]')).toBeNull();
+
+        await resetCameraZoom(guest.host);
+        const manualCamera = readCamera(guest.host);
+        expect(manualCamera).toContain('scale(1)');
+        await guest.refresh();
+        metrics.resize(width - 64, height - 64);
+        await act(async () => window.dispatchEvent(new Event('resize')));
+        await afterCameraFrame();
+        expect(readCamera(guest.host)).toBe(manualCamera);
+      } finally {
+        guest.dispose();
+      }
+    } finally {
+      metrics.restore();
+    }
+  },
+);
+
+test('uses the saved camera ahead of fitting on a remounted guest board', async () => {
+  const metrics = mockCanvasMetrics(960, 600);
+  const app = createGuestAppMock(boardUrl + '#invite=' + invitationToken, undefined, {
+    boardId: sampleBoardId,
+    selectedIds: [],
+    viewport: { x: 80, y: 35, zoom: 0.55 },
+  });
+
+  try {
+    await app.open('invited');
+    await act(async () => enterName(app.host, guestName));
+    await act(async () => guestButton(app.host, '打开白板').click());
+    await afterCameraFrame();
+    expect(readCamera(app.host)).toBe('translate(80px, 35px) scale(0.55)');
+
+    await resetCameraZoom(app.host);
+    const manualCamera = readCamera(app.host);
+    expect(manualCamera).toContain('scale(1)');
+    await app.open('remounted');
+    await afterCameraFrame();
+    expect(readCamera(app.host)).toBe(manualCamera);
+  } finally {
+    app.dispose();
+    metrics.restore();
+  }
+});
+
+test('uses authorized guest sharing scope and switches theme without leaving the board', async () => {
+  const app = createGuestAppMock(boardUrl + '#invite=' + invitationToken);
+  try {
+    await app.open('invited');
+    await act(async () => enterName(app.host, guestName));
+    await act(async () => guestButton(app.host, '打开白板').click());
+
+    const share = guestButton(app.host, '分享');
+    Object.defineProperty(share, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => new DOMRect(720, 40, 80, 32),
+    });
+    expect(share.getAttribute('aria-description')).toBe('局域网共享已开启');
+    app.sharing.useLocalScope();
+    await app.refresh();
+    expect(share.hasAttribute('aria-description')).toBe(false);
+
+    await act(async () => share.click());
+    await act(async () => guestButton(app.host, '切换为明亮主题').click());
+    expect(app.host.querySelector('.studio-whiteboard-app')?.getAttribute('data-theme')).toBe(
+      'light',
+    );
+    expect(app.host.querySelector('[aria-label="分享"]')?.getAttribute('aria-expanded')).toBe(
+      'true',
+    );
+    expect(app.guestBoard.sceneReads).toEqual([sampleBoardId]);
+  } finally {
+    app.dispose();
+  }
+});
+
 test('joins an explicit invitation, strips the token and resumes only the guest board', async () => {
   const app = createGuestAppMock(boardUrl + '#invite=' + invitationToken);
   try {
@@ -219,6 +397,7 @@ test('joins an explicit invitation, strips the token and resumes only the guest 
 
     expect(app.sharing.calls).toEqual([inspectBoardInvitation.name]);
     expect(app.host.textContent).toContain('你被邀请评论这块白板。');
+    expect(app.host.querySelector('.studio-app-page[data-guest-invitation]')).not.toBeNull();
     expect(app.guestBoard.sceneReads).toEqual([]);
     expect(app.ownerBoard.sceneReads).toEqual([]);
 
@@ -234,6 +413,7 @@ test('joins an explicit invitation, strips the token and resumes only the guest 
     ]);
     expect(app.guestBoard.sceneReads).toEqual([sampleBoardId]);
     expect(app.host.querySelector('[data-canvas-root]')).not.toBeNull();
+    expect(app.host.querySelector('.studio-app-page[data-guest-invitation]')).toBeNull();
     expect(app.host.querySelector('[aria-label="返回 Luming Studio"]')).toBeNull();
     expect(app.host.querySelector('[aria-label="白板名称"]')).toHaveProperty('readOnly', true);
     expect(app.host.querySelector('[aria-label="备注"]')).toHaveProperty('disabled', false);

@@ -161,6 +161,7 @@ const nativeReaders = new Map<
 >([
   ['table', readTableEdit],
   ['html', readEmbedEdit],
+  ['diagram', readEmbedEdit],
   ['sticker', readStickerEdit],
   ['image', readCropEdit],
 ]);

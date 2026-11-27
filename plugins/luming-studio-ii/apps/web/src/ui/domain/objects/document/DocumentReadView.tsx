@@ -182,6 +182,7 @@ function blockAttributes(
 
   return {
     'data-document-read-block': block.id,
+    'data-canvas-content-unit': block.id,
     'data-document-annotation-target': annotation || undefined,
     'data-document-match': matchingIds?.has(block.id) || undefined,
     'data-document-current': selectedId === block.id || undefined,

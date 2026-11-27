@@ -164,7 +164,10 @@ function allowedLibrary(file, family, specifier) {
   }
 
   return (
-    reactLibraries.has(specifier) || (family === 'document' && documentLibraries.has(specifier))
+    reactLibraries.has(specifier) ||
+    (family === 'document' && documentLibraries.has(specifier)) ||
+    (stem(file) === resolve(objectsRoot, 'sticker/sticker-catalog') &&
+      specifier === '@codexworkbench/luming-studio-ii-contracts/whiteboard/stickers')
   );
 }
 

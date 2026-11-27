@@ -1,5 +1,5 @@
 export { todoExtension } from './canvas-extension.js';
-export { TodoObject } from './TodoObject.js';
+export { isTodoOverview, TodoObject } from './TodoObject.js';
 export { applyTodoObjectEdit } from './todo-edit.js';
 export type {
   TodoContentAnnotation,

@@ -59,6 +59,7 @@ const gestureKinds: Record<GesturePreview['kind'], BoardRoomGestureKind> = {
 
 function participantWire({
   expiresAtUnixMs,
+  activityAtUnixMs,
   gesture,
   gestureExpiresAtUnixMs,
   ...participant
@@ -66,6 +67,7 @@ function participantWire({
   return {
     ...participant,
     expiresAtUnixMs: BigInt(expiresAtUnixMs),
+    activityAtUnixMs: activityAtUnixMs === undefined ? undefined : BigInt(activityAtUnixMs),
     gesture: gesture && { kind: gestureKinds[gesture.kind], changes: [...gesture.changes] },
     gestureExpiresAtUnixMs:
       gestureExpiresAtUnixMs === undefined ? undefined : BigInt(gestureExpiresAtUnixMs),
@@ -86,6 +88,8 @@ function payloadWire(payload: RoomEventPayload): WirePayload {
         timer,
         agentWorkspaces,
         canReleaseAgentActivity,
+        feedbackVersion,
+        suggestionsVersion,
       } = payload.snapshot;
 
       return {
@@ -98,6 +102,8 @@ function payloadWire(payload: RoomEventPayload): WirePayload {
           timer: timerWire(timer),
           agentWorkspaces: agentWorkspaces.map(agentWorkspaceWire),
           canReleaseAgentActivity,
+          feedbackVersion,
+          suggestionsVersion,
         },
       };
     }
@@ -133,6 +139,10 @@ function payloadWire(payload: RoomEventPayload): WirePayload {
     }
     case 'accessLost':
       return { case: 'accessLost', value: {} };
+    case 'feedbackChanged':
+      return { case: 'feedbackChanged', value: { version: payload.version } };
+    case 'suggestionsChanged':
+      return { case: 'suggestionsChanged', value: { version: payload.version } };
   }
 }
 
@@ -155,7 +165,7 @@ function encodeFrame(event: RoomEvent): string {
   return 'id: ' + event.sequence + '\ndata: ' + data + '\n\n';
 }
 
-function compactPayload(event: RoomEvent): RoomEventPayload {
+export function compactPayload(event: RoomEvent): RoomEventPayload {
   const { payload } = event;
   if (payload.kind === 'contentChanged') {
     return {

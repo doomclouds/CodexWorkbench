@@ -36,6 +36,7 @@ export type {
 export { SharingAccessError } from './access.js';
 
 const browserSessionMillis = 365 * 24 * 60 * 60 * 1_000;
+const visitUpdateInterval = 30_000;
 
 export function validBrowserCredential(value: string) {
   return isBrowserCredential(value);
@@ -115,6 +116,7 @@ function join(
     role: invitation.role,
     removed: false,
     invitationVersion: invitation.version,
+    lastSeenAtMillis: now,
   };
   writer.saveMember(boardId, member);
 
@@ -185,7 +187,21 @@ export function createSharingApplication(
 
       return session !== undefined && session.expiresAt <= services.now();
     },
-    guestAccess: (boardId, actorId, scope) =>
-      repository.read((reader) => readGuestSession(reader, services, boardId, actorId, scope)),
+    guestAccess(boardId, actorId, scope) {
+      const now = services.now();
+      const session = repository.read((reader) =>
+        readGuestSession(reader, services, boardId, actorId, scope, now),
+      );
+
+      if (
+        session &&
+        (session.lastSeenAtMillis === undefined ||
+          now - session.lastSeenAtMillis >= visitUpdateInterval)
+      ) {
+        repository.write((writer) => writer.touchMember(boardId, actorId, now));
+      }
+
+      return session;
+    },
   };
 }

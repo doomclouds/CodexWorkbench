@@ -1,3 +1,5 @@
+import { maximumImageBytes } from './board-image.js';
+
 const boardParameter = 'board';
 const invitationParameter = 'invite';
 const viewParameter = 'view';
@@ -9,6 +11,7 @@ const archiveTooLargeStatus = 413;
 const archiveAssetPath = /^\/studio-archive-assets\/[A-Za-z0-9_-]{1,128}\/[A-Za-z0-9_-]{1,128}$/u;
 const layoutKey = 'luming-studio-ii:library-layout';
 const themeKey = 'luming-studio-ii:theme';
+const darkColorScheme = '(prefers-color-scheme: dark)';
 const guestAccessInterval = 3_000;
 const guestRequestHeaders = { 'x-luming-guest': '1', 'content-type': protobufContentType };
 
@@ -17,6 +20,7 @@ export { prepareBoardImage } from './board-image.js';
 export { prepareBoardVideo } from './board-video.js';
 export { renderBrowserVectorExport } from './board-vector.js';
 export { boardRoomClock, subscribeGuestRoomEvents, subscribeRoomEvents } from './room-events.js';
+export { createRoomStreamTransport } from './room-stream.js';
 
 type LibraryLayout = 'grid' | 'list';
 type StudioTheme = 'light' | 'dark';
@@ -86,11 +90,9 @@ export function resolveArchiveAssetUrl(source: string): string {
   return archiveAssetPath.test(source) ? new URL(source, window.location.origin).href : source;
 }
 
-const maximumDocumentImageBytes = 8 * 1024 * 1024;
-
 export async function readDocumentImageFile(file: File): Promise<Uint8Array> {
-  if (file.size <= 0 || file.size > maximumDocumentImageBytes) {
-    throw new Error('文档图片的大小必须在 8 MiB 以内。');
+  if (file.size <= 0 || file.size > maximumImageBytes) {
+    throw new Error('文档图片的大小必须在 20 MiB 以内。');
   }
 
   return new Uint8Array(await file.arrayBuffer());
@@ -150,14 +152,20 @@ export function subscribeStudioLocation(listener: () => void) {
   };
 }
 
+function preferredTheme(systemPrefersDark: boolean): StudioTheme {
+  const theme = window.localStorage.getItem(themeKey);
+  if (theme === 'light' || theme === 'dark') {
+    return theme;
+  }
+
+  return systemPrefersDark ? 'dark' : 'light';
+}
+
 export function readPreferences(): { layout: LibraryLayout; resolvedTheme: StudioTheme } {
   const layout = window.localStorage.getItem(layoutKey);
-  const theme = window.localStorage.getItem(themeKey);
-  const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-
   return {
     layout: layout === 'list' ? 'list' : 'grid',
-    resolvedTheme: theme === 'light' || theme === 'dark' ? theme : systemTheme,
+    resolvedTheme: preferredTheme(window.matchMedia(darkColorScheme).matches),
   };
 }
 
@@ -167,6 +175,18 @@ export function rememberLayout(layout: LibraryLayout) {
 
 export function rememberTheme(theme: StudioTheme) {
   window.localStorage.setItem(themeKey, theme);
+}
+
+export function subscribeTheme(listener: (theme: StudioTheme) => void): () => void {
+  const media = window.matchMedia(darkColorScheme);
+
+  function updateTheme() {
+    listener(preferredTheme(media.matches));
+  }
+
+  media.addEventListener('change', updateTheme);
+  updateTheme();
+  return () => media.removeEventListener('change', updateTheme);
 }
 
 async function postBinary(
@@ -285,7 +305,8 @@ interface BoardDownload {
 }
 
 export function downloadBoardFile({ filename, mimeType, content }: BoardDownload): void {
-  const url = URL.createObjectURL(new Blob([new Uint8Array(content)], { type: mimeType }));
+  const type = mimeType === 'text/html' ? 'application/octet-stream' : mimeType;
+  const url = URL.createObjectURL(new Blob([new Uint8Array(content)], { type }));
   const anchor = document.createElement('a');
   anchor.href = url;
   anchor.download = filename;

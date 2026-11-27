@@ -1,3 +1,5 @@
+import { renderThumbnailSticker } from './thumbnail-sticker.js';
+
 interface Point {
   readonly x: number;
   readonly y: number;
@@ -12,6 +14,8 @@ export interface CatalogThumbnailObject extends Point {
   readonly rotation: number;
   readonly appearance?: string;
   readonly detail?: string;
+  readonly content?: JsonRecord;
+  readonly html?: string;
   readonly image?: string;
 }
 
@@ -144,6 +148,171 @@ function previewLabel(label: string, frame: Frame) {
   return `<text x="${centerX}" y="${centerY}" text-anchor="middle" fill="${ink}" font-family="sans-serif" font-size="9">${xml(display)}</text>`;
 }
 
+function textValue(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
+function blockText(value: unknown): string {
+  if (!Array.isArray(value)) {
+    return textValue(value);
+  }
+
+  return value
+    .slice(0, 120)
+    .map((run: unknown) => {
+      const entry = record(run);
+      const children = entry?.content;
+
+      return entry?.type === 'link' && Array.isArray(children)
+        ? children
+            .slice(0, 24)
+            .map((item: unknown) => textValue(record(item)?.text))
+            .join('')
+        : textValue(entry?.text ?? run);
+    })
+    .join('');
+}
+
+function documentLines(content: JsonRecord, count: number) {
+  const pending: unknown[] = Array.isArray(content.blocks)
+    ? content.blocks.slice(0, 48).reverse()
+    : [];
+  const lines: string[] = [];
+  for (let visited = 0; visited < 48 && pending.length && lines.length < count; visited += 1) {
+    const block = record(pending.pop());
+    const text = blockText(block?.content) || textValue(record(block?.props)?.caption);
+    if (text.trim()) {
+      lines.push(text);
+    }
+    if (Array.isArray(block?.children)) {
+      pending.push(...block.children.slice(0, 48).reverse());
+    }
+  }
+
+  return lines;
+}
+
+function todoLines(content: JsonRecord, count: number) {
+  const items: unknown[] = Array.isArray(content.items) ? content.items : [];
+
+  return items.slice(0, count).map((raw) => {
+    const item = record(raw);
+
+    return (item?.checked === true ? '✓ ' : '□ ') + textValue(item?.text);
+  });
+}
+
+function truncateLine(text: string, width: number, fontSize: number) {
+  const end = width / fontSize;
+  let extent = 0;
+  let result = '';
+  for (const character of text.trim().replace(/\s+/gu, ' ').slice(0, 360)) {
+    extent += character.codePointAt(0)! > 255 ? 1 : 0.58;
+    if (extent > end) {
+      return result + '…';
+    }
+
+    result += character;
+  }
+
+  return result;
+}
+
+function previewTextContent(object: CatalogThumbnailObject, frame: Frame, scale: number) {
+  const { content, kind, label } = object;
+  if (!content || frame.width < 27 || frame.height < 12) {
+    return undefined;
+  }
+
+  const isCard = kind === 'document' || kind === 'todo';
+  const plain = textValue(content.text);
+  if (!isCard && !plain.trim()) {
+    return undefined;
+  }
+
+  const textSize = typeof content.fontSize === 'number' ? content.fontSize : 15;
+  const fontSize = Math.min(16, Math.max(5, textSize * scale));
+  const pad = Math.max(2, fontSize * 0.5);
+  const step = fontSize * 1.35;
+  const count = Math.min(12, Math.floor((frame.height - pad * 2) / step));
+  if (count < 1) {
+    return undefined;
+  }
+
+  const title = textValue(content.title) || label;
+  const lines =
+    kind === 'document' ? documentLines(content, count - 1) : todoLines(content, count - 1);
+  const text = isCard ? [title, ...lines] : plain.split('\n', count);
+  const x = frame.x + pad;
+  const y = frame.y + pad + fontSize;
+  const rows = text
+    .map((line, index) => {
+      const display = truncateLine(line, frame.width - pad * 2, fontSize);
+      const weight = isCard && index === 0 ? ' font-weight="bold"' : '';
+
+      return `<tspan x="${x}" y="${y + index * step}"${weight}>${xml(display)}</tspan>`;
+    })
+    .join('');
+
+  return rows
+    ? `<text fill="${color(content.color, ink)}" font-family="sans-serif" font-size="${fontSize}">${rows}</text>`
+    : undefined;
+}
+
+function detailedContent(
+  object: CatalogThumbnailObject,
+  frame: Frame,
+  scale: number,
+  shape: string,
+) {
+  if (object.kind === 'sticker') {
+    const graphic = renderThumbnailSticker(object.content?.stickerId, dimensions(frame));
+
+    return graphic ?? previewLabel(textValue(object.content?.fallback) || object.label, frame);
+  }
+  if (object.html) {
+    const { x, y } = frame;
+    const size = `width="${object.width}" height="${object.height}"`;
+
+    return `${shape}<g transform="translate(${x} ${y}) scale(${scale})"><foreignObject ${size} style="overflow:hidden">${object.html}</foreignObject></g>`;
+  }
+  if (object.image && inlineImage.test(object.image)) {
+    return shape + previewImage(object.image, object.content, frame);
+  }
+
+  const text = previewTextContent(object, frame, scale);
+
+  return text === undefined ? undefined : shape + text;
+}
+
+function finiteNumber(value: unknown, fallback: number) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function previewImage(image: string, data: JsonRecord | undefined, frame: Frame) {
+  const crop = record(data?.crop);
+  const natural = record(data?.naturalSize);
+  const naturalWidth = finiteNumber(natural?.width, 0);
+  const naturalHeight = finiteNumber(natural?.height, 0);
+  const usableSize = [naturalWidth, naturalHeight].every(
+    (value) => Number.isInteger(value) && value > 0 && value <= 0xffffffff,
+  );
+
+  if (!crop || !usableSize) {
+    return `<image ${dimensions(frame)} preserveAspectRatio="xMidYMid meet" href="${image}"/>`;
+  }
+
+  const { width, height } = frame;
+  const zoom = Math.max(1, Math.min(10, finiteNumber(crop.zoom, 1)));
+  const scale = Math.max(width / naturalWidth, height / naturalHeight) * zoom;
+  const imageWidth = naturalWidth * scale;
+  const imageHeight = naturalHeight * scale;
+  const x = (width - imageWidth) * Math.max(0, Math.min(1, finiteNumber(crop.x, 0.5)));
+  const y = (height - imageHeight) * Math.max(0, Math.min(1, finiteNumber(crop.y, 0.5)));
+
+  return `<svg ${dimensions(frame)} viewBox="0 0 ${width} ${height}" overflow="hidden"><image x="${x}" y="${y}" width="${imageWidth}" height="${imageHeight}" preserveAspectRatio="none" href="${image}"/></svg>`;
+}
+
 function point(input: unknown): Point | undefined {
   const value = record(input);
   const x = value?.x;
@@ -207,11 +376,7 @@ function appearance(object: CatalogThumbnailObject) {
   return { fill, stroke, dash };
 }
 
-function previewObject(
-  object: CatalogThumbnailObject,
-  projection: Projection,
-  includeImages: boolean,
-) {
+function previewObject(object: CatalogThumbnailObject, projection: Projection, detailed: boolean) {
   const { fill, stroke, dash } = appearance(object);
   if (object.kind === 'connector' || object.kind === 'arrow') {
     return previewConnector(object, projection, stroke);
@@ -224,11 +389,8 @@ function previewObject(
   const info = readRecord(object.detail);
   const paint = `fill="${fill}" stroke="${stroke}" stroke-width="1"${dash}`;
   const shape = previewShape(frame, info?.outline, paint);
-  const image =
-    includeImages && object.image && inlineImage.test(object.image) ? object.image : undefined;
-  const content = image
-    ? `${shape}<image ${dimensions(frame)} preserveAspectRatio="xMidYMid meet" href="${image}"/>`
-    : shape + previewLabel(object.label, frame);
+  const details = detailed ? detailedContent(object, frame, projection.scale, shape) : undefined;
+  const content = details ?? shape + previewLabel(object.label, frame);
 
   if (object.rotation === 0) {
     return content;
@@ -257,13 +419,9 @@ function projectScene({ objects, left, top, right, bottom }: CatalogThumbnailSce
   };
 }
 
-function renderOverview(
-  scene: CatalogThumbnailScene,
-  projection: Projection,
-  includeImages: boolean,
-) {
+function renderOverview(scene: CatalogThumbnailScene, projection: Projection, detailed: boolean) {
   const content = scene.objects
-    .map((object) => previewObject(object, projection, includeImages))
+    .map((object) => previewObject(object, projection, detailed))
     .join('');
 
   return new TextEncoder().encode(

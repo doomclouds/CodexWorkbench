@@ -136,6 +136,14 @@ async function inspect(filePath, code) {
 
 const permitted = [
   [
+    'src/entrypoints/http/room-event-stream.ts',
+    "import { ConnectError } from '@connectrpc/connect';\nimport { connectNodeAdapter } from '@connectrpc/connect-node';",
+  ],
+  [
+    'tests/integration/room-event-stream.test.ts',
+    "import { createClient } from '@connectrpc/connect';\nimport { createGrpcWebTransport } from '@connectrpc/connect-node';",
+  ],
+  [
     'src/entrypoints/http/suggestion-routes.ts',
     `import { BoardSuggestionService } from '${suggestionsProtocol}';\nimport type { BoardSuggestionsApplication } from '@board-app';`,
   ],
@@ -166,6 +174,11 @@ const permitted = [
   ],
   ['src/infrastructure/platform/png-renderer.ts', "import { Resvg } from '@resvg/resvg-wasm';"],
   ['src/infrastructure/adapters/feedback/content-source.ts', "import { parse } from 'parse5';"],
+  [catalogAdapter + 'thumbnail-html.ts', "import { parse } from 'parse5';"],
+  [
+    catalog + 'domain/thumbnail-sticker.ts',
+    "import { stickerDefinition } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/stickers';",
+  ],
   [
     'src/entrypoints/mcp/index.ts',
     `import { McpServer } from '${mcpServerSdk}';\nimport { StdioServerTransport } from '${mcpStdioSdk}';`,
@@ -419,6 +432,16 @@ for (const [file, code] of permitted) {
 
 const rejected = [
   [
+    'room business logic reaches the HTTP streaming SDK',
+    rooms + 'application/private.ts',
+    "import { connectNodeAdapter } from '@connectrpc/connect-node';",
+  ],
+  [
+    'an unrelated HTTP route mounts the room streaming SDK',
+    'src/entrypoints/http/guest-sharing.ts',
+    "import { createContextValues } from '@connectrpc/connect';",
+  ],
+  [
     'suggestion application consumes the wire request instead of domain input',
     whiteboard + 'application/board-suggestions.ts',
     `import type { SubmitSuggestionRequest } from '${suggestionsProtocol}';`,
@@ -512,6 +535,16 @@ const rejected = [
     'feedback domain cannot import the HTML content parser',
     'src/modules/feedback/domain/anchor.ts',
     "import { parse } from 'parse5';",
+  ],
+  [
+    'the catalogue application cannot import the thumbnail HTML parser dependency',
+    catalog + 'application/catalog-thumbnail.ts',
+    "import { parse } from 'parse5';",
+  ],
+  [
+    'the catalogue application cannot import sticker artwork',
+    catalog + 'application/catalog-thumbnail.ts',
+    "import { stickerDefinition } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/stickers';",
   ],
   [
     'MCP entrypoint calls the whiteboard application instead of injected operations',

@@ -167,7 +167,7 @@ function SuggestionReviewSurface(props: BoardSuggestionsSurfaceProps) {
   const open = inline ? inline.outlet !== null : anchor !== null;
   const showCards = inline?.showCards ?? true;
   const active = open && showCards;
-  const list = useSuggestionList(boardId, active, service);
+  const list = useSuggestionList(boardId, active, service, props.updateKey);
   const refresh = () => list.requestRead();
   const preview = useSuggestionPreview({ boardId, service, active, refresh });
   const decision = useSuggestionDecision({ ...props, refresh });

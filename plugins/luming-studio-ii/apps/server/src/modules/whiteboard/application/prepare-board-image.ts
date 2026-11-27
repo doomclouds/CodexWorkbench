@@ -1,44 +1,73 @@
 import {
+  encodeSafeSvgImage,
   looksLikeSvgImage,
-  svgForImagePreview,
+  maximumBoardImageBytes,
+  readSafeSvgImage,
   type Actor,
+  type BoardEditDecision,
   type BoardEditIdentity,
   type BoardEditReceipt,
-  type ImageOperation,
+  type BoardHeader,
+  type SafeSvgImage,
 } from '../domain/index.js';
-import type { BoardEditRepository } from '../ports/index.js';
-import { planImageEdit } from './attach-image.js';
+import type { BoardEditRepository, BoardEditWriter } from '../ports/index.js';
 import { checkBoardEditBeforePreparation, runBoardEdit } from './run-board-edit.js';
 
-export type RenderUploadedSvg = (svg: string) => Promise<Uint8Array | undefined>;
+export type ValidateUploadedSvg = (svg: string) => Promise<boolean>;
 
-interface ImageCommand extends BoardEditIdentity {
-  readonly operation: ImageOperation;
+interface ImageCommand<Operation> extends BoardEditIdentity {
+  readonly operation: Operation;
   readonly signature: string;
 }
 
-export function createAttachImage(
+type ImageEditPlan<Operation> = (
+  writer: BoardEditWriter,
+  board: BoardHeader,
+  operation: Operation,
+  vector?: SafeSvgImage,
+) => BoardEditDecision;
+
+export function readArchivedSvgImage(content: Uint8Array): Uint8Array | undefined {
+  if (content.byteLength > maximumBoardImageBytes) {
+    return undefined;
+  }
+
+  const svg = readSafeSvgImage(content);
+  if (!svg) {
+    return undefined;
+  }
+
+  const bytes = encodeSafeSvgImage(svg, maximumBoardImageBytes);
+
+  return bytes.byteLength <= maximumBoardImageBytes ? bytes : undefined;
+}
+
+export function createImageEdit(
   repository: BoardEditRepository,
   now: () => number,
-  renderUploadedSvg?: RenderUploadedSvg,
+  validateUploadedSvg?: ValidateUploadedSvg,
 ) {
-  return async (actor: Actor, command: ImageCommand): Promise<BoardEditReceipt> => {
+  return async function editImage<Operation extends { readonly content: Uint8Array }>(
+    actor: Actor,
+    command: ImageCommand<Operation>,
+    plan: ImageEditPlan<Operation>,
+  ): Promise<BoardEditReceipt> {
     const { operation, signature, boardId, commandId } = command;
     const identity = { boardId, commandId };
-    let prepared = operation;
+    let vector: SafeSvgImage | undefined;
     if (looksLikeSvgImage(operation.content)) {
       const prior = checkBoardEditBeforePreparation(repository, actor, identity, signature);
       if (prior) {
         return prior;
       }
-
-      const svg = svgForImagePreview(operation.content);
-      const raster = svg && renderUploadedSvg ? await renderUploadedSvg(svg) : undefined;
-      if (!raster) {
-        return { ...identity, outcome: { kind: 'rejected', reason: 'invalidImage' } };
+      if (operation.content.byteLength > maximumBoardImageBytes) {
+        return { ...identity, outcome: { kind: 'rejected', reason: 'tooLarge' } };
       }
 
-      prepared = { ...operation, content: raster };
+      vector = readSafeSvgImage(operation.content);
+      if (!vector || !validateUploadedSvg || !(await validateUploadedSvg(vector.markup))) {
+        return { ...identity, outcome: { kind: 'rejected', reason: 'invalidImage' } };
+      }
     }
 
     return runBoardEdit(
@@ -46,7 +75,7 @@ export function createAttachImage(
       actor,
       identity,
       { kind: 'image', signature, savedAtMillis: now() },
-      (writer, board) => planImageEdit(writer, board, prepared),
+      (writer, board) => plan(writer, board, operation, vector),
     );
   };
 }

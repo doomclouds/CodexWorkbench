@@ -8,6 +8,7 @@ import type {
 import { createFrameChannel, isFrameVisible } from './frame-identity.js';
 import {
   readAuthenticatedFrameMessage,
+  validateHtmlAnnotationLocations,
   validateHtmlNavigationMessage,
   validateHtmlPointerMessage,
   validateHtmlScrollMessage,
@@ -50,6 +51,7 @@ export interface FrameSession {
   close(): void;
   postMode(): void;
   postSavedState(): void;
+  postAnnotationLocations(): void;
   restoreScroll(position: { x: number; y: number }): void;
   clearInteraction(): void;
   pauseSaves(): void;
@@ -116,6 +118,10 @@ export function attachEmbedFrame({
   let navigationPan: Extract<HtmlNavigationEvent, { kind: 'pan' }> | null = null;
   let navigationSpace = false;
   let annotationTargets: ReadonlySet<string> = new Set();
+  let locationRequest = 0;
+  let requestedIds: ReadonlySet<string> = new Set();
+  let revealed: number | undefined;
+  let locationConsumer: EmbedObjectProps['annotationLocations'];
 
   if (scrollPosition.current?.regionId !== regionId) {
     scrollPosition.current = null;
@@ -142,6 +148,36 @@ export function attachEmbedFrame({
     );
   };
   const postSavedState = () => postState('studio-html-state-update', { ...authority() });
+  const postAnnotationLocations = () => {
+    if (!ready) {
+      return;
+    }
+
+    const locations = readProps().annotationLocations;
+    if (!locations && requestedIds.size === 0) {
+      return;
+    }
+
+    locationConsumer = locations;
+    const reveal = locations?.reveal;
+    const ids = [reveal?.nodeId, ...(locations?.nodeIds ?? [])];
+    requestedIds = new Set(
+      ids.filter((id): id is string => Boolean(id && annotationTargets.has(id))).slice(0, 256),
+    );
+    const stillPending = reveal && requestedIds.has(reveal.nodeId) && reveal.sequence !== revealed;
+    if (stillPending) {
+      revealed = reveal.sequence;
+    }
+    postState('studio-html-track-annotations', {
+      sequence: ++locationRequest,
+      nodeIds: [...requestedIds],
+      reveal: stillPending ? reveal.nodeId : undefined,
+    });
+
+    if (requestedIds.size === 0) {
+      locations?.onChange(new Map());
+    }
+  };
   const reportPointer = (point: HtmlPointerPosition | null) => {
     readProps().onPointerPosition?.(point);
     pointerInside = Boolean(point);
@@ -289,6 +325,7 @@ export function attachEmbedFrame({
     }
     postMode();
     postSavedState();
+    postAnnotationLocations();
   };
   const receiveFrameControl = (
     data: Record<string, unknown>,
@@ -327,6 +364,29 @@ export function attachEmbedFrame({
       : undefined;
     current.onSelection?.({ ...content, ...(screenPoint ? { screenPoint } : {}) });
   };
+  const reportAnnotationLocations = (data: Record<string, unknown>, current: EmbedObjectProps) => {
+    if (!ready || !locationConsumer || current.annotationLocations !== locationConsumer) {
+      return;
+    }
+
+    const points = validateHtmlAnnotationLocations(data, identity, locationRequest, requestedIds);
+    if (!points) {
+      return;
+    }
+
+    const bounds = iframe.getBoundingClientRect();
+    locationConsumer.onChange(
+      new Map(
+        [...points].map(([id, point]) => [
+          id,
+          point && {
+            x: bounds.left + point.x * bounds.width,
+            y: bounds.top + point.y * bounds.height,
+          },
+        ]),
+      ),
+    );
+  };
 
   const receive = (event: MessageEvent<unknown>) => {
     const sourceWindow = iframe.contentWindow;
@@ -340,6 +400,10 @@ export function attachEmbedFrame({
     }
 
     const current = readProps();
+    if (data.type === 'studio-html-annotation-locations') {
+      reportAnnotationLocations(data, current);
+      return;
+    }
     const pointerEnabled = current.annotation || current.interactive;
     const navigation = validateHtmlNavigationMessage(data, identity);
     if (navigation) {
@@ -400,6 +464,7 @@ export function attachEmbedFrame({
     },
     postMode,
     postSavedState,
+    postAnnotationLocations,
     restoreScroll(position) {
       scrollPosition.current = { regionId, ...position };
       if (ready) {

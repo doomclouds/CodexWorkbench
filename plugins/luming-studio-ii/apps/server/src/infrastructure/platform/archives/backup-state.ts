@@ -12,6 +12,7 @@ interface HistoryVersion {
 
 export interface BackupState {
   readonly properties: Fields;
+  readonly contentFields?: Fields;
   readonly elements: Elements;
   readonly history: readonly HistoryVersion[];
 }
@@ -99,8 +100,7 @@ class ArchiveRecords {
     return id;
   }
 
-  private delta(units: readonly number[]) {
-    const fields = this.payload(this.emptyFields);
+  private delta(units: readonly number[], fields: number) {
     const previous = this.previous;
     if (previous) {
       const changes = units.flatMap((value, index) =>
@@ -115,7 +115,7 @@ class ArchiveRecords {
     return { fields, units };
   }
 
-  private content(elements: Elements) {
+  private content(elements: Elements, contentFields: Fields) {
     const retained = this.contentIds.get(elements);
     if (retained !== undefined) {
       return retained;
@@ -133,7 +133,7 @@ class ArchiveRecords {
 
       return this.payload(element);
     });
-    this.contents.push(this.reserve(this.delta(units)));
+    this.contents.push(this.reserve(this.delta(units, this.payload(contentFields))));
     this.previous = { index, elements: units };
     this.contentIds.set(elements, index);
 
@@ -141,12 +141,13 @@ class ArchiveRecords {
   }
 
   serialize(state: BackupState) {
+    const fields = state.contentFields ?? this.emptyFields;
     const history = state.history.map(({ entry, artifact, elements }) => [
       this.payload(entry),
       this.payload(artifact),
-      this.content(elements),
+      this.content(elements, fields),
     ]);
-    const current = this.content(state.elements);
+    const current = this.content(state.elements, fields);
     const properties = Object.entries(state.properties).map(([field, value]) => [
       field,
       this.payload(value),

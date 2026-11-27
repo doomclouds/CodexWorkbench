@@ -12,6 +12,7 @@ import type {
   EmbedJson,
   EmbedKind,
   EmbedNavigationEvent,
+  EmbedObjectProps,
   EmbedObjectValue,
   EmbedSelection,
   EmbedSourceDraft,
@@ -76,6 +77,50 @@ function fraction(value: number, start: number, size: number) {
   return size > 0 ? Math.max(0, Math.min(1, (value - start) / size)) : 0.5;
 }
 
+function readAnnotationLocations(
+  tracking: CanvasObjectViewProps['contentTracking'],
+  sourceRevision: number | undefined,
+): EmbedObjectProps['annotationLocations'] {
+  if (!tracking || sourceRevision === undefined) {
+    return undefined;
+  }
+
+  const revision = BigInt(sourceRevision);
+  const nodes = new Map<string, (typeof tracking.requests)[number]>();
+  for (const request of tracking.requests) {
+    const { target } = request;
+    const first = target.kind === 'html' && target.sourceRevision === revision && target.nodeIds[0];
+    if (first) {
+      nodes.set(request.id, request);
+    }
+  }
+  const nodeId = (request: (typeof tracking.requests)[number]) =>
+    request.target.kind === 'html' ? request.target.nodeIds[0] : undefined;
+  const revealed = [...nodes.values()].find(({ reveal }) => reveal !== undefined);
+  const revealId = revealed && nodeId(revealed);
+  const ids = [...new Set([...nodes.values()].map(nodeId).filter((id) => id !== undefined))];
+
+  return {
+    nodeIds: ids,
+    reveal:
+      revealId && revealed?.reveal !== undefined
+        ? { nodeId: revealId, sequence: revealed.reveal }
+        : undefined,
+    onChange(points) {
+      tracking.report(
+        new Map(
+          [...nodes].flatMap(([id, request]) => {
+            const node = nodeId(request);
+            const point = node === undefined ? undefined : points.get(node);
+
+            return point === undefined ? [] : [[id, { point, reveal: request.reveal }]];
+          }),
+        ),
+      );
+    },
+  };
+}
+
 function CanvasEmbedView(props: CanvasObjectViewProps) {
   const {
     object,
@@ -91,15 +136,23 @@ function CanvasEmbedView(props: CanvasObjectViewProps) {
     onRetentionChange,
     annotationActive,
     onAnnotateContent,
+    contentTracking,
   } = props;
   const known = useMemo(() => readProjection(payload, id), [id, payload]);
   const [accepted, setAccepted] = useState<EmbedProjection>();
   const host = useRef<HTMLDivElement>(null);
-  if (!known) {
+  const current = known && preferNewer(known, accepted);
+  const revision = current?.value.sourceRevision ?? current?.value.version;
+  const annotationLocations = useMemo(
+    () => readAnnotationLocations(contentTracking, revision),
+    [contentTracking, revision],
+  );
+
+  if (!current) {
     return <StatusText message="暂未取得嵌入对象正文" announcement="polite" />;
   }
 
-  const { value, version } = preferNewer(known, accepted);
+  const { value, version } = current;
   const kind = object.kind === 'diagram' || object.kind === 'chart' ? object.kind : 'html';
 
   async function requestValue(operation: CanvasObjectOperation) {
@@ -191,6 +244,7 @@ function CanvasEmbedView(props: CanvasObjectViewProps) {
         preserveScroll
         onNavigation={onNavigation ? handleNavigation : undefined}
         onSelection={onAnnotateContent ? handleContentSelection : undefined}
+        annotationLocations={annotationLocations}
         onRetentionChange={onRetentionChange}
         onSaveState={readOnly ? undefined : saveState}
         onSaveSource={readOnly ? undefined : saveSource}

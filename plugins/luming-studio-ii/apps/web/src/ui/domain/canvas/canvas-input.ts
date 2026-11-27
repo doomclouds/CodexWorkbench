@@ -6,7 +6,7 @@ import type {
   RefObject,
 } from 'react';
 
-import { canConnectTo, connectionTarget, recordInk } from './canvas-creation.js';
+import { canConnectTo, connectionTarget, placementDraft, recordInk } from './canvas-creation.js';
 import {
   canvasNativeId,
   canvasDragSurface,
@@ -258,14 +258,15 @@ export function useCanvasInput({
     if (!sameTool || action.kind === 'pan' || action.kind === 'marquee') {
       return sameTool;
     }
-    if (!canEdit) {
-      return false;
-    }
 
     if (action.kind === 'transform') {
       const { targets, kind } = action.transform;
 
       return (
+        canStartTransform(
+          kind,
+          targets.map(({ id }) => id),
+        ) &&
         isCurrentEdit(index, pending, targets) &&
         targets.every(({ id }) => {
           const object = index.get(id);
@@ -273,6 +274,9 @@ export function useCanvasInput({
           return object && transformAllowed(object.kind, kind);
         })
       );
+    }
+    if (!canEdit) {
+      return false;
     }
     if (action.kind === 'edit-connection') {
       return editableTarget(index, pending, action.target.id)?.version === action.target.version;
@@ -302,7 +306,7 @@ export function useCanvasInput({
   });
   useLayoutEffect(() => {
     cancelStaleSession();
-  }, [canEdit, index, pending, key]);
+  }, [canEdit, index, pending, key, props.pendingResizeObjectId]);
 
   function transformTargets(
     kind: TransformGesture['kind'],
@@ -324,6 +328,12 @@ export function useCanvasInput({
     });
   }
 
+  function canStartTransform(kind: TransformGesture['kind'], ids: readonly string[]) {
+    return (
+      canEdit || (kind === 'resize' && ids.length === 1 && ids[0] === props.pendingResizeObjectId)
+    );
+  }
+
   function beginTransform(
     container: HTMLDivElement,
     sample: ReactPointerEvent<HTMLElement>,
@@ -332,7 +342,7 @@ export function useCanvasInput({
     ids: readonly string[],
     handle?: ResizeHandle,
   ) {
-    if (!canEdit) {
+    if (!canStartTransform(kind, ids)) {
       return;
     }
 
@@ -498,7 +508,26 @@ export function useCanvasInput({
 
     const origin = containerOrigin(container);
     const id = objectAt(event, container, origin);
-    if (!id || canvasNativeId(target, container) === id) {
+    const native = canvasNativeId(target, container);
+    const point = screenToBoard(relativePoint(event, origin), read().viewport);
+    if (!id) {
+      const placement = props.blankDoubleClickPlacement;
+      const placeable = placement && canEdit && !props.presentation;
+      const blank =
+        !native &&
+        !isCanvasKeyboardControl(target, container) &&
+        !isCanvasActivationControl(target, container);
+
+      if (placeable && blank) {
+        onEditIntent({
+          kind: 'create',
+          interactionId: interactionId(),
+          object: placementDraft(placement, point),
+        });
+      }
+      return;
+    }
+    if (native === id) {
       return;
     }
 
@@ -507,7 +536,6 @@ export function useCanvasInput({
       return;
     }
 
-    const point = screenToBoard(relativePoint(event, origin), read().viewport);
     props.onObjectActivate?.({ id, point });
   }
 

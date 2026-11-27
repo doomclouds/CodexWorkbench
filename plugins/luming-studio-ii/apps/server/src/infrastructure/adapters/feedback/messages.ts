@@ -5,6 +5,7 @@ import { readText, readUnsigned } from './stored-values.js';
 export const messageColumns = `
   m.message_id,
   m.author_actor_id,
+  m.author_name,
   m.text,
   m.created_at_millis,
   m.updated_at_millis AS message_updated_at_millis,
@@ -15,6 +16,7 @@ export function readMessage(row: SqliteRow): FeedbackMessage {
   return {
     messageId: readText(row.message_id, 'message_id'),
     authorActorId: readText(row.author_actor_id, 'author_actor_id'),
+    authorName: row.author_name === null ? undefined : readText(row.author_name, 'author_name'),
     text: readText(row.text, 'text'),
     createdAtMillis: readUnsigned(row.created_at_millis, 'created_at_millis'),
     updatedAtMillis: readUnsigned(row.message_updated_at_millis, 'message_updated_at_millis'),
@@ -65,19 +67,21 @@ export function insertMessage(
   position: number,
   message: FeedbackMessage,
 ): void {
-  const { messageId, authorActorId, text, createdAtMillis, updatedAtMillis, version } = message;
+  const { messageId, authorActorId, authorName, text, createdAtMillis, updatedAtMillis, version } =
+    message;
   connection
     .prepare(`
       INSERT INTO feedback_messages (
-        board_id, thread_id, message_id, author_actor_id, text,
+        board_id, thread_id, message_id, author_actor_id, author_name, text,
         created_at_millis, updated_at_millis, version, position
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
     .run(
       boardId,
       threadId,
       messageId,
       authorActorId,
+      authorName ?? null,
       text,
       createdAtMillis,
       updatedAtMillis,

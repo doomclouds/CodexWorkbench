@@ -85,6 +85,18 @@ export function createFeedbackApplication(
   repository: FeedbackRepository,
   services: FeedbackServices,
 ): FeedbackApplication {
+  function legacyNames(reader: FeedbackReader, boardId: string) {
+    const names = new Map<string, string | undefined>();
+    return (authorId: string) => {
+      if (!names.has(authorId)) {
+        const access = reader.getAccess(boardId, authorId);
+        names.set(authorId, access?.isOwner ? services.ownerDisplayName : access?.name);
+      }
+
+      return names.get(authorId);
+    };
+  }
+
   return {
     listThreads: (actor, boardId, query) =>
       repository.read((reader) => {
@@ -101,10 +113,11 @@ export function createFeedbackApplication(
         });
         const page = rows.slice(0, limit);
         const last = page.at(-1);
+        const names = legacyNames(reader, boardId);
 
         return {
           threads: page.map((thread) =>
-            viewThread(actor, access, currentThread(reader, boardId, thread)),
+            viewThread(actor, access, currentThread(reader, boardId, thread), names),
           ),
           nextCursor: last && rows.length > limit ? writeThreadPosition(last) : undefined,
           canWrite: permitsFeedback(access),
@@ -121,10 +134,11 @@ export function createFeedbackApplication(
         const limit = pageLimit(query.pageSize);
         const position = readReplyPosition(query.cursor);
         const replies = reader.listReplies(boardId, threadId, position, limit + 1);
+        const names = legacyNames(reader, boardId);
 
         return {
-          thread: viewThread(actor, access, currentThread(reader, boardId, thread)),
-          replies: replies.slice(0, limit).map((reply) => viewMessage(actor, access, reply)),
+          thread: viewThread(actor, access, currentThread(reader, boardId, thread), names),
+          replies: replies.slice(0, limit).map((reply) => viewMessage(actor, access, reply, names)),
           nextCursor: replies.length > limit ? String(position + limit) : undefined,
           canWrite: permitsFeedback(access),
         };

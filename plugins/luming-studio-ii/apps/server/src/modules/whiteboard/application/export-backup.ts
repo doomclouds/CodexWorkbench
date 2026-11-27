@@ -2,11 +2,14 @@ import {
   backupElement,
   BackupElementError,
   exportFilename,
-  maxExportFileBytes,
+  legacyBackupFeedback,
+  maxBoardBackupAssetBytes,
+  maxBoardBackupBytes,
   type Actor,
+  type BoardBackupActor,
   type BoardBackupArchive,
+  type BoardBackupAsset,
   type BoardBackupMetadata,
-  type BoardExportAsset,
   type BoardExportRejection,
   type BoardExportStale,
   type BoardHeader,
@@ -30,10 +33,21 @@ type FormatTime = (value: number) => string;
 
 const maxVersions = 200;
 const maxObjects = 4_000;
-const maxStoredPayload = 32n * 1024n * 1024n;
-const maxAssetBytes = 20 * 1024 * 1024;
+const maxStoredPayload = 64n * 1024n * 1024n;
 const portableId = /^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/u;
 const assetPrefix = '/studio-archive-assets/';
+
+const legacyStyle = {
+  name: 'Diagram',
+  paper: '#f5f5f5',
+  ink: '#2d3142',
+  muted: '#4f5d75',
+  accent: '#eb6c36',
+  link: '#2e5aa8',
+  fontFamily: 'Arial, "Microsoft YaHei", sans-serif',
+  titleFont: 'Georgia, "Songti SC", serif',
+  monoFont: 'Consolas, monospace',
+};
 
 class BackupError extends Error {
   constructor(readonly reason: BoardExportRejection['reason']) {
@@ -59,10 +73,6 @@ function numericVersion(value: bigint) {
   return version;
 }
 
-function timeString(value: number | undefined, formatTime: FormatTime) {
-  return value === undefined ? undefined : formatTime(value);
-}
-
 function artifact(
   board: BoardHeader,
   metadata: BoardBackupMetadata,
@@ -74,25 +84,37 @@ function artifact(
     title: version?.title ?? board.title,
     type: 'whiteboard',
     revision: numericVersion(version?.revision ?? board.revision),
-    createdAt: timeString(metadata.createdAtMillis, formatTime),
-    updatedAt: timeString(version?.savedAtMillis ?? metadata.updatedAtMillis, formatTime),
+    createdAt: formatTime(metadata.createdAtMillis ?? metadata.updatedAtMillis),
+    updatedAt: formatTime(version?.savedAtMillis ?? metadata.updatedAtMillis),
     pinned: metadata.pinned,
     sharing: false,
   };
 }
 
-function historyEntry(version: BoardVersionSummary, formatTime: FormatTime) {
+function historyEntry(
+  version: BoardVersionSummary,
+  actor: BoardBackupActor,
+  metadata: BoardBackupMetadata,
+  formatTime: FormatTime,
+  changedIds: readonly string[],
+) {
   const { actorId, revision, savedAtMillis, kind, sourceRevision, changedObjectCount } = version;
 
   return {
     id: 'revision-' + revision,
     revision: numericVersion(revision),
-    createdAt: timeString(savedAtMillis, formatTime),
-    actor: actorId ? { id: actorId, name: actorId } : undefined,
+    createdAt: formatTime(savedAtMillis ?? metadata.createdAtMillis ?? metadata.updatedAtMillis),
+    actor,
     summary: kind,
-    changedIds: [],
-    changedObjectCount,
+    changedIds,
     restoredFrom: sourceRevision !== undefined ? 'revision-' + sourceRevision : undefined,
+    studioII: {
+      actorId,
+      savedAtMillis,
+      kind,
+      sourceRevision: sourceRevision?.toString(),
+      changedObjectCount,
+    },
   };
 }
 
@@ -101,11 +123,11 @@ function payloadKey(objectId: string, payloadVersion: bigint) {
 }
 
 class BackupCapture {
-  readonly assets = new Map<string, BoardExportAsset>();
+  readonly assets = new Map<string, BoardBackupAsset>();
   private readonly payloads = new Map<string, PayloadRecord>();
   private readonly objects = new Map<string, Element>();
   private remainingPayload = maxStoredPayload;
-  private remainingAssets = maxAssetBytes;
+  private remainingAssets = maxBoardBackupBytes;
 
   constructor(
     private readonly reader: BoardEditReader,
@@ -120,15 +142,16 @@ class BackupCapture {
     }
 
     if (!this.assets.has(assetId)) {
-      const media = this.reader.getExportAsset?.(this.boardId, assetId, this.remainingAssets);
+      const limit = Math.min(maxBoardBackupAssetBytes, this.remainingAssets);
+      const media = this.reader.getBackupAsset?.(this.boardId, assetId, limit);
       if (!media) {
         throw new BackupError('assetUnavailable');
       }
-      if (media.kind === 'tooLarge' || media.asset.byteLength > this.remainingAssets) {
+      if (media.kind === 'tooLarge' || media.asset.bytes.byteLength > limit) {
         throw new BackupError('tooLarge');
       }
 
-      this.remainingAssets -= media.asset.byteLength;
+      this.remainingAssets -= media.asset.bytes.byteLength;
       this.assets.set(assetId, media.asset);
     }
 
@@ -205,11 +228,32 @@ class BackupCapture {
   }
 }
 
+function currentVersion(board: BoardHeader): BoardVersionSummary {
+  return {
+    revision: board.revision,
+    title: board.title,
+    kind: 'baseline',
+    changedObjectCount: 0,
+  };
+}
+
+function changedObjectIds(previous: readonly Element[], elements: readonly Element[]) {
+  const unchanged = new Set(previous);
+  const remaining = new Set(elements);
+  return [
+    ...new Set([
+      ...elements.filter((element) => !unchanged.has(element)).map((element) => String(element.id)),
+      ...previous.filter((element) => !remaining.has(element)).map((element) => String(element.id)),
+    ]),
+  ];
+}
+
 function capture(
   reader: BoardEditReader,
   actor: Actor,
   command: ExportBoardFileCommand,
   formatTime: FormatTime,
+  ownerName?: string,
 ): CapturedBackup {
   const { boardId, expectedRevision, scope } = command;
   const metadata = requireOwner(reader, actor, boardId);
@@ -226,52 +270,118 @@ function capture(
 
   const builder = new BackupCapture(reader, boardId);
   const elements = builder.elements(reader.listObjects(boardId, maxObjects + 1));
-  const history = [...reader.listVersions(boardId, undefined, maxVersions)]
-    .reverse()
-    .map((version) => ({
-      entry: historyEntry(version, formatTime),
+  const details = reader.getBackupDetails?.(boardId);
+  const authors = new Map<string, BoardBackupActor>();
+  function author(id: string, role: BoardBackupActor['role'], name?: string) {
+    const known = authors.get(id) ?? details?.actors.get(id);
+    const ownerFallback = id === actor.id && (!known || known.name === id || known.name === '我');
+    const profile = {
+      id,
+      name: name ?? (ownerFallback ? ownerName : undefined) ?? known?.name ?? id,
+      kind: known?.kind ?? 'human',
+      role: known?.role ?? role,
+    };
+    authors.set(id, profile);
+
+    return profile;
+  }
+
+  const versions = [...reader.listVersions(boardId, undefined, maxVersions)].reverse();
+  if (versions.at(-1)?.revision !== board.revision) {
+    versions.push(reader.getVersion(boardId, board.revision) ?? currentVersion(board));
+  }
+
+  let previous: readonly Element[] | undefined;
+  const history = versions.slice(-maxVersions).map((version) => {
+    const scene =
+      version.revision === board.revision
+        ? elements
+        : builder.elements(reader.listVersionObjects(boardId, version.revision), version.revision);
+    const changedIds = previous ? changedObjectIds(previous, scene) : [];
+    previous = scene;
+
+    return {
+      entry: historyEntry(
+        version,
+        author(
+          version.actorId ?? actor.id,
+          !version.actorId || version.actorId === actor.id ? 'owner' : 'editor',
+        ),
+        metadata,
+        formatTime,
+        changedIds,
+      ),
       artifact: artifact(board, metadata, formatTime, version),
-      elements:
-        version.revision === board.revision
-          ? elements
-          : builder.elements(
-              reader.listVersionObjects(boardId, version.revision),
-              version.revision,
-            ),
-    }));
+      elements: scene,
+    };
+  });
+  const feedback = details?.feedback ?? { threads: [], messages: [], contentAnchors: [] };
+  const historyElements = new Map(
+    history.map((version) => [String(version.entry.revision), version.elements]),
+  );
+  const legacyFeedback = legacyBackupFeedback(
+    boardId,
+    feedback,
+    (id, name) => author(id, id === actor.id ? 'owner' : 'commenter', name),
+    formatTime,
+    (revision, objectId) =>
+      historyElements.get(revision)?.find((element) => element.id === objectId),
+  );
   const assetIndex = Object.fromEntries(
     [...builder.assets].map(([id, asset]) => [
       id,
-      { id, filename: id, size: asset.byteLength, mimeType: asset.mimeType },
+      { id, filename: id, size: asset.bytes.byteLength, mimeType: asset.mimeType },
     ]),
   );
   const properties = {
     schemaVersion: 2,
     artifact: artifact(board, metadata, formatTime),
-    feedback: [],
-    sources: {},
+    ...legacyFeedback,
     operations: [],
     sharing: { enabled: false, generation: 0, tokens: {} },
     assets: assetIndex,
+    studioII: {
+      version: 1,
+      revision: board.revision.toString(),
+      createdAtMillis: metadata.createdAtMillis ?? metadata.updatedAtMillis,
+      updatedAtMillis: metadata.updatedAtMillis,
+      actors: [...authors.values()],
+      feedback,
+      reviewSources: details?.reviewSources ?? { sources: [], targetSnapshots: [] },
+    },
   };
 
-  return { board, archive: { boardId, properties, elements, history, assets: builder.assets } };
+  return {
+    board,
+    archive: {
+      boardId,
+      properties,
+      contentFields: { style: legacyStyle },
+      elements,
+      history,
+      assets: builder.assets,
+    },
+  };
 }
 
 export function createBoardBackup(
   repository: BoardEditRepository,
   encode: BackupEncoder,
   formatTime: FormatTime,
+  ownerName?: string,
 ) {
   return async (actor: Actor, command: ExportBoardFileCommand): Promise<ExportBoardResult> => {
     try {
-      const snapshot = repository.read((reader) => capture(reader, actor, command, formatTime));
+      const snapshot = repository.read((reader) =>
+        capture(reader, actor, command, formatTime, ownerName?.trim() || undefined),
+      );
+
       if ('kind' in snapshot) {
         return snapshot;
       }
 
-      const content = await encode(snapshot.archive, maxExportFileBytes);
-      if (!content?.byteLength) {
+      const content = await encode(snapshot.archive, maxBoardBackupBytes);
+      if (!content?.byteLength || content.byteLength > maxBoardBackupBytes) {
         return { kind: 'rejected', reason: 'tooLarge' };
       }
 

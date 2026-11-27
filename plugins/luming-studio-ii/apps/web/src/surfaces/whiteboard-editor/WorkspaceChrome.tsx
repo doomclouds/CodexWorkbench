@@ -35,6 +35,7 @@ import {
 import type { GeometryActionContext } from './GeometryBoardMenu.js';
 import type { useGeometryEdits } from './geometry-session.js';
 import type { useMoveSession } from './move-session.js';
+import type { BoardTitleEditor } from './use-board-title.js';
 import type { useContentEdits } from './use-content-edits.js';
 
 type BoardAnchorAction = (trigger: HTMLButtonElement) => void;
@@ -75,6 +76,7 @@ interface WorkspaceSelectionBarProps {
   readonly moreOpen: boolean;
   readonly onOpenViewing: BoardAnchorAction;
   readonly onEditObject: (id: string) => void;
+  readonly selectedHtmlId?: string;
   readonly onAction: WorkspaceGeometry['handleSelectionAction'];
   readonly onOpenMore: BoardAnchorAction;
   readonly onSelectAll: () => void;
@@ -92,6 +94,7 @@ export function WorkspaceSelectionBar({
   moreOpen,
   onOpenViewing,
   onEditObject,
+  selectedHtmlId,
   onAction,
   onOpenMore,
   onSelectAll,
@@ -110,6 +113,7 @@ export function WorkspaceSelectionBar({
             selection={selection}
             canEdit={canEdit}
             onEditObject={onEditObject}
+            selectedHtmlId={selectedHtmlId}
             onAction={onAction}
             textStyleById={textStyleById}
             onFormatObject={onFormatObject}
@@ -140,6 +144,7 @@ interface WorkspaceHeaderProps {
   readonly feedbackOpen: boolean;
   readonly suggestionsOpen: boolean;
   readonly shareOpen: boolean;
+  readonly lanSharing: boolean;
   readonly consumeShareEntry?: () => boolean;
   readonly annotationActive: boolean;
   readonly unresolvedFeedback: boolean;
@@ -152,7 +157,7 @@ interface WorkspaceHeaderProps {
   readonly participants?: ReactNode;
   readonly suggestionTrigger: Ref<HTMLButtonElement>;
   readonly onBack?: () => void;
-  readonly onRename?: (title: string) => void;
+  readonly titleEditor?: BoardTitleEditor;
   readonly onOpenShare?: BoardAnchorAction;
   readonly onOpenHistory?: BoardAnchorAction;
   readonly onToggleFeedback?: BoardAnchorAction;
@@ -207,6 +212,7 @@ export function WorkspaceHeader(props: WorkspaceHeaderProps) {
     historyOpen,
     feedbackOpen,
     shareOpen,
+    lanSharing,
     annotationActive,
     unresolvedFeedback,
     move,
@@ -214,7 +220,7 @@ export function WorkspaceHeader(props: WorkspaceHeaderProps) {
     notice,
     readNotices,
     onBack,
-    onRename,
+    titleEditor,
     onOpenShare,
     onOpenHistory,
     onToggleFeedback,
@@ -237,13 +243,14 @@ export function WorkspaceHeader(props: WorkspaceHeaderProps) {
     <div hidden={watching}>
       <BoardHeader
         title={title}
-        canManage={props.writeAccess && Boolean(onBack || onRename)}
+        canManage={props.writeAccess && Boolean(onBack || titleEditor)}
         onBack={onBack}
-        onRename={historyPreview ? undefined : onRename}
+        titleEditor={historyPreview ? undefined : titleEditor}
         status={boardStatus(props)}
         participants={headerParticipants(props)}
         onOpenShare={historyPreview ? undefined : onOpenShare}
         shareOpen={shareOpen}
+        lanSharing={lanSharing}
         consumeShareEntry={props.consumeShareEntry}
         onOpenHistory={onOpenHistory}
         historyOpen={historyOpen}
@@ -394,9 +401,16 @@ interface WorkspaceExportProps {
   readonly context: BoardExportContext;
   readonly render?: WhiteboardEditorFeatures['renderExport'];
   readonly onClose: () => void;
+  readonly onLanSharingChange: (active: boolean) => void;
 }
 
-export function WorkspaceExport({ anchor, context, render, onClose }: WorkspaceExportProps) {
+export function WorkspaceExport({
+  anchor,
+  context,
+  render,
+  onClose,
+  onLanSharingChange,
+}: WorkspaceExportProps) {
   if (!render) {
     return null;
   }
@@ -404,6 +418,7 @@ export function WorkspaceExport({ anchor, context, render, onClose }: WorkspaceE
   return render({
     anchor: anchor ?? null,
     context,
+    onLanSharingChange,
     onRequestClose: onClose,
     restoreFocus: () => anchor?.focus({ preventScroll: true }),
   });

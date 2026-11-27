@@ -24,6 +24,13 @@ interface MemberActions {
 }
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+const visitDateFormat = new Intl.DateTimeFormat('zh-CN', {
+  year: 'numeric',
+  month: 'short',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+});
 
 function memberRole(role: SharingRole) {
   return role === 'owner' ? '所有者' : roleLabels[role];
@@ -44,7 +51,7 @@ function memberRemoval(member: SharingMember, trigger: HTMLButtonElement): Shari
   };
 }
 
-function memberStatus({ removed, active, online }: SharingMember) {
+function memberStatus({ removed, active, online, lastSeenAtMillis }: SharingMember) {
   if (removed) {
     return '访问权限已移除';
   }
@@ -53,6 +60,9 @@ function memberStatus({ removed, active, online }: SharingMember) {
   }
   if (online) {
     return '在线';
+  }
+  if (lastSeenAtMillis !== undefined) {
+    return '最近访问 ' + visitDateFormat.format(lastSeenAtMillis);
   }
 
   return online === undefined ? '有权访问' : '未在线';
@@ -131,7 +141,13 @@ export function SharingMembers({
   actions: MemberActions;
 }) {
   const { members, links, ownerDisplayName } = state;
-  const joined = members.filter(({ role, removed }) => role !== 'owner' && !removed);
+  const joined = members
+    .filter(({ role, removed }) => role !== 'owner' && !removed)
+    .sort(
+      (left, right) =>
+        Number(Boolean(right.online)) - Number(Boolean(left.online)) ||
+        (right.lastSeenAtMillis ?? 0) - (left.lastSeenAtMillis ?? 0),
+    );
   const removed = members.filter((member) => member.removed);
 
   return (

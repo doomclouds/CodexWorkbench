@@ -76,7 +76,7 @@ function withinCanvasLimit(svg: string) {
   return validImageSize(Math.ceil(width), Math.ceil(height));
 }
 
-export async function renderSvgPng(svg: string): Promise<Uint8Array | undefined> {
+async function openSvg(svg: string, requireFont: boolean) {
   if (!withinCanvasLimit(svg)) {
     return undefined;
   }
@@ -84,12 +84,19 @@ export async function renderSvgPng(svg: string): Promise<Uint8Array | undefined>
   renderer ??= initialize();
   fonts ??= readFonts();
   const [fontBuffers] = await Promise.all([fonts, renderer]);
-  if (fontBuffers.length === 0 && /<text\b/u.test(svg)) {
+  if (requireFont && fontBuffers.length === 0 && /<text\b/u.test(svg)) {
     throw new Error('PNG export requires a readable system font for its text.');
   }
 
   const { defaultFontFamily } = fontConfiguration();
-  const resvg = new Resvg(svg, { font: { fontBuffers, defaultFontFamily } });
+  return new Resvg(svg, { font: { fontBuffers, defaultFontFamily } });
+}
+
+export async function renderSvgPng(svg: string): Promise<Uint8Array | undefined> {
+  const resvg = await openSvg(svg, true);
+  if (!resvg) {
+    return undefined;
+  }
 
   try {
     if (!validImageSize(resvg.width, resvg.height)) {
@@ -107,14 +114,23 @@ export async function renderSvgPng(svg: string): Promise<Uint8Array | undefined>
   }
 }
 
-export async function renderSvgUpload(svg: string): Promise<Uint8Array | undefined> {
+export async function validateSvgUpload(svg: string): Promise<boolean> {
   try {
-    return await renderSvgPng(svg);
+    const resvg = await openSvg(svg, false);
+    if (!resvg) {
+      return false;
+    }
+
+    try {
+      return validImageSize(resvg.width, resvg.height);
+    } finally {
+      resvg.free();
+    }
   } catch (error) {
     if (!(error instanceof Error && error.message.startsWith('SVG data parsing failed'))) {
       throw error;
     }
 
-    return undefined;
+    return false;
   }
 }

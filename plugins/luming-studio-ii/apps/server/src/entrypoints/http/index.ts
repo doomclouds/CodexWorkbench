@@ -56,6 +56,8 @@ import { HttpRequestError, mediaType, readBody } from './request.js';
 import { protobufContentType, sendProtobuf, sendStatus } from './response.js';
 import { agentActivityPath, agentActivityRequestLimit } from './room-agent-activity.js';
 import { observeRoomChange } from './room-changes.js';
+import { createRoomEventStreamRoute, roomEventStreamPath } from './room-event-stream.js';
+import { roomEventWaitPath, serveRoomEventWait } from './room-event-wait.js';
 import { createRoomRoutes, roomEventPath, serveRoomEvents } from './room-routes.js';
 import { createWhiteboardRoutes } from './routes.js';
 import { createSharingRoutes, type SharingRoutesOptions } from './share-routes.js';
@@ -70,6 +72,7 @@ import {
 export type { GuestHttpOptions } from './guest-sharing.js';
 export { createGuestWeb } from './guest-web.js';
 export { createModelSuggestionSubmitter } from './model-suggestion.js';
+export { toPayloadResult } from './payload.js';
 export { boardSuggestionSubmitPath } from './suggestion-routes.js';
 
 const REQUEST_METHOD = 'POST';
@@ -94,7 +97,10 @@ export interface WhiteboardHttpOptions {
   readonly onError: (error: unknown) => void;
 }
 
-type Routes = ReadonlyMap<string, ProtobufRoute>;
+interface Routes {
+  readonly unary: ReadonlyMap<string, ProtobufRoute>;
+  readonly roomStream?: ReturnType<typeof createRoomEventStreamRoute>;
+}
 
 const requestLimits = new Map([
   [boardImageRoutePath, boardImageRequestLimit],
@@ -103,39 +109,55 @@ const requestLimits = new Map([
   [agentActivityPath, agentActivityRequestLimit],
 ]);
 
+function serveRoomConnection(
+  request: IncomingMessage,
+  response: ServerResponse,
+  { features, resolveActor, onError }: WhiteboardHttpOptions,
+  roomStream: Routes['roomStream'],
+) {
+  const path = request.url ?? '';
+  const rooms = features?.rooms;
+  if (roomStream && path === roomEventStreamPath) {
+    roomStream(request, response, () => resolveActor(request));
+    return true;
+  }
+
+  if (!rooms || !roomEventPath(path)) {
+    return false;
+  }
+
+  serveRoomEvents(
+    rooms,
+    request,
+    response,
+    () => {
+      const actor = resolveActor(request);
+
+      return actor?.kind === 'agent' ? undefined : actor;
+    },
+    onError,
+  );
+
+  return true;
+}
+
 async function handleRequest(
   request: IncomingMessage,
   response: ServerResponse,
   routes: Routes,
-  {
-    archiveApplication,
-    features,
-    resolveActor,
-    onError,
-    agentSuggestionPath,
-  }: WhiteboardHttpOptions,
+  options: WhiteboardHttpOptions,
 ): Promise<void> {
-  const path = request.url ?? '';
-  const rooms = features?.rooms;
-  if (rooms && roomEventPath(path)) {
-    serveRoomEvents(
-      rooms,
-      request,
-      response,
-      () => {
-        const actor = resolveActor(request);
-
-        return actor?.kind === 'agent' ? undefined : actor;
-      },
-      onError,
-    );
-
+  if (serveRoomConnection(request, response, options, routes.roomStream)) {
     return;
   }
 
-  const route = routes.get(path);
+  const { archiveApplication, features, resolveActor, agentSuggestionPath } = options;
+  const path = request.url ?? '';
+  const rooms = features?.rooms;
+  const route = routes.unary.get(path);
   const rawRoute = archiveRoute(path, archiveApplication);
-  if (!route && !rawRoute) {
+  const waitForRoom = path === roomEventWaitPath && rooms;
+  if (!route && !rawRoute && !waitForRoom) {
     sendStatus(response, 404);
     return;
   }
@@ -163,6 +185,11 @@ async function handleRequest(
   }
   if (mediaType(request) !== protobufContentType) {
     sendStatus(response, 415);
+    return;
+  }
+
+  if (waitForRoom) {
+    await serveRoomEventWait(waitForRoom, request, response, actor, () => resolveActor(request));
     return;
   }
 
@@ -280,13 +307,16 @@ export function createWhiteboardRequestHandler(
           : []),
       ]
     : [];
-  const routes = new Map([
-    ...createWhiteboardRoutes(application, observe),
-    ...studioRoutes,
-    ...createCatalogRoutes(catalogApplication),
-    createArchiveReceiptRoute(archiveApplication),
-    ...(sharing ? createSharingRoutes(sharing) : []),
-  ]);
+  const routes: Routes = {
+    unary: new Map([
+      ...createWhiteboardRoutes(application, observe),
+      ...studioRoutes,
+      ...createCatalogRoutes(catalogApplication),
+      createArchiveReceiptRoute(archiveApplication),
+      ...(sharing ? createSharingRoutes(sharing) : []),
+    ]),
+    roomStream: features?.rooms && createRoomEventStreamRoute(features.rooms, onError),
+  };
 
   return (request, response) => {
     const pending = guest

@@ -126,6 +126,18 @@ async function settle() {
   });
 }
 
+it('shows a newly arrived private suggestion without closing the active panel', async () => {
+  const service = suggestionService();
+  service.listSuggestions.mockResolvedValueOnce({ proposals: [] });
+  const { rerender } = render(service, { updateKey: 'instance:0' });
+  await settle();
+  expect(view.host.textContent).toContain('暂无私人建议');
+  rerender({ updateKey: 'instance:1' });
+  await settle();
+  expect(view.host.textContent).toContain(proposal.observation);
+  expect(service.listSuggestions).toHaveBeenCalledTimes(2);
+});
+
 it('previews an inactive option only while hovered, then applies it on click', async () => {
   const service = suggestionService();
   const renderPreview = vi.fn(() => <div>此区域只读</div>);

@@ -5,7 +5,7 @@ import { writeZip } from './zip-writer.js';
 
 interface BackupArchive extends BackupState {
   readonly boardId: string;
-  readonly assets: ReadonlyMap<string, { readonly base64: string }>;
+  readonly assets: ReadonlyMap<string, { readonly bytes: Uint8Array }>;
 }
 
 export async function writeBoardArchive(snapshot: BackupArchive, maximumBytes: number) {
@@ -27,7 +27,7 @@ export async function writeBoardArchive(snapshot: BackupArchive, maximumBytes: n
   };
   const assets = [...snapshot.assets].map(([id, asset]) => ({
     name: 'assets/' + id,
-    body: Buffer.from(asset.base64, 'base64'),
+    body: Buffer.from(asset.bytes.buffer, asset.bytes.byteOffset, asset.bytes.byteLength),
   }));
 
   return writeZip(

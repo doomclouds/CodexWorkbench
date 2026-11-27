@@ -84,7 +84,7 @@ function assertRoundTrip(type, value) {
   assert.deepEqual(decode(type, wire), value);
 }
 
-test('declares typed unary methods for every Studio workflow', () => {
+test('declares the request, response and streaming direction of every Studio RPC', () => {
   const descriptor = JSON.parse(
     runBuf([
       'build',
@@ -139,6 +139,8 @@ test('declares typed unary methods for every Studio workflow', () => {
       'BoardRoomService',
       [
         'GetBoardRoom',
+        'WaitBoardRoomEvents',
+        'StreamBoardRoomEvents',
         'UpdateBoardPresence',
         'LeaveBoardPresence',
         'ChangeBoardTimer',
@@ -193,7 +195,7 @@ test('declares typed unary methods for every Studio workflow', () => {
         inputType: `.${protoPackage}.${name}Request`,
         outputType: `.${protoPackage}.${name}Response`,
         clientStreaming: false,
-        serverStreaming: false,
+        serverStreaming: service.name === 'BoardRoomService' && name === 'StreamBoardRoomEvents',
       })),
     );
   }

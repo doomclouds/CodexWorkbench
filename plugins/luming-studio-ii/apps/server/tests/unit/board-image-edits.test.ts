@@ -122,7 +122,7 @@ test('rejects animated WebP and mismatched canvas sizes', () => {
 });
 
 test('limits file bytes before trying to interpret the format', () => {
-  const oversized = new Uint8Array(8 * 1024 * 1024 + 1);
+  const oversized = new Uint8Array(20 * 1024 * 1024 + 1);
 
   assert.deepEqual(planImageChanges(boardId, placement(oversized)), {
     kind: 'rejected',

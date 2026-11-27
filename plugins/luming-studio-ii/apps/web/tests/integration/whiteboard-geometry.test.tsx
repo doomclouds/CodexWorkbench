@@ -54,6 +54,19 @@ function applyOperation(
   switch (operation.kind) {
     case 'create': {
       const object = { ...operation.object, geometryVersion: 1n, locked: false };
+      if (object.kind === 'text') {
+        const payload: WhiteboardPayload = {
+          id: object.id,
+          version: 0n,
+          body: { kind: 'text', value: { text: '' } },
+        };
+
+        return {
+          ...base,
+          objects: [{ ...object, payloadVersion: payload.version }],
+          payloads: [{ kind: 'loaded', payload }],
+        };
+      }
       if (object.kind === 'table') {
         const payload = initialTable(object.id);
 
@@ -150,6 +163,7 @@ interface GeometryFixtureOptions {
   readonly failFirst?: boolean;
   readonly pendingMove?: Promise<void>;
   readonly pendingGeometry?: Promise<void>;
+  readonly createFailure?: 'conflict' | 'rejected';
   readonly initialObjects?: readonly WhiteboardObject[];
   readonly initialPayloads?: readonly WhiteboardPayload[];
 }
@@ -158,6 +172,7 @@ function geometryFixture({
   failFirst = false,
   pendingMove,
   pendingGeometry,
+  createFailure,
   initialObjects = [baseObject],
   initialPayloads = [],
 }: GeometryFixtureOptions = {}) {
@@ -216,6 +231,15 @@ function geometryFixture({
 
       if (pendingGeometry) {
         await pendingGeometry;
+      }
+      const identity = { boardId, commandId: command.commandId };
+      if (command.operation.kind === 'create') {
+        if (createFailure === 'rejected') {
+          return { ...identity, kind: 'rejected', reason: 'invalidEdit' };
+        }
+        if (createFailure === 'conflict') {
+          return { ...identity, kind: 'conflict', revision, objects: [], payloads: [] };
+        }
       }
 
       const changes = applyOperation(objects, command);
@@ -316,9 +340,11 @@ test('places once and saves geometry, locks and order through the existing white
     await app.click('锁定元素');
     expect(button(app.host, '图层顺序').disabled).toBe(true);
     await app.click('更多操作');
-    expect(button(app.host, '删除').getAttribute('aria-disabled')).toBe('true');
-    expect(button(app.host, '解锁位置与尺寸').getAttribute('aria-disabled')).toBeNull();
-    await app.click('解锁位置与尺寸');
+    expect(button(app.host, '删除 Delete').getAttribute('aria-disabled')).toBe('true');
+    expect(
+      button(app.host, '解锁位置与尺寸 Ctrl/⌘ Shift L').getAttribute('aria-disabled'),
+    ).toBeNull();
+    await app.click('解锁位置与尺寸 Ctrl/⌘ Shift L');
     await app.click('图层顺序');
     const layers = app.host.querySelector('[role="menu"][aria-label="图层顺序"]');
     expect(layers?.querySelector('[role="separator"]')?.nextElementSibling?.textContent).toBe(
@@ -337,8 +363,17 @@ test('places once and saves geometry, locks and order through the existing white
     ];
     expect(
       rows.slice(0, 8).map((row) => row.getAttribute('aria-label') ?? row.textContent),
-    ).toEqual(['剪切', '复制', '粘贴', '重复', '置于顶层', '置于底层', '上移一层', '下移一层']);
-    await app.click('删除');
+    ).toEqual([
+      '剪切 Ctrl/⌘ X',
+      '复制 Ctrl/⌘ C',
+      '粘贴 Ctrl/⌘ V',
+      '重复 Ctrl/⌘ D',
+      '置于顶层',
+      '置于底层',
+      '上移一层',
+      '下移一层',
+    ]);
+    await app.click('删除 Delete');
     expect(app.commands[5]?.operation).toMatchObject({ kind: 'delete' });
     expect(app.host.querySelector(selector)).toBeNull();
     await app.open('reopened');
@@ -349,7 +384,7 @@ test('places once and saves geometry, locks and order through the existing white
   }
 });
 
-test('closes the earlier object menu when a pending duplicate changes the selection', async () => {
+test('keeps the newer object selection and menu when a pending duplicate is confirmed', async () => {
   let confirmDuplicate!: () => void;
   const pendingGeometry = new Promise<void>((resolve) => {
     confirmDuplicate = resolve;
@@ -365,7 +400,7 @@ test('closes the earlier object menu when a pending duplicate changes the select
     await app.open();
     await app.drag({ x: 70, y: 70 }, { x: 70, y: 70 });
     await app.click('更多操作');
-    await app.click('重复');
+    await app.click('重复 Ctrl/⌘ D');
     expect(app.commands[0]?.operation).toMatchObject({
       kind: 'duplicate',
       targets: [{ source: { id: baseObject.id } }],
@@ -382,16 +417,146 @@ test('closes the earlier object menu when a pending duplicate changes the select
       );
     });
     expect(app.host.querySelector(boardMenu)).not.toBeNull();
-    expect(button(app.host, '删除').getAttribute('aria-disabled')).toBe('true');
+    expect(button(app.host, '删除 Delete').getAttribute('aria-disabled')).toBe('true');
 
     await app.update(confirmDuplicate);
     expect(app.host.querySelector('[data-canvas-object="new-geometry-1-1"]')).not.toBeNull();
-    expect(app.host.querySelector(boardMenu)).toBeNull();
+    expect(app.host.querySelector(boardMenu)).not.toBeNull();
   } finally {
     confirmDuplicate();
     app.dispose();
   }
 });
+
+test('creates blank text at a double click in the selection tool and opens its editor', async () => {
+  const app = geometryFixture();
+  try {
+    await app.open();
+    await app.update(() => {
+      app
+        .canvas()
+        .dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: 430, clientY: 270 }));
+    });
+    expect(app.commands[0]?.operation).toMatchObject({
+      kind: 'create',
+      object: { kind: 'text', geometry: { x: 430, y: 270 } },
+      initialPayload: { kind: 'text', value: { text: '' } },
+    });
+    expect(app.host.querySelector('[role="textbox"][contenteditable="true"]')).not.toBeNull();
+    expect(app.commands).toHaveLength(1);
+  } finally {
+    app.dispose();
+  }
+});
+
+test.each(['另一个对象', '空白'])('保留慢回执之前更新的选区（%s）', async (target) => {
+  let confirm!: () => void;
+  const pendingGeometry = new Promise<void>((resolve) => {
+    confirm = resolve;
+  });
+  const app = geometryFixture({ pendingGeometry });
+  const box = () => app.canvas().querySelector<HTMLElement>('.studio-ui-canvas-selection-outline');
+  try {
+    await app.open();
+    await app.click('形状');
+    await app.place();
+    expect(box()?.style.left).toBe('260px');
+
+    const point = target === '空白' ? { x: 750, y: 430 } : { x: 70, y: 70 };
+    await app.drag(point, point);
+    const latestLeft = target === '空白' ? undefined : '48px';
+    expect(box()?.style.left).toBe(latestLeft);
+
+    await app.update(confirm);
+    expect(box()?.style.left).toBe(latestLeft);
+    expect(app.host.querySelector('[data-canvas-object="new-geometry-1"]')).not.toBeNull();
+  } finally {
+    confirm();
+    app.dispose();
+  }
+});
+
+test('previews resizing a pending placement and saves it against the confirmed version', async () => {
+  let confirm!: () => void;
+  const pendingGeometry = new Promise<void>((resolve) => {
+    confirm = resolve;
+  });
+  const app = geometryFixture({ pendingGeometry });
+  try {
+    await app.open();
+    await app.click('形状');
+    await app.place();
+    const operation = app.commands[0]?.operation;
+    if (operation?.kind !== 'create') {
+      throw new Error('Expected a pending creation.');
+    }
+
+    const { x, y, width, height } = operation.object.geometry;
+    const handle = app.canvas().querySelector<HTMLElement>('[data-canvas-handle="se"]');
+    if (!handle) {
+      throw new Error('The pending object must be resizable.');
+    }
+
+    const end = { x: x + width + 45, y: y + height + 36 };
+    await app.drag({ x: x + width, y: y + height }, end, handle);
+
+    const object = () =>
+      app.canvas().querySelector<HTMLElement>('[data-canvas-object="new-geometry-1"]');
+    expect(object()?.style.width).toBe(width + 45 + 'px');
+    expect(app.commands).toHaveLength(1);
+
+    await app.update(confirm);
+    expect(app.commands[1]?.operation).toMatchObject({
+      kind: 'transform',
+      transform: 'resize',
+      objects: [
+        {
+          target: { id: 'new-geometry-1', expectedGeometryVersion: 1n },
+          geometry: { x, y, width: width + 45, height: height + 36 },
+        },
+      ],
+    });
+    expect(object()?.style.width).toBe(width + 45 + 'px');
+  } finally {
+    confirm();
+    app.dispose();
+  }
+});
+
+test.each(['conflict', 'rejected'] as const)(
+  'rolls back a pending placement after %s',
+  async (createFailure) => {
+    let confirm!: () => void;
+    const pendingGeometry = new Promise<void>((resolve) => {
+      confirm = resolve;
+    });
+    const app = geometryFixture({ pendingGeometry, createFailure });
+    const box = () =>
+      app.canvas().querySelector<HTMLElement>('.studio-ui-canvas-selection-outline');
+
+    try {
+      await app.open();
+      await app.drag({ x: 70, y: 70 }, { x: 70, y: 70 });
+      await app.click('形状');
+      await app.place();
+      expect(box()?.style.left).toBe('260px');
+      const handle = app.canvas().querySelector<HTMLElement>('[data-canvas-handle="se"]');
+      if (!handle) {
+        throw new Error('The pending object must be resizable.');
+      }
+
+      await app.drag({ x: 420, y: 280 }, { x: 445, y: 310 }, handle);
+
+      await app.update(confirm);
+      expect(app.canvas().querySelector('[data-canvas-object="new-geometry-1"]')).toBeNull();
+      expect(app.commands).toHaveLength(1);
+      expect(box()?.style.left).toBe('48px');
+    } finally {
+      confirm();
+      app.dispose();
+    }
+  },
+);
 
 test('cancels a placement with Escape and retries an unknown save with the original command', async () => {
   const app = geometryFixture({ failFirst: true });
@@ -480,7 +645,7 @@ test('uses the original picker shortcuts and repeats the selection from the more
     expect(button(app.host, '选择').getAttribute('aria-pressed')).toBe('true');
     await app.drag({ x: 70, y: 70 }, { x: 70, y: 70 });
     await app.click('更多操作');
-    await app.click('重复');
+    await app.click('重复 Ctrl/⌘ D');
     expect(app.commands[0]?.operation).toMatchObject({
       kind: 'duplicate',
       delta: { x: 32, y: 32 },
@@ -728,6 +893,8 @@ test('keeps HTML selection actions in the original order and opens the existing 
     });
     const menus = [...app.host.querySelectorAll('[role="menu"]')];
     expect(menus.map((menu) => menu.getAttribute('aria-label'))).toEqual(['白板操作']);
+    expect(menus[0]?.querySelector('[aria-label="重复 Ctrl/⌘ D"]')).not.toBeNull();
+    expect(menus[0]?.querySelector('[aria-label="适应选区 Shift 2"]')).not.toBeNull();
     await app.update(() => {
       app
         .canvas()

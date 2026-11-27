@@ -16,6 +16,7 @@ interface InlineBoardSuggestions {
 export interface BoardSuggestionsSurfaceProps {
   readonly anchor: HTMLElement | null;
   readonly boardId: string;
+  readonly updateKey?: string;
   readonly revision: bigint;
   readonly service: SuggestionService;
   readonly createCommandId: () => string;

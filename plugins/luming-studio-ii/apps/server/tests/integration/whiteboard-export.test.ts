@@ -10,6 +10,7 @@ import { expect, test } from 'vitest';
 import { pngImage } from '../fixtures/board-image-bytes.js';
 import { callWhiteboard, sendWhiteboardRequest } from '../support/whiteboard-client.js';
 import {
+  documentId,
   documentContent,
   editorId,
   lockedId,
@@ -86,6 +87,104 @@ test('rasterizes native content as a real PNG and exports the same saved histori
   expect(version.result).toEqual(live.result);
 });
 
+test('exports the todo progress, checkbox shapes and task sources in SVG and renders its PNG', async () => {
+  const objectId = 'todo-export-card';
+  const create = await callWhiteboard(
+    server.address,
+    editorId,
+    BoardEditService.method.editBoardGeometry,
+    {
+      boardId: mainBoardId,
+      commandId: 'add-export-todo',
+      operation: {
+        case: 'create',
+        value: {
+          object: {
+            objectId,
+            kind: 'todo',
+            label: '项目待办',
+            geometry: { width: 340, height: 160 },
+          },
+        },
+      },
+    },
+  );
+  expect(create.receipt?.outcome.case).toBe('applied');
+
+  const change = await callWhiteboard(
+    server.address,
+    editorId,
+    BoardEditService.method.editObjectContent,
+    {
+      boardId: mainBoardId,
+      objectId,
+      commandId: 'fill-export-todo',
+      expectedPayloadVersion: 0n,
+      edit: {
+        case: 'todo',
+        value: {
+          edits: [
+            {
+              operation: {
+                case: 'insert',
+                value: {
+                  item: {
+                    itemId: 'done',
+                    text: '审核 <事项>',
+                    checked: true,
+                    sourceRef: { objectId: documentId, boardId: mainBoardId, version: 0n },
+                  },
+                  placement: { position: { case: 'append', value: true } },
+                },
+              },
+            },
+            {
+              operation: {
+                case: 'insert',
+                value: {
+                  item: { itemId: 'open', text: '发给同事' },
+                  placement: { position: { case: 'append', value: true } },
+                },
+              },
+            },
+          ],
+        },
+      },
+    },
+  );
+  expect(change.receipt?.outcome.case).toBe('applied');
+
+  const selection = {
+    ...request,
+    expectedRevision: 2n,
+    scope: { case: 'selection' as const, value: { objectIds: [objectId] } },
+  };
+  const svg = await callWhiteboard(server.address, viewerId, exportBoard, {
+    ...selection,
+    format: BoardExportFormat.SVG,
+  });
+  assert.equal(svg.result.case, 'file');
+  const markup = new TextDecoder().decode(svg.result.value.content);
+  expect(markup).toContain('>1/2</text>');
+  expect(markup).toContain('data-studio-task-id="done" data-checked="true"');
+  expect(markup).toContain('data-studio-task-id="open" data-checked="false"');
+  expect(markup).toContain(
+    `data-source-ref="{&quot;elementId&quot;:&quot;${documentId}&quot;,&quot;artifactId&quot;:&quot;${mainBoardId}&quot;,&quot;version&quot;:0}"`,
+  );
+  expect(markup).toContain('<rect x="14" y="9" width="14" height="14"');
+  expect(markup).toContain('审核 &lt;事项&gt;');
+
+  const png = await callWhiteboard(server.address, viewerId, exportBoard, {
+    ...selection,
+    format: BoardExportFormat.PNG,
+  });
+  assert.equal(png.result.case, 'file');
+  expect(png.result.value.mimeType).toBe('image/png');
+  const bytes = png.result.value.content;
+  const header = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  expect([header.getUint32(16), header.getUint32(20)]).toEqual([404, 224]);
+});
+
 async function createExportDiagram(html: string) {
   const { receipt } = await callWhiteboard(
     server.address,
@@ -133,6 +232,18 @@ test('exports complete native documents plus isolated embedded content, and prep
   expect(contents).toContain('sandbox="allow-scripts"');
   expect(contents).toContain('Offline diagram');
   expect(contents).toContain('connect-src &apos;none&apos;');
+
+  const source = await callWhiteboard(server.address, viewerId, exportBoard, {
+    ...current,
+    scope: { case: 'selection', value: { objectIds: ['html-card'] } },
+    format: BoardExportFormat.HTML,
+  });
+  assert.equal(source.result.case, 'file');
+  expect(source.result.value).toMatchObject({
+    filename: 'Offline.html',
+    mimeType: 'text/html',
+    content: new TextEncoder().encode(html),
+  });
 
   const png = await callWhiteboard(server.address, viewerId, exportBoard, {
     ...current,

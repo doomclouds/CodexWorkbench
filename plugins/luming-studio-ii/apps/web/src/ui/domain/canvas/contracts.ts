@@ -231,6 +231,24 @@ export interface CanvasContentAnnotationRequest {
   readonly v: number;
 }
 
+export interface CanvasContentLocationRequest {
+  readonly id: string;
+  readonly target: CanvasContentUnit;
+  readonly u: number;
+  readonly v: number;
+  readonly reveal?: number;
+}
+
+export interface CanvasContentLocation {
+  readonly point: CanvasPoint | null;
+  readonly reveal?: number;
+}
+
+export interface CanvasContentTracking {
+  readonly requests: readonly CanvasContentLocationRequest[];
+  readonly report: (locations: ReadonlyMap<string, CanvasContentLocation>) => void;
+}
+
 export interface CanvasObjectViewProps extends CanvasObjectGeometryContext {
   readonly id?: string;
   readonly payload?: CanvasObjectPayload;
@@ -256,6 +274,7 @@ export interface CanvasObjectViewProps extends CanvasObjectGeometryContext {
   readonly nativeSourceRequest?: CanvasNativeSourceRequest;
   readonly annotationActive?: boolean;
   readonly onAnnotateContent?: (request: CanvasContentAnnotationRequest) => void;
+  readonly contentTracking?: CanvasContentTracking;
   readonly onOpenPresentation?: () => void;
   readonly onClosePresentation?: () => void;
   readonly request: (operation: CanvasObjectOperation) => Promise<CanvasObjectReceipt>;
@@ -389,11 +408,13 @@ export interface CanvasProps {
   readonly presentation?: CanvasPresentation;
   readonly selectionActions?: ReactNode;
   readonly pendingEdits?: readonly CanvasEditIntent[];
+  readonly pendingResizeObjectId?: string;
   readonly objectExtensions?: readonly CanvasObjectExtension[];
   readonly payloadById?: ReadonlyMap<string, CanvasObjectPayload>;
   readonly contentById?: ReadonlyMap<string, ReactNode>;
   readonly onSelectionChange: (selection: readonly string[]) => void;
   readonly onContextMenu?: (anchor: CanvasPoint, selection: readonly string[]) => void;
+  readonly blankDoubleClickPlacement?: CanvasPlacement;
   readonly onObjectActivate?: (activation: CanvasObjectActivation) => void;
   readonly editObjectRequest?: { readonly id: string };
   readonly formatObjectRequest?: CanvasObjectFormatRequest & { readonly id: string };
@@ -406,6 +427,7 @@ export interface CanvasProps {
   readonly nativeSourceRequest?: CanvasNativeSourceRequest;
   readonly annotationActive?: boolean;
   readonly onAnnotateContent?: (id: string, request: CanvasContentAnnotationRequest) => void;
+  readonly contentTracking?: ReadonlyMap<string, CanvasContentTracking>;
   readonly canEditExpandedObject?: boolean;
   readonly onOpenPresentation?: (ids: readonly string[]) => void;
   readonly onClosePresentation?: () => void;

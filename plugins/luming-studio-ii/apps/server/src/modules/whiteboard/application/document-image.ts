@@ -3,6 +3,7 @@ import {
   type BoardEditDecision,
   type BoardEditReceipt,
   type BoardHeader,
+  type SafeSvgImage,
 } from '../domain/index.js';
 import type { BoardEditWriter } from '../ports/index.js';
 
@@ -21,6 +22,7 @@ export function planDocumentImageUpload(
   writer: BoardEditWriter,
   { boardId }: BoardHeader,
   operation: DocumentImageOperation,
+  vector?: SafeSvgImage,
 ): BoardEditDecision {
   const { objectId, assetId, content } = operation;
   const [document] = writer.getObjects(boardId, [objectId]);
@@ -34,5 +36,5 @@ export function planDocumentImageUpload(
     return { kind: 'rejected', reason: 'invalidEdit' };
   }
 
-  return planDocumentImageAsset(boardId, assetId, content);
+  return planDocumentImageAsset(boardId, assetId, content, vector);
 }

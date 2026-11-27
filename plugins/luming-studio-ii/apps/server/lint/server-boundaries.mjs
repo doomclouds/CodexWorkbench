@@ -193,6 +193,8 @@ const portLayers = new Set([
 const protocolPrefix = '@codexworkbench/luming-studio-ii-contracts/whiteboard/';
 const catalogProtocol = '@codexworkbench/luming-studio-ii-contracts/catalog/service';
 const roomsProtocol = '@codexworkbench/luming-studio-ii-contracts/rooms/service';
+const roomStreamRoute = 'src/entrypoints/http/room-event-stream';
+const roomStreamTest = 'tests/integration/room-event-stream.test';
 const mcpActivity = 'src/entrypoints/mcp/agent-activity';
 const mcpActivityTest = 'tests/integration/mcp-agent-activity.test';
 const mcpTestLibraries = new Set([
@@ -271,6 +273,15 @@ const testBuiltins = new Set([
   'util',
 ]);
 const invalidSpecifier = /[?\\]|[^#]#|^(?:[/]|[a-z]:[/]|[a-z][a-z+.-]*:\/\/|file:)/iu;
+const privateLibraries = new Map([
+  ['@connectrpc/connect', new Set([roomStreamRoute, roomStreamTest])],
+  ['@connectrpc/connect-node', new Set([roomStreamRoute, roomStreamTest])],
+  ['proper-lockfile', new Set([mcpRuntime])],
+  ['@resvg/resvg-wasm', new Set(['src/infrastructure/platform/png-renderer'])],
+  ['parse5', new Set([feedbackAdapters + 'content-source', catalogAdapters + 'thumbnail-html'])],
+  [protocolPrefix + 'stickers', new Set([catalog + 'domain/thumbnail-sticker'])],
+  ['eslint', new Set(['tests/contracts/server-lint.test'])],
+]);
 
 function layerOf(path) {
   return [...layers].find(([prefix]) => path?.startsWith(prefix))?.[1];
@@ -322,17 +333,9 @@ function allowsLibrary(layer, specifier, from) {
 
     return builtins.get(layer)?.has(name) || (testLayers.has(layer) && testBuiltins.has(name));
   }
-  if (specifier === 'proper-lockfile') {
-    return from === mcpRuntime;
-  }
-  if (specifier === '@resvg/resvg-wasm') {
-    return from === 'src/infrastructure/platform/png-renderer';
-  }
-  if (specifier === 'parse5') {
-    return from === feedbackAdapters + 'content-source';
-  }
-  if (specifier === 'eslint') {
-    return from === 'tests/contracts/server-lint.test';
+  const sources = privateLibraries.get(specifier);
+  if (sources) {
+    return sources.has(from);
   }
 
   return specifier === 'vitest' && testLayers.has(layer);

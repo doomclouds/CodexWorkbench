@@ -111,6 +111,10 @@ function readParticipant(participant: WireParticipant): BoardRoomParticipant {
     role: participant.role,
     sequence: required(participant.sequence, '参与者序号'),
     expiresAtMillis: readServerTime(participant.expiresAtUnixMs),
+    activityAtMillis:
+      participant.activityAtUnixMs === undefined
+        ? undefined
+        : readServerTime(participant.activityAtUnixMs),
     cursor: readPoint(participant.cursor),
     viewport: readViewport(participant.viewport),
     following: participant.following,
@@ -171,6 +175,8 @@ export function readRoomEvent(event: WireRoomEvent | undefined, boardId: string)
         timer,
         agentWorkspaces,
         canReleaseAgentActivity,
+        feedbackVersion,
+        suggestionsVersion,
       } = payload.value;
 
       return {
@@ -183,6 +189,8 @@ export function readRoomEvent(event: WireRoomEvent | undefined, boardId: string)
         timer: readTimer(timer),
         agentWorkspaces: readAgentWorkspaces(agentWorkspaces),
         canReleaseAgentActivity,
+        feedbackVersion,
+        suggestionsVersion,
       };
     }
     case 'participants':
@@ -214,6 +222,13 @@ export function readRoomEvent(event: WireRoomEvent | undefined, boardId: string)
       };
     case 'accessLost':
       return { ...header, kind: 'accessLost' };
+    case 'feedbackChanged':
+    case 'suggestionsChanged':
+      return {
+        ...header,
+        kind: payload.case,
+        version: required(payload.value.version, '讨论版本'),
+      };
     case undefined:
       throw new Error('房间响应缺少事件内容。');
   }

@@ -42,6 +42,23 @@ const archiveImportData = resolve(sourceRoot, 'data/archive-import');
 const feedbackData = resolve(sourceRoot, 'data/feedback');
 const sharingData = resolve(sourceRoot, 'data/sharing');
 const roomsData = resolve(sourceRoot, 'data/rooms');
+const roomStreamImports = new Map([
+  [
+    '@connectrpc/connect',
+    {
+      file: resolve(roomsData, 'stream.ts'),
+      types: new Set(['Transport']),
+      values: new Set(['Code', 'ConnectError', 'createClient']),
+    },
+  ],
+  [
+    '@connectrpc/connect-web',
+    {
+      file: resolve(sourceRoot, 'platform/browser/room-stream.ts'),
+      values: new Set(['createGrpcWebTransport']),
+    },
+  ],
+]);
 const suggestionsData = resolve(sourceRoot, 'data/suggestions');
 const whiteboardPage = resolve(sourceRoot, 'pages/whiteboard');
 const guestShell = resolve(shellRoot, 'AppShell.tsx');
@@ -217,7 +234,7 @@ function guestShellImport(file, target, targetOwner, typeOnly) {
   }
 }
 
-function isWhiteboardDecoderImport(node, imports) {
+function isNamedImportAllowed(node, imports) {
   if (node.type !== 'ImportDeclaration' || node.specifiers.length === 0) {
     return false;
   }
@@ -244,7 +261,7 @@ function allowedLocal(owner, target, targetOwner, file, node) {
 
   const decoderImports = whiteboardDecoderImports.get(file);
   if (decoderImports && targetOwner.root === whiteboardData) {
-    return publicEntry(target, targetOwner) && isWhiteboardDecoderImport(node, decoderImports);
+    return publicEntry(target, targetOwner) && isNamedImportAllowed(node, decoderImports);
   }
 
   const typeOnly = isTypeOnly(node);
@@ -336,6 +353,9 @@ function referenceTargets(file, specifier) {
   return objectTargets(file, specifier);
 }
 
+const stickerArtwork = contractPackage + '/whiteboard/stickers';
+const stickerCatalog = resolve(sourceRoot, 'ui/domain/objects/sticker/sticker-catalog.ts');
+
 const contractBoundary = {
   meta: {
     type: 'problem',
@@ -393,6 +413,18 @@ const contractBoundary = {
     }
 
     function packageProblem(node, specifier, reexport) {
+      if (specifier.startsWith('@connectrpc/')) {
+        const imports = roomStreamImports.get(specifier);
+        if (reexport) {
+          return 'reexport';
+        }
+        if (imports?.file !== file || !isNamedImportAllowed(node, imports)) {
+          return 'dependency';
+        }
+
+        return;
+      }
+
       if (governed && !allowedLibrary(owner, specifier, node, file)) {
         return 'dependency';
       }
@@ -427,6 +459,10 @@ const contractBoundary = {
       }
 
       const [specifier] = written.split(/[?#]/u, 1);
+      if (file === stickerCatalog && written === stickerArtwork) {
+        return;
+      }
+
       const targets = referenceTargets(file, specifier);
       if (targets.length === 0 && isProtocol(specifier)) {
         return allowedProtocol(written, owner, suite) && !reexport ? undefined : 'protocol';
@@ -455,7 +491,11 @@ const contractBoundary = {
       const definition = bindingOf(context.sourceCode, identifier)?.defs[0];
       if (definition?.type === 'ImportBinding') {
         const source = definition.parent.source;
-        if (!typeOnly || mcpSdkLibraries.has(source.value)) {
+        if (
+          !typeOnly ||
+          mcpSdkLibraries.has(source.value) ||
+          source.value.startsWith('@connectrpc/')
+        ) {
           checkReference(node, source, true);
         }
       }

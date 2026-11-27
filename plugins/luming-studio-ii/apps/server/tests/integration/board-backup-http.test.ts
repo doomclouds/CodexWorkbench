@@ -7,6 +7,7 @@ import {
 } from '@codexworkbench/luming-studio-ii-contracts/archives/service';
 import { BoardCatalogService } from '@codexworkbench/luming-studio-ii-contracts/catalog/service';
 import { BoardEditService } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/edits';
+import { BoardHistoryService } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/history';
 import {
   BoardExportFormat,
   BoardExportRejectionReason,
@@ -14,6 +15,7 @@ import {
 } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/service';
 import { expect, test } from 'vitest';
 import { pngImage } from '../fixtures/board-image-bytes.js';
+import { replaceArchiveAssetBytes } from '../support/archive-database.js';
 import { grantCatalogEditor } from '../support/catalog-lifecycle-database.js';
 import {
   actorHeader,
@@ -25,6 +27,7 @@ import { useWhiteboardTestServer } from './whiteboard-test-server.js';
 
 const server = useWhiteboardTestServer();
 const { exportBoard, moveObjects, getObjectPayloads, getBoardScene } = WhiteboardService.method;
+const { getBoardVersionScene, listBoardVersions } = BoardHistoryService.method;
 const geometry = { x: 32, y: 64, width: 100, height: 80, rotation: 0 };
 
 async function newBoard() {
@@ -64,7 +67,32 @@ async function reimport(content: Uint8Array) {
   return reply.receipt.outcome.value.boardId;
 }
 
-test('only the owner can produce a v4 archive and import its latest scene with exact media bytes', async () => {
+function backupRequest(boardId: string, expectedRevision: bigint) {
+  return {
+    boardId,
+    expectedRevision,
+    scope: { case: 'whole' as const, value: {} },
+    format: BoardExportFormat.ZIP,
+  };
+}
+
+test('restores an empty board with a readable creation version', async () => {
+  const boardId = await newBoard();
+  const backup = await callWhiteboard(
+    server.address,
+    editorId,
+    exportBoard,
+    backupRequest(boardId, 0n),
+  );
+  assert.equal(backup.result.case, 'file');
+  const restoredId = await reimport(backup.result.value.content);
+  const { versions } = await callWhiteboard(server.address, editorId, listBoardVersions, {
+    boardId: restoredId,
+  });
+  expect(versions).toMatchObject([{ revision: 0n, actorId: editorId }]);
+});
+
+test('only the owner can back up and restore retained versions with their authors and media', async () => {
   const boardId = await newBoard();
   grantCatalogEditor(server.databasePath, boardId, teammateId);
   const { receipt } = await callWhiteboard(
@@ -81,7 +109,7 @@ test('only the owner can produce a v4 archive and import its latest scene with e
     },
   );
   expect(receipt?.outcome.case).toBe('applied');
-  const moved = await callWhiteboard(server.address, editorId, moveObjects, {
+  const moved = await callWhiteboard(server.address, teammateId, moveObjects, {
     boardId,
     commandId: 'backup-position',
     delta: { dx: 5, dy: -4 },
@@ -89,12 +117,7 @@ test('only the owner can produce a v4 archive and import its latest scene with e
   });
   expect(moved.receipt?.outcome.case).toBe('applied');
 
-  const request = {
-    boardId,
-    expectedRevision: 2n,
-    scope: { case: 'whole' as const, value: {} },
-    format: BoardExportFormat.ZIP,
-  };
+  const request = backupRequest(boardId, 2n);
   const foreignEditor = await sendWhiteboardRequest(
     server.address,
     teammateId,
@@ -133,7 +156,20 @@ test('only the owner can produce a v4 archive and import its latest scene with e
   expect(imported.scene?.objects).toMatchObject([
     { objectId: 'drawing', geometry: { x: 37, y: 60 } },
   ]);
-
+  expect(imported.scene?.boardRevision).toBe(2n);
+  const { versions } = await callWhiteboard(server.address, editorId, listBoardVersions, {
+    boardId: importedId,
+  });
+  expect(versions).toMatchObject([
+    { revision: 2n, actorId: teammateId },
+    { revision: 1n, actorId: editorId },
+    { revision: 0n, actorId: editorId },
+  ]);
+  const historical = await callWhiteboard(server.address, editorId, getBoardVersionScene, {
+    boardId: importedId,
+    revision: 1n,
+  });
+  expect(historical.scene?.objects).toMatchObject([{ objectId: 'drawing', geometry }]);
   const payloads = await callWhiteboard(server.address, editorId, getObjectPayloads, {
     boardId: importedId,
     objectIds: ['drawing'],
@@ -150,4 +186,43 @@ test('only the owner can produce a v4 archive and import its latest scene with e
   });
   expect(media.status).toBe(200);
   expect(new Uint8Array(await media.arrayBuffer())).toEqual(pngImage);
+});
+
+test('backs up two 20 MiB assets through HTTP and rejects an individual asset over 20 MiB', async () => {
+  const boardId = await newBoard();
+  const maximumAssetBytes = 20 * 1024 * 1024;
+  for (const objectId of ['large-image-one', 'large-image-two']) {
+    const { receipt } = await callWhiteboard(
+      server.address,
+      editorId,
+      BoardEditService.method.attachBoardImage,
+      {
+        boardId,
+        commandId: 'backup-' + objectId,
+        objectId,
+        displayName: objectId + '.png',
+        geometry,
+        content: pngImage,
+      },
+    );
+    assert.equal(receipt?.outcome.case, 'applied');
+    replaceArchiveAssetBytes(server.databasePath, boardId, 'image-' + objectId, maximumAssetBytes);
+  }
+
+  const request = backupRequest(boardId, 2n);
+  const backup = await callWhiteboard(server.address, editorId, exportBoard, request);
+  assert.equal(backup.result.case, 'file');
+  expect(backup.result.value.content.byteLength).toBeGreaterThan(2 * maximumAssetBytes);
+
+  replaceArchiveAssetBytes(
+    server.databasePath,
+    boardId,
+    'image-large-image-two',
+    maximumAssetBytes + 1,
+  );
+  const oversized = await callWhiteboard(server.address, editorId, exportBoard, request);
+  expect(oversized.result).toMatchObject({
+    case: 'rejected',
+    value: { reason: BoardExportRejectionReason.TOO_LARGE },
+  });
 });

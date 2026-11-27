@@ -122,7 +122,7 @@ export function BoardViewportTools({
   }
 
   return (
-    <div className="whiteboard-viewport-tools">
+    <div className="whiteboard-viewport-tools" data-canvas-toolbar-obstacle="">
       {timer ?? <BoardTimer canEdit={timerEditable} />}
       <span className="whiteboard-viewport-tools__divider" aria-hidden="true" />
       <div ref={setAnchor} className="whiteboard-viewport-tools__zoom">

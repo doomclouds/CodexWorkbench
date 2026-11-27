@@ -12,7 +12,7 @@ import type {
 } from '../../modules/whiteboard/ports/index.js';
 import type { SqliteConnection, SqliteDatabase } from '../platform/index.js';
 import { readBoardAccess } from './authorization/index.js';
-import { readBackupMetadata } from './board-backup-metadata.js';
+import { readBackupDetails, readBackupMetadata } from './board-backup-metadata.js';
 import {
   advanceBoardRevision,
   applyBoardChanges,
@@ -73,6 +73,60 @@ const listTargets = `
   ${payloadVersionJoin}
   ${sceneOrder}
 `;
+
+interface ImportedPayload {
+  readonly version: bigint;
+  readonly kind: string;
+  readonly json: string;
+}
+
+interface ImportedObject {
+  readonly objectId: string;
+  readonly kind: string;
+  readonly label: string;
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+  readonly rotation: number;
+  readonly geometryVersion: bigint;
+  readonly locked: boolean;
+  readonly parentId?: string;
+  readonly groupId?: string;
+  readonly appearanceJson?: string;
+  readonly detailJson?: string;
+  readonly payload?: ImportedPayload;
+}
+
+export function decodeImportedPayload(object: ImportedObject): PayloadRecord | undefined {
+  const { payload } = object;
+  decodeSceneObject({
+    object_id: object.objectId,
+    kind: object.kind,
+    label: object.label,
+    x: object.x,
+    y: object.y,
+    width: object.width,
+    height: object.height,
+    rotation: object.rotation,
+    geometry_version: object.geometryVersion,
+    payload_version: payload?.version ?? null,
+    locked: object.locked ? 1n : 0n,
+    parent_id: object.parentId ?? null,
+    group_id: object.groupId ?? null,
+    appearance_json: object.appearanceJson ?? null,
+    detail_json: object.detailJson ?? null,
+  });
+
+  return (
+    payload && {
+      objectId: object.objectId,
+      bodyKind: payload.kind,
+      payloadVersion: payload.version,
+      data: decodePayload(payload.json),
+    }
+  );
+}
 
 function readObjects(
   connection: SqliteConnection,
@@ -147,12 +201,12 @@ function readPayloadByteSize(
   return storedVersion(query.get(boardId, JSON.stringify(objectIds))?.total_bytes, 'total_bytes');
 }
 
-function readExportAsset(
+function readBackupAsset(
   connection: SqliteConnection,
   boardId: string,
   assetId: string,
   maximumBytes: number,
-): ExportAssetRead | undefined {
+) {
   const row = connection
     .prepare(`
       SELECT mime_type, CASE WHEN length(bytes) <= ? THEN bytes END AS bytes
@@ -165,7 +219,7 @@ function readExportAsset(
     return undefined;
   }
   if (row.bytes === null) {
-    return { kind: 'tooLarge' };
+    return { kind: 'tooLarge' } as const;
   }
   if (!(row.bytes instanceof Uint8Array)) {
     throw new Error('Invalid archived asset bytes.');
@@ -175,8 +229,29 @@ function readExportAsset(
     kind: 'asset',
     asset: {
       mimeType: storedText(row.mime_type, 'asset mime type'),
-      byteLength: row.bytes.byteLength,
-      base64: Buffer.from(row.bytes).toString('base64'),
+      bytes: row.bytes,
+    },
+  } as const;
+}
+
+function readExportAsset(
+  connection: SqliteConnection,
+  boardId: string,
+  assetId: string,
+  maximumBytes: number,
+): ExportAssetRead | undefined {
+  const result = readBackupAsset(connection, boardId, assetId, maximumBytes);
+  if (result?.kind !== 'asset') {
+    return result;
+  }
+
+  const { mimeType, bytes } = result.asset;
+  return {
+    kind: 'asset',
+    asset: {
+      mimeType,
+      byteLength: bytes.byteLength,
+      base64: Buffer.from(bytes).toString('base64'),
     },
   };
 }
@@ -283,6 +358,9 @@ function createReader(connection: SqliteConnection): BoardEditReader {
     },
     getBoard: (boardId) => readBoard(connection, boardId),
     getBackupMetadata: (boardId, actorId) => readBackupMetadata(connection, boardId, actorId),
+    getBackupDetails: (boardId) => readBackupDetails(connection, boardId),
+    getBackupAsset: (boardId, assetId, maximumBytes) =>
+      readBackupAsset(connection, boardId, assetId, maximumBytes),
     listObjects: (boardId, limit) =>
       limit === undefined
         ? readObjects(connection, listScene, boardId)

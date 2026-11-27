@@ -35,6 +35,7 @@ export interface SharingMember {
   readonly role: GuestRole;
   readonly invitationVersion: bigint;
   readonly removed: boolean;
+  readonly lastSeenAtMillis?: number;
 }
 
 export interface BrowserSession {
@@ -47,6 +48,7 @@ export interface ActiveBoardGuest {
   readonly name: string;
   readonly scope: SharingScope;
   readonly version: bigint;
+  readonly lastSeenAtMillis?: number;
 }
 
 export interface BoardIdentity {
@@ -66,6 +68,7 @@ export interface SharingMemberView {
   readonly role: GuestRole;
   readonly removed: boolean;
   readonly active: boolean;
+  readonly lastSeenAtMillis?: number;
 }
 
 export interface SharingCapabilities {

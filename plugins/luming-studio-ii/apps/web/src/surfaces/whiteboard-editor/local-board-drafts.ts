@@ -83,6 +83,7 @@ const knownKinds = new Set<string>([
   'todo',
   'table',
   'html',
+  'diagram',
   'sticker',
   'image',
   'link',

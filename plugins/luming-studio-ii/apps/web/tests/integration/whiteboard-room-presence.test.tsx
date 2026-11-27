@@ -9,7 +9,14 @@ import type {
   BoardRoomSession,
   BoardRoomState,
 } from '../../src/data/rooms/index.js';
-import type { WhiteboardObject, WhiteboardService } from '../../src/data/whiteboard/index.js';
+import type {
+  EditObjectContentCommand,
+  WhiteboardEditService,
+  WhiteboardObject,
+  WhiteboardPayload,
+  WhiteboardPayloadResult,
+  WhiteboardService,
+} from '../../src/data/whiteboard/index.js';
 import { createControlFixture } from '../support/render-control.js';
 
 type ViewReporter = NonNullable<ComponentProps<typeof WhiteboardApp>['onViewContext']>;
@@ -130,13 +137,15 @@ function measureCanvas() {
   };
 }
 
-function roomApp() {
+function roomApp(overrides: Partial<WhiteboardService> = {}, editService?: WhiteboardEditService) {
   const restoreLayout = measureCanvas();
   const fixture = createControlFixture();
   const room = createRoomFixture();
   const board = createBoardFixture();
+  const service = { ...board.service, ...overrides };
   const views: ReportedView[] = [];
   const accessLoss: string[] = [];
+  let command = 0;
   return {
     host: fixture.host,
     room,
@@ -148,9 +157,10 @@ function roomApp() {
         fixture.render(
           <WhiteboardApp
             boardId="shared"
-            service={board.service}
+            service={service}
+            editService={editService}
             room={room.session}
-            createCommandId={() => 'command'}
+            createCommandId={() => 'command-' + ++command}
             onViewContext={(view) => views.push(view)}
             onRoomAccessLost={() => accessLoss.push('revoked')}
           />,
@@ -165,7 +175,10 @@ function roomApp() {
 }
 
 async function click(label: string) {
-  const button = document.querySelector<HTMLButtonElement>('button[aria-label="' + label + '"]');
+  const button = [...document.querySelectorAll('button')].find(
+    (control) => control.ariaLabel === label || control.textContent?.trim() === label,
+  );
+
   if (!button) {
     throw new Error('Missing board control: ' + label);
   }
@@ -196,6 +209,204 @@ async function nextFrame() {
     });
   });
 }
+
+function roomDocumentPayload(id: string, version: bigint, title: string, text: string) {
+  return {
+    id,
+    version,
+    body: {
+      kind: 'document',
+      value: {
+        title,
+        document: {
+          schemaVersion: 1,
+          blocks: [{ id: 'paragraph', type: 'paragraph', props: {}, content: text }],
+        },
+      },
+    },
+  } as const satisfies WhiteboardPayload;
+}
+
+function deferredPayload() {
+  let respond: (results: readonly WhiteboardPayloadResult[]) => void = () => {
+    throw new Error('The document payload request was not initialized.');
+  };
+  const results = new Promise<readonly WhiteboardPayloadResult[]>((resolve) => {
+    respond = resolve;
+  });
+
+  return { results, respond };
+}
+
+function roomDocumentFixture() {
+  const source: WhiteboardObject = {
+    id: 'room-document',
+    kind: 'document',
+    label: '原标题',
+    geometry: { x: 80, y: 80, width: 550, height: 380, rotation: 0 },
+    geometryVersion: 0n,
+    payloadVersion: 0n,
+    locked: false,
+  };
+  const initial = roomDocumentPayload(source.id, 0n, '原标题', '原正文');
+  const remote = roomDocumentPayload(source.id, 1n, '远端标题', '远端改动的正文');
+  const delayed = deferredPayload();
+  let version = 0n;
+  const writes: EditObjectContentCommand[] = [];
+  const unused = async (): Promise<never> => {
+    throw new Error('Unexpected write to the test whiteboard.');
+  };
+  const editService: WhiteboardEditService = {
+    async editContent(command) {
+      writes.push(command);
+      const { boardId, commandId, edit } = command;
+      if (command.expectedPayloadVersion !== version || edit.kind !== 'document') {
+        return {
+          kind: 'conflict',
+          boardId,
+          commandId,
+          revision: version,
+          objects: [],
+          payloads: [],
+        };
+      }
+
+      version++;
+      return {
+        kind: 'applied',
+        boardId,
+        commandId,
+        revision: version,
+        objects: [{ ...source, label: edit.value.title, payloadVersion: version }],
+        payloads: [
+          {
+            kind: 'loaded',
+            payload: { id: source.id, version, body: { ...edit, value: { ...edit.value } } },
+          },
+        ],
+        removedIds: [],
+        order: [],
+      };
+    },
+    getReceipt: async () => undefined,
+    editGeometry: unused,
+    attachImage: unused,
+  };
+  const app = roomApp(
+    {
+      async getScene(boardId) {
+        const current = version ? remote : initial;
+        const object = { ...source, label: current.body.value.title, payloadVersion: version };
+
+        return { boardId, title: '共享白板', revision: version, objects: [object], canEdit: true };
+      },
+      async getPayloads() {
+        return version ? delayed.results : [{ kind: 'loaded', payload: initial }];
+      },
+    },
+    editService,
+  );
+
+  return {
+    ...app,
+    writes,
+    updateRemote() {
+      version = 1n;
+      app.room.change({
+        revision: version,
+        changedObjectIds: [source.id],
+        changedObjects: [{ ...source, label: remote.body.value.title, payloadVersion: version }],
+        removedObjectIds: [],
+        refreshScene: false,
+      });
+    },
+    deliverRemote() {
+      delayed.respond([{ kind: 'loaded', payload: remote }]);
+    },
+  };
+}
+
+function typeDocumentTitle(title: string) {
+  const input = document.querySelector<HTMLInputElement>(
+    '[data-document-view="edit"] input.studio-document-title',
+  );
+
+  if (!input) {
+    throw new Error('Missing document title editor.');
+  }
+
+  act(() => {
+    const value = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+    value?.set?.call(input, title);
+    input.dispatchEvent(new InputEvent('input', { bubbles: true, data: title }));
+  });
+}
+
+async function waitForDocument(check: () => boolean) {
+  const deadline = Date.now() + 3000;
+  while (!check() && Date.now() < deadline) {
+    await nextFrame();
+  }
+
+  expect(check()).toBe(true);
+}
+
+function prepareDocumentScrolling() {
+  const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollTo');
+  Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
+    configurable: true,
+    value(this: HTMLElement, options: ScrollToOptions) {
+      this.scrollTop = options.top ?? this.scrollTop;
+    },
+  });
+
+  return () => {
+    if (original) {
+      Object.defineProperty(HTMLElement.prototype, 'scrollTo', original);
+    } else {
+      Reflect.deleteProperty(HTMLElement.prototype, 'scrollTo');
+    }
+  };
+}
+
+test('keeps the active document and its exact save version while room metadata awaits the body', async () => {
+  const restoreScroll = prepareDocumentScrolling();
+  const app = roomDocumentFixture();
+  const editorSelector = '[data-document-editor] [contenteditable="true"]';
+  try {
+    await app.open();
+    await click('编辑文档');
+    await waitForDocument(() => document.querySelector(editorSelector) !== null);
+    const editor = document.querySelector(editorSelector);
+    typeDocumentTitle('本地草稿标题');
+    await act(async () => app.updateRemote());
+    expect(document.querySelector(editorSelector)).toBe(editor);
+    await waitForDocument(() => app.writes.length === 1);
+    expect(app.writes[0]?.expectedPayloadVersion).toBe(0n);
+
+    await click('比较最新内容');
+    await click('保存此草稿');
+    expect(app.writes[1]?.expectedPayloadVersion).toBe(0n);
+    await act(async () => app.deliverRemote());
+    expect(app.host.textContent).toContain('远端改动的正文');
+    await click('保存此草稿');
+    expect(app.writes[2]).toMatchObject({
+      expectedPayloadVersion: 1n,
+      edit: {
+        kind: 'document',
+        value: { title: '本地草稿标题', document: { blocks: [{ content: '远端改动的正文' }] } },
+      },
+    });
+
+    await act(async () => app.room.revoke());
+    expect(document.querySelector(editorSelector)).toBeNull();
+    expect(app.host.textContent).toContain('白板访问已撤销');
+    expect(app.host.textContent).not.toContain('远端改动的正文');
+  } finally {
+    app.dispose();
+    restoreScroll();
+  }
+});
 
 test('follows a larger peer viewport, publishes world pointer coordinates and detaches on a real action', async () => {
   const app = roomApp();

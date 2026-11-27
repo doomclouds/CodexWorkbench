@@ -25,10 +25,23 @@ interface UnitContent {
 
 type ArchiveContent = number | UnitContent;
 
+export interface ArchiveHistoryRecord {
+  readonly entry: Readonly<Record<string, unknown>>;
+  readonly artifact: Readonly<Record<string, unknown>>;
+  readonly objects: readonly unknown[];
+}
+
+export interface ArchiveRestoration {
+  readonly artifact: Readonly<Record<string, unknown>>;
+  readonly details?: Readonly<Record<string, unknown>>;
+  readonly history: readonly ArchiveHistoryRecord[];
+}
+
 export interface CurrentArchiveState {
   readonly title: string;
   readonly objects: readonly unknown[];
   readonly assets: Record<string, unknown>;
+  readonly restoration?: ArchiveRestoration;
 }
 
 function textChunk(utf8: InstanceType<typeof TextDecoder>, chunk?: Uint8Array): string {
@@ -192,28 +205,32 @@ function restoreContent(
   return { fields, units: units.map((id) => archiveIndex(id, payloadCount)) };
 }
 
-function checkHistory(value: unknown, contentCount: number, payloadCount: number): void {
+function readHistory(value: unknown, contentCount: number, payloadCount: number) {
   const history = archiveArray(value);
   if (history.length > MAX_HISTORY) {
     throw archiveTooLarge();
   }
 
-  for (const version of history) {
+  return history.map((version) => {
     const references = archiveArray(version);
     if (references.length !== 3) {
       throw invalidArchive('Invalid archive history references');
     }
 
-    archiveIndex(references[0], payloadCount);
-    archiveIndex(references[1], payloadCount);
-    archiveIndex(references[2], contentCount);
-  }
+    return {
+      entry: archiveIndex(references[0], payloadCount),
+      artifact: archiveIndex(references[1], payloadCount),
+      content: archiveIndex(references[2], contentCount),
+    };
+  });
 }
 
-function latestObjects(value: ArchiveContent, reader: ArchiveValueReader): readonly unknown[] {
+type ReadPayload = (reference: number, budget: ArchiveValueBudget) => unknown;
+
+function readScene(value: ArchiveContent, readPayload: ReadPayload): readonly unknown[] {
   const budget: ArchiveValueBudget = { maximum: MAX_ARCHIVE_BOARD_BYTES, bytes: 0, nodes: 0 };
   if (typeof value === 'number') {
-    const content = archiveRecord(reader.payload(value, budget));
+    const content = archiveRecord(readPayload(value, budget));
     const elements = archiveArray(content.elements);
     if (elements.length > MAX_UNITS) {
       throw archiveTooLarge();
@@ -222,12 +239,65 @@ function latestObjects(value: ArchiveContent, reader: ArchiveValueReader): reado
     return elements;
   }
 
-  const fields = archiveRecord(reader.payload(value.fields, budget));
+  const fields = archiveRecord(readPayload(value.fields, budget));
   if (Object.hasOwn(fields, 'elements')) {
     throw invalidArchive('Duplicate archive object list');
   }
 
-  return value.units.map((reference) => reader.payload(reference, budget));
+  return value.units.map((reference) => readPayload(reference, budget));
+}
+
+function cachedPayload(reader: ArchiveValueReader, total: ArchiveValueBudget): ReadPayload {
+  const cache = new Map<number, { value: unknown; bytes: number; nodes: number }>();
+
+  return (reference, budget) => {
+    let entry = cache.get(reference);
+    if (!entry) {
+      const measured = { maximum: total.maximum - total.bytes, bytes: 0, nodes: 0 };
+      const value = reader.payload(reference, measured);
+      total.bytes += measured.bytes;
+      total.nodes += measured.nodes;
+      if (total.nodes > MAX_JSON_STRUCTURE) {
+        throw archiveTooLarge();
+      }
+
+      entry = { value, bytes: measured.bytes, nodes: measured.nodes };
+      cache.set(reference, entry);
+    }
+
+    budget.bytes += entry.bytes;
+    budget.nodes += entry.nodes;
+    if (budget.bytes > budget.maximum || budget.nodes > MAX_JSON_STRUCTURE) {
+      throw archiveTooLarge();
+    }
+
+    return entry.value;
+  };
+}
+
+function legacyStudioBackup(
+  current: ArchiveContent,
+  board: Record<string, unknown>,
+  history: ReturnType<typeof readHistory>,
+  reader: ArchiveValueReader,
+  budget: ArchiveValueBudget,
+): boolean {
+  if (typeof current === 'number' || !Number.isSafeInteger(board.revision)) {
+    return false;
+  }
+
+  const fields = archiveRecord(reader.payload(current.fields, budget));
+  if (Object.keys(fields).length > 0) {
+    return false;
+  }
+
+  return history.every(({ entry }) => {
+    const record = archiveRecord(reader.payload(entry, budget));
+
+    return (
+      Number.isSafeInteger(record.revision) && record.id === 'revision-' + String(record.revision)
+    );
+  });
 }
 
 function projectState(
@@ -235,6 +305,7 @@ function projectState(
   contents: readonly ArchiveContent[],
   reader: ArchiveValueReader,
   artifactId: string,
+  history: ReturnType<typeof readHistory>,
 ): CurrentArchiveState {
   const properties = archiveFields(header.properties);
   if (properties.size > MAX_PROPERTIES) {
@@ -254,14 +325,50 @@ function projectState(
     throw invalidArchive('Archive board title is missing');
   }
 
-  const current = contents[archiveIndex(header.current, contents.length)];
+  const currentIndex = archiveIndex(header.current, contents.length);
+  const current = contents[currentIndex];
   if (current === undefined) {
     throw invalidArchive('Archive contains no current board');
   }
 
   const assets = archiveRecord(reader.payload(properties.get('assets'), budget));
+  const marker = properties.get('studioII');
+  const details = marker === undefined ? undefined : archiveRecord(reader.payload(marker, budget));
+  const restore = details || legacyStudioBackup(current, board, history, reader, budget);
+  if (!restore) {
+    return {
+      title,
+      objects: readScene(current, (reference, allowance) => reader.payload(reference, allowance)),
+      assets,
+    };
+  }
 
-  return { title, objects: latestObjects(current, reader), assets };
+  const readPayload = cachedPayload(reader, budget);
+  const scenes = new Map<number, readonly unknown[]>();
+  function scene(index: number) {
+    const existing = scenes.get(index);
+    if (existing) {
+      return existing;
+    }
+
+    const result = readScene(contents[index]!, readPayload);
+    scenes.set(index, result);
+
+    return result;
+  }
+
+  const restoredHistory = history.map(({ entry, artifact, content }) => ({
+    entry: archiveRecord(reader.payload(entry, budget)),
+    artifact: archiveRecord(reader.payload(artifact, budget)),
+    objects: scene(content),
+  }));
+
+  return {
+    title,
+    objects: scene(currentIndex),
+    assets,
+    restoration: { artifact: board, details, history: restoredHistory },
+  };
 }
 
 async function readSections(
@@ -286,9 +393,15 @@ async function readSections(
   for (const value of encodedContents) {
     contents.push(restoreContent(value, contents, payloads.length));
   }
-  checkHistory(header.history, contents.length, payloads.length);
+  const history = readHistory(header.history, contents.length, payloads.length);
 
-  return projectState(header, contents, new ArchiveValueReader(texts, payloads), artifactId);
+  return projectState(
+    header,
+    contents,
+    new ArchiveValueReader(texts, payloads),
+    artifactId,
+    history,
+  );
 }
 
 export async function readCurrentArchiveState(

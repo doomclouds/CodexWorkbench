@@ -150,42 +150,45 @@ const updateSource = {
   value: { title: 'Updated demo', html: '<p>Updated</p>', expectedSourceRevision: 0n },
 } as const;
 
-test('saves HTML state independently and requires current source and payload versions', async () => {
-  seedNativeObjects(server.databasePath, false);
-  const state = await editContent(embedId, 'write-embed-state', 0n, stateEdit);
-  expect(state.receipt?.outcome.case).toBe('applied');
+test.each(['html', 'diagram'] as const)(
+  'saves %s state independently and requires current source and payload versions',
+  async (kind) => {
+    seedNativeObjects(server.databasePath, false, kind);
+    const state = await editContent(embedId, 'write-embed-state', 0n, stateEdit);
+    expect(state.receipt?.outcome.case).toBe('applied');
 
-  const source = await editContent(embedId, 'write-embed-source', 1n, updateSource);
-  expect(source.receipt?.outcome).toMatchObject({
-    case: 'applied',
-    value: {
-      changedObjects: [{ objectId: embedId, label: 'Updated demo', geometryVersion: 0n }],
-      changedPayloads: [
-        {
-          objectId: embedId,
-          result: {
-            case: 'payload',
-            value: {
-              payloadVersion: 2n,
-              body: { case: 'embed', value: { sourceRevision: 1n, state: savedState.state } },
+    const source = await editContent(embedId, 'write-embed-source', 1n, updateSource);
+    expect(source.receipt?.outcome).toMatchObject({
+      case: 'applied',
+      value: {
+        changedObjects: [{ objectId: embedId, kind, label: 'Updated demo', geometryVersion: 0n }],
+        changedPayloads: [
+          {
+            objectId: embedId,
+            result: {
+              case: 'payload',
+              value: {
+                payloadVersion: 2n,
+                body: { case: 'embed', value: { sourceRevision: 1n, state: savedState.state } },
+              },
             },
           },
-        },
-      ],
-    },
-  });
+        ],
+      },
+    });
 
-  const oldSource = await editContent(embedId, 'old-embed-source', 2n, updateSource);
-  const oldState = await editContent(embedId, 'old-embed-state', 0n, stateEdit);
-  expect(oldSource.receipt?.outcome.case).toBe('conflict');
-  expect(oldState.receipt?.outcome.case).toBe('conflict');
+    const oldSource = await editContent(embedId, 'old-embed-source', 2n, updateSource);
+    const oldState = await editContent(embedId, 'old-embed-state', 0n, stateEdit);
+    expect(oldSource.receipt?.outcome.case).toBe('conflict');
+    expect(oldState.receipt?.outcome.case).toBe('conflict');
 
-  const chart = await editContent(chartId, 'chart-state', 0n, stateEdit);
-  expect(chart.receipt?.outcome).toMatchObject({
-    case: 'rejected',
-    value: { reason: BoardEditRejectionReason.UNSUPPORTED_KIND },
-  });
-});
+    const chart = await editContent(chartId, 'chart-state', 0n, stateEdit);
+    expect(chart.receipt?.outcome).toMatchObject({
+      case: 'rejected',
+      value: { reason: BoardEditRejectionReason.UNSUPPORTED_KIND },
+    });
+  },
+);
 
 test('rejects non-object and oversized HTML state', async () => {
   seedNativeObjects(server.databasePath, false);

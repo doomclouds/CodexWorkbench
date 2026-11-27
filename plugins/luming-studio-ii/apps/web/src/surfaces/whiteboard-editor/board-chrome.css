@@ -132,6 +132,17 @@
   white-space: nowrap;
 }
 
+.whiteboard-chrome__lan-dot {
+  position: absolute;
+  inset-block-start: 3px;
+  inset-inline-end: 3px;
+  inline-size: 7px;
+  block-size: 7px;
+  border-radius: 50%;
+  background: #3b9b64;
+  box-shadow: 0 0 0 2px var(--board-chrome, Canvas);
+}
+
 .whiteboard-chrome__annotation[aria-pressed='true'] {
   color: var(--studio-ui-accent, #eb6c36);
   background: color-mix(in srgb, var(--studio-ui-accent, #eb6c36) 16%, transparent);
@@ -181,7 +192,7 @@
     block-size: 32px;
   }
 
-  .whiteboard-chrome__share > span {
+  .whiteboard-chrome__share-label {
     display: none;
   }
 

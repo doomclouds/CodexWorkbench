@@ -27,3 +27,4 @@ export type { BoardRoomContentChange } from './room-message.js';
 export type { BoardRoomAgentWorkspace, BoardRoomAgentWorkspaceTarget } from './agent-workspaces.js';
 export { createBoardRoomService } from './service.js';
 export { createBoardRoomSession } from './session.js';
+export { createBoardRoomStream } from './stream.js';

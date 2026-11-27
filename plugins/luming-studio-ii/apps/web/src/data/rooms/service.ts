@@ -24,9 +24,19 @@ import type {
 import { writeRoomGesture } from './room-gesture.js';
 import { readRoomEvent, readServerTime, readTimerReceipt } from './room-message.js';
 
-interface SnapshotObserver {
-  readonly observeSnapshots: (
-    read: (signal: AbortSignal) => Promise<BoardRoomEvent>,
+interface EventCursor {
+  readonly instanceId: string;
+  readonly sequence: bigint;
+}
+
+type ReadEvents = (
+  cursor: EventCursor | undefined,
+  signal: AbortSignal,
+) => Promise<readonly BoardRoomEvent[]>;
+
+interface WaitObserver {
+  readonly waitForEvents: (
+    read: ReadEvents,
     observer: BoardRoomStreamObserver,
     signal: AbortSignal,
   ) => void;
@@ -63,7 +73,7 @@ function writeTimerAction(
 
 export function createBoardRoomService(
   post: BoardRoomPost,
-  events: BoardRoomEventPort | SnapshotObserver,
+  events: BoardRoomEventPort | WaitObserver | Pick<BoardRoomService, 'subscribe'>,
 ): BoardRoomService {
   const methods = roomService.method;
 
@@ -80,7 +90,30 @@ export function createBoardRoomService(
     signal: AbortSignal,
   ) {
     if (typeof events !== 'function') {
-      events.observeSnapshots((scope) => getRoom(boardId, scope), observer, signal);
+      if ('subscribe' in events) {
+        events.subscribe(boardId, viewId, observer, signal);
+        return;
+      }
+
+      events.waitForEvents(
+        async (cursor, scope) => {
+          const result = await request(
+            post,
+            methods.waitBoardRoomEvents,
+            {
+              boardId,
+              viewId,
+              after: cursor && { roomInstanceId: cursor.instanceId, sequence: cursor.sequence },
+            },
+            scope,
+          );
+
+          return result.events.map((event) => readRoomEvent(event, boardId));
+        },
+        observer,
+        signal,
+      );
+
       return;
     }
 

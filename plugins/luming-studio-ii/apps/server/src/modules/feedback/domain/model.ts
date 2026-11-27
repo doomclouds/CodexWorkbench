@@ -6,6 +6,7 @@ export interface FeedbackBoardAccess {
   readonly canEdit: boolean;
   readonly canComment?: boolean;
   readonly isOwner: boolean;
+  readonly name?: string;
 }
 
 export interface FeedbackPoint {
@@ -74,6 +75,7 @@ export type FeedbackThreadStatus = 'open' | 'resolved';
 export interface FeedbackMessage {
   readonly messageId: string;
   readonly authorActorId: string;
+  readonly authorName?: string;
   readonly text: string;
   readonly createdAtMillis: bigint;
   readonly updatedAtMillis: bigint;

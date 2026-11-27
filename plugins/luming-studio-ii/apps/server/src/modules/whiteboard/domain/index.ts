@@ -28,7 +28,10 @@ export type {
   StoredReceipt,
 } from './model.js';
 export type {
+  BoardBackupActor,
   BoardBackupArchive,
+  BoardBackupAsset,
+  BoardBackupDetails,
   BoardBackupHistory,
   BoardBackupMetadata,
   BoardExportAsset,
@@ -40,10 +43,15 @@ export type {
   ExportBoardResult,
   ExportRenderCommand,
 } from './export-types.js';
-export { maxExportFileBytes } from './export-types.js';
+export {
+  maxBoardBackupAssetBytes,
+  maxBoardBackupBytes,
+  maxExportFileBytes,
+} from './export-types.js';
 export { selectExportObjects } from './export-scope.js';
 export { exportFilename, renderExportFile } from './export-file.js';
 export { backupElement, BackupElementError } from './backup-elements.js';
+export { legacyBackupFeedback } from './backup-feedback.js';
 export {
   canAdvanceVersion,
   canTranslate,
@@ -100,11 +108,17 @@ export { editImageCrop, editStickerContent } from './object-content-edits-media.
 export { editLinkContent } from './link-content.js';
 export {
   archiveImageSource,
+  maximumBoardImageBytes,
   planDocumentImageAsset,
   planImageChanges,
   type ImageOperation,
 } from './image-edits.js';
-export { looksLikeSvgImage, svgForImagePreview } from './svg-image.js';
+export {
+  encodeSafeSvgImage,
+  looksLikeSvgImage,
+  readSafeSvgImage,
+  type SafeSvgImage,
+} from './svg-image.js';
 export { planVideoChanges, type VideoOperation } from './video-edits.js';
 export type {
   AcceptBoardSuggestion,

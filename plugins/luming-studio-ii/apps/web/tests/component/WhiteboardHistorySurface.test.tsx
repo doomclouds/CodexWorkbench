@@ -119,6 +119,14 @@ async function selectButton(label: string) {
   });
 }
 
+async function pressEscape(target: HTMLElement) {
+  await act(async () => {
+    target.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+    );
+  });
+}
+
 async function openPreview() {
   await selectButton('展开版本 1');
   await selectButton('预览版本');
@@ -251,9 +259,74 @@ test('pages versions and previews the chosen saved scene without changing the li
   expect(service.restoreVersion).not.toHaveBeenCalled();
   expect(surface.onPreviewChange).toHaveBeenCalledWith(true);
   expect(document.activeElement).toBe(button('退出预览'));
-  await selectButton('退出预览');
+  const previewTrigger = button('正在预览');
+  await pressEscape(button('退出预览'));
+  expect(surface.onPreviewChange).toHaveBeenLastCalledWith(false);
+  expect(fixture.host.querySelector('[aria-label="历史版本预览"]')).toBeNull();
+  expect(button('预览版本')).toBe(previewTrigger);
+  expect(document.activeElement).toBe(previewTrigger);
+  expect(surface.onClose).not.toHaveBeenCalled();
+
+  await pressEscape(previewTrigger);
+  expect(surface.onClose).toHaveBeenCalledOnce();
+  expect(document.activeElement).toBe(anchor);
+});
+
+test('returns focus to the history entry when the preview source is no longer mounted', async () => {
+  const surface = await mount(historyMock());
+  await openPreview();
+  await selectButton('关闭版本历史入口');
+  await pressEscape(button('退出预览'));
   expect(surface.onPreviewChange).toHaveBeenLastCalledWith(false);
   expect(document.activeElement).toBe(anchor);
+});
+
+test('refreshes through the already loaded history while preserving an expanded record and focus', async () => {
+  const service = historyMock();
+  service.listVersions
+    .mockResolvedValueOnce({
+      currentRevision: latestRevision,
+      versions: [version(latestRevision)],
+      nextBeforeRevision: latestRevision,
+    })
+    .mockResolvedValueOnce({
+      currentRevision: latestRevision,
+      versions: [version(sourceRevision), version(0n)],
+    });
+  const surface = await mount(service);
+  await selectButton('加载更多版本');
+  await selectButton('展开版本 1');
+  const previewTrigger = button('预览版本');
+  await act(async () => previewTrigger.focus());
+
+  const pending = deferred<Awaited<ReturnType<BoardHistoryService['listVersions']>>>();
+  service.listVersions
+    .mockReturnValueOnce(pending.promise)
+    .mockResolvedValueOnce({
+      currentRevision: 4n,
+      versions: [version(latestRevision), version(sourceRevision)],
+      nextBeforeRevision: sourceRevision,
+    })
+    .mockResolvedValueOnce({ currentRevision: 4n, versions: [version(0n)] });
+  await act(async () => surface.render({ revision: 4n }));
+  expect(button('展开版本 0')).toBeDefined();
+  expect(document.activeElement).toBe(previewTrigger);
+
+  await act(async () =>
+    pending.resolve({ currentRevision: 4n, versions: [version(4n)], nextBeforeRevision: 4n }),
+  );
+  expect(service.listVersions.mock.calls.map(([, before]) => before)).toEqual([
+    undefined,
+    latestRevision,
+    undefined,
+    4n,
+    sourceRevision,
+  ]);
+  expect(button('展开版本 4')).toBeDefined();
+  expect(button('展开版本 0')).toBeDefined();
+  expect(button('展开版本 1').getAttribute('aria-expanded')).toBe('true');
+  expect(button('预览版本')).toBe(previewTrigger);
+  expect(document.activeElement).toBe(previewTrigger);
 });
 
 function archivedObject(x: number, geometryVersion: bigint): WhiteboardObject {

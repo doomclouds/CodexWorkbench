@@ -5,11 +5,13 @@ import { zh } from '@blocknote/core/locales';
 import { useCreateBlockNote } from '@blocknote/react';
 import '@blocknote/ariakit/style.css';
 import type { DocumentBlock, DocumentContent, DocumentObjectProps } from './contracts.js';
+import { applyEditorChange } from './document-replay.js';
 import {
   emptyDocument,
   flattenBlocks,
   isPrivateDocumentAssetSource,
   safeDocumentImage,
+  safeResolvedDocumentImage,
   sameDocument,
 } from './model.js';
 
@@ -126,6 +128,8 @@ function useEditorDraft(
   { value, editable, focusBlockId, onChange, onCompositionChange }: DocumentEditorProps,
 ) {
   const applied = useRef(value);
+  const [initialEditorValue] = useState(() => editorValue(editor));
+  const editorSnapshot = useRef(initialEditorValue);
   const emitted = useRef(new WeakSet<DocumentContent>());
   const pendingFocus = useRef(focusBlockId);
   const ownChange = useRef(false);
@@ -176,15 +180,23 @@ function useEditorDraft(
     ownChange.current = true;
     try {
       editor.replaceBlocks(editor.document, editableBlocks(value));
+      editorSnapshot.current = editorValue(editor);
     } finally {
       ownChange.current = false;
     }
   }, [composing, editor, value]);
 
   function emit(next: DocumentContent) {
-    emitted.current.add(next);
-    applied.current = next;
-    callbacks.current.onChange(next);
+    const previous = editorSnapshot.current;
+    editorSnapshot.current = next;
+    if (sameDocument(previous, next)) {
+      return;
+    }
+
+    const draft = applyEditorChange(previous, next, applied.current);
+    emitted.current.add(draft);
+    applied.current = draft;
+    callbacks.current.onChange(draft);
   }
 
   function handleChange() {
@@ -264,7 +276,7 @@ export default function DocumentEditor(props: DocumentEditorProps) {
       try {
         const url = await assets.current.resolveImage?.(source, controller.signal);
 
-        return !controller.signal.aborted ? (safeDocumentImage(url) ?? '') : '';
+        return !controller.signal.aborted ? (safeResolvedDocumentImage(url) ?? '') : '';
       } finally {
         requests.current.delete(controller);
       }

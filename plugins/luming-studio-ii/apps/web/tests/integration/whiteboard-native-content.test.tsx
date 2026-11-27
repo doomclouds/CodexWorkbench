@@ -364,6 +364,31 @@ function sendFirstHtmlState(frame: HTMLIFrameElement) {
   );
 }
 
+test('opens and saves the source of an imported diagram through its selection controls', async () => {
+  const { app, writes } = nativeFixture('diagram', embedBody, { locked: true });
+  const html = '<main>更新图解</main>';
+  try {
+    await app.open(boardId);
+    await app.drag(selectPoint, selectPoint);
+    await app.click('编辑 HTML 源码');
+    const field = required<HTMLTextAreaElement>(app.host, 'dialog[open] textarea');
+    expect(field.value).toBe(embedBody.value.html);
+    await app.update(() => typeText(field, html));
+    await app.click('保存源码');
+
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatchObject({
+      expectedPayloadVersion: 0n,
+      edit: { kind: 'embedSource', value: { html, expectedSourceRevision: 0n } },
+    });
+    expect(app.host.querySelector('dialog[open]')).toBeNull();
+    await app.open(boardId, 'reopened');
+    expect(required<HTMLIFrameElement>(app.host, 'iframe').srcdoc).toContain(html);
+  } finally {
+    app.dispose();
+  }
+});
+
 test.each(['html', 'diagram'] as const)(
   'handles state saving from an initial %s frame',
   async (kind) => {
@@ -375,17 +400,13 @@ test.each(['html', 'diagram'] as const)(
       const sourceBefore = frame.srcdoc;
       await app.update(() => sendFirstHtmlState(frame));
 
-      if (kind === 'html') {
-        expect(writes).toHaveLength(1);
-        expect(writes[0]).toMatchObject({
-          expectedPayloadVersion: 0n,
-          edit: { kind: 'embedState', value: { votes: 2 } },
-        });
-        expect(required<HTMLIFrameElement>(app.host, 'iframe')).toBe(frame);
-        expect(frame.srcdoc).toBe(sourceBefore);
-      } else {
-        expect(writes).toEqual([]);
-      }
+      expect(writes).toHaveLength(1);
+      expect(writes[0]).toMatchObject({
+        expectedPayloadVersion: 0n,
+        edit: { kind: 'embedState', value: { votes: 2 } },
+      });
+      expect(required<HTMLIFrameElement>(app.host, 'iframe')).toBe(frame);
+      expect(frame.srcdoc).toBe(sourceBefore);
     } finally {
       app.dispose();
     }

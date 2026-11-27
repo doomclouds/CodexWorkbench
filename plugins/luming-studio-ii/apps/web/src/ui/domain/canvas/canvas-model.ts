@@ -64,6 +64,7 @@ export function selectionControls(
   pending: ReadonlyMap<string, CanvasObjectChange>,
   registry: CanvasObjectRegistry,
   enabled: boolean,
+  pendingResizeObjectId?: string,
 ) {
   if (selected.length === 0) {
     return {};
@@ -74,8 +75,13 @@ export function selectionControls(
     enabled && object && editableTarget(index, pending, object.object.id) ? object : undefined;
   const allEditable =
     enabled && selected.every(({ object }) => editableTarget(index, pending, object.id));
+  const pendingResize =
+    object &&
+    object.object.id === pendingResizeObjectId &&
+    editableTarget(index, pending, object.object.id);
+  const resizable = Boolean(allEditable || pendingResize);
   const allowResize =
-    allEditable && selected.every(({ object }) => registry.get(object.kind)?.capabilities.resize);
+    resizable && selected.every(({ object }) => registry.get(object.kind)?.capabilities.resize);
   const allowRotate =
     allEditable && selected.every(({ object }) => registry.get(object.kind)?.capabilities.rotate);
   const geometries = selected.map(({ geometry }) => geometry);
@@ -83,7 +89,7 @@ export function selectionControls(
 
   return {
     transformBox: showSelectionBox ? getTransformBox(geometries) : undefined,
-    lockedSelection: !allEditable,
+    lockedSelection: !resizable,
     allowResize,
     allowRotate,
     cornerResizeOnly:

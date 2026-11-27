@@ -14,7 +14,7 @@ import {
   WhiteboardService,
 } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/service';
 import { expect, test } from 'vitest';
-import { pngImage } from '../fixtures/board-image-bytes.js';
+import { pngImage, svgImage } from '../fixtures/board-image-bytes.js';
 import { archiveRowCounts } from '../support/archive-database.js';
 import { actorHeader, callWhiteboard } from '../support/whiteboard-client.js';
 import {
@@ -222,4 +222,34 @@ test('rejects read-only actors, non-documents, unsafe formats and reuse with dif
     value: { reason: BoardEditRejectionReason.COMMAND_ID_REUSE },
   });
   expect(reused.assetUrl).toBeUndefined();
+});
+
+test('stores, backs up and serves a 20 MiB SVG attached to a document', async () => {
+  const boardId = await createDocumentBoard();
+  const size = 20 * 1024 * 1024;
+  const content = svgImage(size);
+  const input = { boardId, objectId: ownedDocumentId, commandId: 'upload-document-vector' };
+  const oversized = await callWhiteboard(server.address, owner, uploadBoardDocumentImage, {
+    ...input,
+    content: svgImage(size + 1),
+  });
+  expect(oversized.receipt?.outcome).toMatchObject({
+    case: 'rejected',
+    value: { reason: BoardEditRejectionReason.TOO_LARGE },
+  });
+  const saved = await callWhiteboard(server.address, owner, uploadBoardDocumentImage, {
+    ...input,
+    content,
+  });
+  assert.equal(saved.receipt?.outcome.case, 'applied');
+  assert.ok(saved.assetUrl);
+  await commitDocument(boardId, saved.assetUrl);
+
+  const importedId = await copyArchive(boardId);
+  const importedUrl = await readDocumentImage(importedId);
+  const asset = await fetchImage(importedUrl, owner);
+  assert.equal(asset.status, 200);
+  assert.equal(asset.headers.get('content-type'), 'image/svg+xml');
+  assert.deepEqual(new Uint8Array(await asset.arrayBuffer()), content);
+  assert.equal((await fetchImage(importedUrl, outsiderId)).status, 404);
 });

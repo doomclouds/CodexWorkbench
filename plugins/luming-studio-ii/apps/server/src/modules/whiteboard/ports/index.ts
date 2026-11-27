@@ -1,5 +1,7 @@
 import type {
   BoardAccess,
+  BoardBackupAsset,
+  BoardBackupDetails,
   BoardBackupMetadata,
   BoardChanges,
   BoardEditApplied,
@@ -16,6 +18,8 @@ import type {
 export type {
   Appearance,
   BoardAccess,
+  BoardBackupActor,
+  BoardBackupDetails,
   BoardBackupMetadata,
   BoardChanges,
   BoardEditApplied,
@@ -39,6 +43,10 @@ export type {
 
 export type ExportAssetRead =
   | { readonly kind: 'asset'; readonly asset: BoardExportAsset }
+  | { readonly kind: 'tooLarge' };
+
+export type BackupAssetRead =
+  | { readonly kind: 'asset'; readonly asset: BoardBackupAsset }
   | { readonly kind: 'tooLarge' };
 
 export interface WhiteboardReader {
@@ -71,6 +79,12 @@ export interface WhiteboardRepository {
 
 export interface BoardEditReader extends WhiteboardReader {
   getBackupMetadata?(boardId: string, actorId: string): BoardBackupMetadata | undefined;
+  getBackupDetails?(boardId: string): BoardBackupDetails;
+  getBackupAsset?(
+    boardId: string,
+    assetId: string,
+    maximumBytes: number,
+  ): BackupAssetRead | undefined;
   payloadByteSize?(boardId: string, objectIds: readonly string[], revision?: bigint): bigint;
   getEditReceipt(
     boardId: string,

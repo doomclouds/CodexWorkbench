@@ -10,19 +10,38 @@ interface WatchingBoard {
 interface PresentationOptions {
   readonly objects: ReadonlyMap<string, { readonly kind: string }>;
   readonly viewport: CanvasViewport;
+  readonly initialFocus?: { readonly id: string; readonly returnViewport?: CanvasViewport };
   readonly onRestore: (viewport: CanvasViewport) => void;
   readonly onFit: () => void;
   readonly focusCanvas: () => void;
 }
 
+function presentationScope(objects: PresentationOptions['objects'], objectIds: readonly string[]) {
+  const [first] = objectIds;
+  const kind = first ? objects.get(first)?.kind : undefined;
+  const expandedObjectId =
+    objectIds.length === 1 && (kind === 'document' || kind === 'todo') ? first : undefined;
+  const focusObjectId = kind === 'document' ? expandedObjectId : undefined;
+
+  return { objectIds, focusObjectId, expandedObjectId };
+}
+
 export function useBoardPresentation({
   objects,
   viewport,
+  initialFocus,
   onRestore,
   onFit,
   focusCanvas,
 }: PresentationOptions) {
-  const [watching, setWatching] = useState<WatchingBoard>();
+  const [watching, setWatching] = useState<WatchingBoard | undefined>(() =>
+    initialFocus && objects.has(initialFocus.id)
+      ? {
+          scope: presentationScope(objects, [initialFocus.id]),
+          viewport: initialFocus.returnViewport ?? viewport,
+        }
+      : undefined,
+  );
   const scheduled = useRef<number | undefined>(undefined);
 
   function afterLayout(callback: () => void) {
@@ -42,15 +61,10 @@ export function useBoardPresentation({
       return;
     }
 
-    const [first] = objectIds;
-    const kind = first ? objects.get(first)?.kind : undefined;
-    const expandedObjectId =
-      objectIds.length === 1 && (kind === 'document' || kind === 'todo') ? first : undefined;
-    const focusObjectId = kind === 'document' ? expandedObjectId : undefined;
-
-    setWatching({ scope: { objectIds, focusObjectId, expandedObjectId }, viewport, trigger });
+    const scope = presentationScope(objects, objectIds);
+    setWatching({ scope, viewport, trigger });
     afterLayout(() => {
-      if (!focusObjectId) {
+      if (!scope.focusObjectId) {
         onFit();
         focusCanvas();
       }
@@ -95,5 +109,8 @@ export function useBoardPresentation({
     [],
   );
 
-  return { scope: watching?.scope, enter, exit };
+  const scope = watching?.scope;
+  const focusedObjectId = scope?.objectIds.length === 1 ? scope.objectIds[0] : undefined;
+
+  return { scope, focusedObjectId, returnViewport: watching?.viewport, enter, exit };
 }

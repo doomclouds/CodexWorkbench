@@ -1,6 +1,8 @@
 import type { BoardHeader, BoardObject, PayloadRecord } from './model.js';
 
 export const maxExportFileBytes = 32 * 1024 * 1024;
+export const maxBoardBackupBytes = 128 * 1024 * 1024;
+export const maxBoardBackupAssetBytes = 20 * 1024 * 1024;
 
 export type BoardExportScope =
   | { readonly kind: 'whole' }
@@ -88,16 +90,44 @@ export interface BoardBackupMetadata {
   readonly pinned: boolean;
 }
 
+export interface BoardBackupActor {
+  readonly id: string;
+  readonly name: string;
+  readonly kind: 'human' | 'agent';
+  readonly role: 'owner' | 'editor' | 'commenter' | 'viewer';
+}
+
+type BackupRow = Readonly<Record<string, string | number | null>>;
+
+export interface BoardBackupDetails {
+  readonly actors: ReadonlyMap<string, BoardBackupActor>;
+  readonly feedback: {
+    readonly threads: readonly BackupRow[];
+    readonly messages: readonly BackupRow[];
+    readonly contentAnchors: readonly BackupRow[];
+  };
+  readonly reviewSources: {
+    readonly sources: readonly BackupRow[];
+    readonly targetSnapshots: readonly BackupRow[];
+  };
+}
+
 export interface BoardBackupHistory {
   readonly entry: Readonly<Record<string, unknown>>;
   readonly artifact: Readonly<Record<string, unknown>>;
   readonly elements: readonly Readonly<Record<string, unknown>>[];
 }
 
+export interface BoardBackupAsset {
+  readonly mimeType: string;
+  readonly bytes: Uint8Array;
+}
+
 export interface BoardBackupArchive {
   readonly boardId: string;
   readonly properties: Readonly<Record<string, unknown>>;
+  readonly contentFields: Readonly<Record<string, unknown>>;
   readonly elements: readonly Readonly<Record<string, unknown>>[];
   readonly history: readonly BoardBackupHistory[];
-  readonly assets: ReadonlyMap<string, BoardExportAsset>;
+  readonly assets: ReadonlyMap<string, BoardBackupAsset>;
 }

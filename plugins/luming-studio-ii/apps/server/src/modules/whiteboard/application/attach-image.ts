@@ -3,6 +3,7 @@ import type {
   BoardEditDecision,
   BoardHeader,
   ImageOperation,
+  SafeSvgImage,
   VideoOperation,
 } from '../domain/index.js';
 import type { BoardEditWriter } from '../ports/index.js';
@@ -32,8 +33,14 @@ export function planImageEdit(
   writer: BoardEditWriter,
   board: BoardHeader,
   operation: ImageOperation,
+  vector?: SafeSvgImage,
 ): BoardEditDecision {
-  return reserveAttachment(writer, board, operation, planImageChanges(board.boardId, operation));
+  return reserveAttachment(
+    writer,
+    board,
+    operation,
+    planImageChanges(board.boardId, operation, vector),
+  );
 }
 
 export function planVideoEdit(

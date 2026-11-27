@@ -4,7 +4,12 @@ import { requestFailure } from './review-messages.js';
 
 const pageLimit = 20;
 
-export function useSuggestionList(boardId: string, active: boolean, service: SuggestionService) {
+export function useSuggestionList(
+  boardId: string,
+  active: boolean,
+  service: SuggestionService,
+  updateKey?: string,
+) {
   const [snapshot, setSnapshot] = useState<BoardSuggestionPage>();
   const [loading, setLoading] = useState(false);
   const [failure, setFailure] = useState<string>();
@@ -74,7 +79,7 @@ export function useSuggestionList(boardId: string, active: boolean, service: Sug
       lifetime.abort();
       request.current?.abort();
     };
-  }, [active, boardId, service]);
+  }, [active, boardId, service, updateKey]);
 
   return { snapshot, loading, failure, requestRead };
 }

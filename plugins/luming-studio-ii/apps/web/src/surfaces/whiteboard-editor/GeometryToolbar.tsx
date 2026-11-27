@@ -406,6 +406,7 @@ export function GeometryToolbar({
       <div
         ref={setAnchor}
         className="whiteboard-editor__toolbar"
+        data-canvas-toolbar-obstacle=""
         role="toolbar"
         aria-label="白板工具"
       >

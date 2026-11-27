@@ -32,6 +32,8 @@ export interface RoomPresenceSlot {
   readonly notice: ReactNode;
   readonly overlay: ReactNode;
   readonly accessLost: boolean;
+  readonly feedbackUpdateKey?: string;
+  readonly suggestionsUpdateKey?: string;
   readonly onCursorChange: (point: BoardRoomPoint | undefined) => void;
   readonly onGesturePreviewChange: (gesture: BoardRoomGesturePreview | undefined) => void;
   readonly remoteGesturePreviews?: readonly BoardRoomGesturePreview[];
@@ -369,6 +371,8 @@ export function RoomPresenceSurface(props: RoomPresenceSurfaceProps) {
 
   return render({
     accessLost: status === 'accessLost',
+    feedbackUpdateKey: snapshot.feedbackUpdateKey,
+    suggestionsUpdateKey: snapshot.suggestionsUpdateKey,
     ...follow.publish,
     remoteGesturePreviews: paused ? undefined : remoteGestures,
     participants: status !== 'accessLost' && (

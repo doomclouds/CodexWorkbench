@@ -91,6 +91,17 @@ function objectLayer(
   return bounds.every(finitePoint) ? { value: native, bounds } : undefined;
 }
 
+export function renderExportHtmlSource(
+  snapshot: BoardExportSnapshot,
+): string | BoardExportRejection {
+  const [payload] = snapshot.payloads;
+  if (payload?.bodyKind === 'embed' && typeof payload.data.html === 'string') {
+    return payload.data.html;
+  }
+
+  return { kind: 'rejected', reason: 'unsupported' };
+}
+
 export function renderExportHtml(snapshot: BoardExportSnapshot): string | BoardExportRejection {
   const payloads = new Map(snapshot.payloads.map((payload) => [payload.objectId, payload]));
   const layers: string[] = [];

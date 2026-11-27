@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type {
   BoardEditReceipt,
   BoardEditRejection,
@@ -9,7 +9,10 @@ import type {
 import {
   expandCanvasSelection,
   type CanvasEditIntent,
+  type CanvasGeometry,
   type CanvasObject,
+  type CanvasObjectDraft,
+  type CanvasTransformIntent,
 } from '../../ui/domain/canvas/index.js';
 import {
   geometryOperation,
@@ -28,11 +31,19 @@ interface GeometryOptions {
   readonly boardId: string;
   readonly revision: bigint;
   readonly canEdit: boolean;
+  readonly canWrite: boolean;
   readonly createCommandId: () => string;
   readonly service: GeometryService | undefined;
   readonly objectsById: ReadonlyMap<string, CanvasObject>;
   readonly payloadVersion: (objectId: string) => bigint | undefined;
-  readonly onApplied: (receipt: AppliedEdit, selection?: readonly string[]) => void;
+  readonly readSelectionEpoch: () => number;
+  readonly onPlacementStarted: (id: string) => void;
+  readonly onPlacementFailed: (id: string, selectionCurrent: boolean) => void;
+  readonly onApplied: (
+    receipt: AppliedEdit,
+    selection: readonly string[] | undefined,
+    context: { readonly selectionCurrent: boolean; readonly editText: boolean },
+  ) => void;
   readonly onConflict: (receipt: ConflictEdit) => void;
 }
 
@@ -40,6 +51,8 @@ interface PendingEdit {
   readonly command: EditBoardGeometryCommand;
   readonly controller: AbortController;
   readonly edits: readonly CanvasEditIntent[];
+  readonly selectionEpoch: number;
+  readonly placement?: CanvasObject;
 }
 
 type GeometryState =
@@ -99,22 +112,33 @@ export function useGeometryEdits({
   boardId,
   revision,
   canEdit,
+  canWrite,
   createCommandId,
   service,
   objectsById,
   payloadVersion,
+  readSelectionEpoch,
+  onPlacementStarted,
+  onPlacementFailed,
   onApplied,
   onConflict,
 }: GeometryOptions) {
   const [state, setState] = useState<GeometryState>({ kind: 'idle' });
   const pending = useRef<PendingEdit | undefined>(undefined);
   const running = useRef(false);
+  const queuedResize = useRef<CanvasTransformIntent | undefined>(undefined);
+  const [placementGeometry, setPlacementGeometry] = useState<CanvasGeometry>();
+  const canWriteCurrent = useRef(canWrite);
+  useLayoutEffect(() => {
+    canWriteCurrent.current = canWrite;
+  }, [canWrite]);
 
   useEffect(
     () => () => {
       pending.current?.controller.abort();
       pending.current = undefined;
       running.current = false;
+      queuedResize.current = undefined;
     },
     [],
   );
@@ -131,17 +155,41 @@ export function useGeometryEdits({
     }
 
     pending.current = undefined;
+    const resize = queuedResize.current;
+    queuedResize.current = undefined;
+    setPlacementGeometry(undefined);
     const { receipt } = attempt;
+    const selectionCurrent = edit.selectionEpoch === readSelectionEpoch();
     switch (receipt.kind) {
-      case 'applied':
+      case 'applied': {
         setState({ kind: 'saved' });
-        onApplied(receipt, selectionForOperation(edit.command.operation));
+        onApplied(receipt, selectionForOperation(edit.command.operation), {
+          selectionCurrent,
+          editText: edit.placement?.kind === 'text' && !resize,
+        });
+        const placed = receipt.objects.find(({ id }) => id === edit.placement?.id);
+        if (placed && resize && canWriteCurrent.current) {
+          submitEdit({
+            ...resize,
+            changes: resize.changes.map((change) => ({
+              ...change,
+              expectedVersion: Number(placed.geometryVersion),
+            })),
+          })?.catch(reportEditFailure);
+        }
         break;
+      }
       case 'conflict':
+        if (edit.placement) {
+          onPlacementFailed(edit.placement.id, selectionCurrent);
+        }
         setState({ kind: 'conflict', detail: '白板已被其他操作更新，请重新选择对象。' });
         onConflict(receipt);
         break;
       case 'rejected':
+        if (edit.placement) {
+          onPlacementFailed(edit.placement.id, selectionCurrent);
+        }
         setState({ kind: 'rejected', detail: rejectionDetails[receipt.reason] });
         break;
     }
@@ -173,6 +221,7 @@ export function useGeometryEdits({
   function start(
     makeOperation: (commandId: string) => EditBoardGeometryOperation | undefined,
     edits: readonly CanvasEditIntent[],
+    draft?: CanvasObjectDraft,
   ) {
     if (!canEdit || !service || pending.current) {
       return;
@@ -186,21 +235,44 @@ export function useGeometryEdits({
         return;
       }
 
-      const edit = {
+      const placement =
+        draft && operation.kind === 'create'
+          ? { ...draft, id: operation.object.id, version: 0 }
+          : undefined;
+      const edit: PendingEdit = {
         command: { boardId, commandId, operation },
         controller: new AbortController(),
         edits,
+        selectionEpoch: readSelectionEpoch(),
+        placement,
       };
       pending.current = edit;
+      if (placement) {
+        onPlacementStarted(placement.id);
+      }
       return run(edit, 'saving');
     } catch (error) {
       setState({ kind: 'rejected', detail: errorDetail(error) });
     }
   }
 
-  function submitEdit(intent: CanvasEditIntent) {
+  function submitEdit(intent: CanvasEditIntent, optimisticPlacement = false) {
+    if (canEdit && intent.kind === 'resize' && intent.changes.length === 1) {
+      const [change] = intent.changes;
+      if (change && change.id === pending.current?.placement?.id) {
+        queuedResize.current = intent;
+        setPlacementGeometry(change.geometry);
+        return;
+      }
+    }
+
     if (intent.kind !== 'move') {
-      return start((commandId) => geometryOperation(intent, commandId), [intent]);
+      const draft = optimisticPlacement && intent.kind === 'create' ? intent.object : undefined;
+      return start(
+        (commandId) => geometryOperation(intent, commandId),
+        draft ? emptyEdits : [intent],
+        draft,
+      );
     }
   }
 
@@ -248,8 +320,13 @@ export function useGeometryEdits({
     }
   }
 
+  const currentEdit = 'edit' in state ? state.edit : undefined;
+  const placement = currentEdit?.placement;
+
   return {
     state,
+    pendingPlacement:
+      placement && placementGeometry ? { ...placement, geometry: placementGeometry } : placement,
     pendingEdits: 'edit' in state ? state.edit.edits : emptyEdits,
     hasPendingEdit: 'edit' in state,
     handleEdit,

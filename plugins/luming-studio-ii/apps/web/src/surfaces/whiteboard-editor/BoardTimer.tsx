@@ -532,63 +532,66 @@ export function BoardTimer({ canEdit }: { readonly canEdit: boolean }) {
       </button>
       <AnchoredPopover
         anchor={anchor}
-        open={open}
+        open={open && anchor !== null}
         label="计时器"
+        align="end"
         persistent
         onRequestClose={handleDismiss}
       >
-        <div className="whiteboard-board-timer__layout" data-readonly={!canEdit || undefined}>
-          {canEdit && (
-            <button
-              type="button"
-              className="whiteboard-board-timer__play"
-              aria-label={actions[phase]}
-              onClick={handlePlay}
-            >
-              {running ? (
-                <Pause size={22} fill="currentColor" />
-              ) : (
-                <Play size={22} fill="currentColor" />
-              )}
-            </button>
-          )}
-          <div className="whiteboard-board-timer__face">
-            {canEdit && !running && phase !== 'ended' ? (
-              <TimerEntry entry={entry} />
-            ) : (
-              <output aria-label="剩余时间">
-                <TimerDigits digits={digits} ended={phase === 'ended'} />
-              </output>
+        <div className="whiteboard-board-timer__panel">
+          <div className="whiteboard-board-timer__layout" data-readonly={!canEdit || undefined}>
+            {canEdit && (
+              <button
+                type="button"
+                className="whiteboard-board-timer__play"
+                aria-label={actions[phase]}
+                onClick={handlePlay}
+              >
+                {running ? (
+                  <Pause size={22} fill="currentColor" />
+                ) : (
+                  <Play size={22} fill="currentColor" />
+                )}
+              </button>
             )}
-          </div>
-          {canEdit && (
-            <div className="whiteboard-board-timer__slot">
-              {paused ? (
-                <button
-                  type="button"
-                  className="whiteboard-board-timer__reset"
-                  aria-label="重置"
-                  title={`重置为 ${timerDigits(timer.durationMs / milliseconds).join(':')}`}
-                  onClick={handleReset}
-                >
-                  <RotateCcw size={21} />
-                </button>
+            <div className="whiteboard-board-timer__face">
+              {canEdit && !running && phase !== 'ended' ? (
+                <TimerEntry entry={entry} />
               ) : (
-                <TimerAdjusters
-                  canIncrease={canAdjust(1)}
-                  canDecrease={canAdjust(-1)}
-                  onAdjust={handleAdjust}
-                />
+                <output className="whiteboard-board-timer__display" aria-label="剩余时间">
+                  <TimerDigits digits={digits} ended={phase === 'ended'} />
+                </output>
               )}
             </div>
-          )}
+            {canEdit && (
+              <div className="whiteboard-board-timer__slot">
+                {paused ? (
+                  <button
+                    type="button"
+                    className="whiteboard-board-timer__reset"
+                    aria-label="重置"
+                    title={`重置为 ${timerDigits(timer.durationMs / milliseconds).join(':')}`}
+                    onClick={handleReset}
+                  >
+                    <RotateCcw size={21} />
+                  </button>
+                ) : (
+                  <TimerAdjusters
+                    canIncrease={canAdjust(1)}
+                    canDecrease={canAdjust(-1)}
+                    onAdjust={handleAdjust}
+                  />
+                )}
+              </div>
+            )}
+          </div>
+          <span className="whiteboard-board-timer__status" aria-label="计时状态">
+            {statuses[phase]}
+          </span>
+          <span className="whiteboard-board-timer__status" aria-live="polite">
+            {entry.message}
+          </span>
         </div>
-        <span className="whiteboard-board-timer__status" aria-label="计时状态">
-          {statuses[phase]}
-        </span>
-        <span className="whiteboard-board-timer__status" aria-live="polite">
-          {entry.message}
-        </span>
       </AnchoredPopover>
     </div>
   );

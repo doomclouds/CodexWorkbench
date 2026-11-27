@@ -16,6 +16,7 @@ interface SharingControls {
   readonly service: BoardSharingService;
   readonly createCommandId: () => string;
   readonly copyLink: (url: string) => Promise<void>;
+  readonly onLanSharingChange?: (active: boolean) => void;
 }
 
 interface PendingSharingCommand {
@@ -43,6 +44,7 @@ export function useBoardSharing({
   service,
   createCommandId,
   copyLink,
+  onLanSharingChange,
 }: SharingControls) {
   const [snapshot, setSnapshot] = useState<BoardSharingState>();
   const [pending, setPending] = useState<PendingSharingCommand>();
@@ -54,7 +56,7 @@ export function useBoardSharing({
   const readNumber = useRef(0);
   const executing = useRef(false);
 
-  async function refresh(signal = lifetime.current?.signal) {
+  async function refresh(signal = lifetime.current?.signal, background = false) {
     if (!signal || signal.aborted) {
       return;
     }
@@ -65,10 +67,11 @@ export function useBoardSharing({
       const next = await service.getBoardSharing(boardId, signal);
       if (!signal.aborted && request === readNumber.current) {
         setSnapshot(next);
+        onLanSharingChange?.(next.enabled && next.scope === 'lan');
         return next;
       }
     } catch (error) {
-      if (!signal.aborted && request === readNumber.current) {
+      if (!signal.aborted && request === readNumber.current && !background) {
         setSnapshot(undefined);
         setNotice({ text: formatFailure(error, '读取分享设置失败，请重试。'), error: true });
       }
@@ -90,12 +93,24 @@ export function useBoardSharing({
   }
 
   const refreshOnOpen = useEffectEvent(readSharing);
+  const observeLanSharing = onLanSharingChange !== undefined;
+  const refreshLanSharing = useEffectEvent(() => {
+    if (!open) {
+      refresh(undefined, true).catch(reportFailure);
+    }
+  });
 
   useEffect(() => {
     const current = new AbortController();
     lifetime.current = current;
     return () => current.abort();
   }, [boardId, service]);
+
+  useEffect(() => {
+    if (observeLanSharing) {
+      refreshLanSharing();
+    }
+  }, [boardId, observeLanSharing, service]);
 
   useEffect(() => {
     if (open) {
@@ -120,6 +135,7 @@ export function useBoardSharing({
 
   async function applyReceipt(
     receipt: SharingReceipt,
+    operation: SharingOperation,
     deferredCopy: CopyOnApply | undefined,
     signal: AbortSignal,
   ) {
@@ -131,6 +147,9 @@ export function useBoardSharing({
       return false;
     }
 
+    if (operation.kind === 'setScope' || operation.kind === 'stop') {
+      onLanSharingChange?.(operation.kind === 'setScope' && operation.scope === 'lan');
+    }
     const current = await refresh(signal);
     if (current && deferredCopy) {
       const url = current.links.find(
@@ -160,7 +179,10 @@ export function useBoardSharing({
         ? await service.retryBoardSharing(entry.command, signal)
         : await service.updateBoardSharing(entry.command, signal);
 
-      return !signal.aborted && (await applyReceipt(receipt, entry.copy, signal));
+      return (
+        !signal.aborted &&
+        (await applyReceipt(receipt, entry.command.operation, entry.copy, signal))
+      );
     } catch (error) {
       if (signal.aborted) {
         return false;

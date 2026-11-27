@@ -12,6 +12,7 @@ const consumer = 'src/surfaces/board/editor.ts';
 const testDocument = 'tests/component/objects/DocumentObject.test.tsx';
 const documentSpecifier = '@codexworkbench/luming-studio-ii-web/ui/domain/objects/document';
 const editsProtocol = '@codexworkbench/luming-studio-ii-contracts/whiteboard/edits';
+const stickerArtwork = '@codexworkbench/luming-studio-ii-contracts/whiteboard/stickers';
 const editingFamilies = ['table', 'embed', 'sticker', 'media'];
 
 const rejected = [
@@ -24,6 +25,11 @@ const rejected = [
     'sticker registration importing a Node file API',
     source + 'sticker/canvas-extension.tsx',
     "import { readFile } from 'node:fs/promises';",
+  ],
+  [
+    'an unrelated object importing sticker artwork',
+    source + 'document/model.ts',
+    `import { stickerDefinition } from '${stickerArtwork}';`,
   ],
   [
     'table registration importing an unrelated UI runtime',
@@ -152,6 +158,7 @@ for (const [name, filePath, text, rule = boundary] of rejected) {
 }
 
 const accepted = [
+  [source + 'sticker/sticker-catalog.ts', `export { stickerDefinition } from '${stickerArtwork}';`],
   ...editingFamilies.map((family) => [
     source + family + '/canvas-extension.tsx',
     [

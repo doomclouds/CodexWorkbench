@@ -1,4 +1,5 @@
 export { ArchiveReadError, type ArchiveReadErrorCode } from './archive-read-error.js';
+export type { ArchiveRestoration } from './archive-state.js';
 export { writeBoardArchive } from './backup-archive.js';
 export {
   readStagedArchiveChunks,

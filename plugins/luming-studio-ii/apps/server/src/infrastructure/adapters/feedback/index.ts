@@ -72,7 +72,13 @@ function createReader(connection: SqliteConnection): FeedbackReader {
 }
 
 export function createFeedbackRepository(database: SqliteDatabase): FeedbackRepository {
-  database.write((connection) => connection.exec(feedbackSchema));
+  database.write((connection) => {
+    connection.exec(feedbackSchema);
+    const columns = connection.prepare('PRAGMA table_info(feedback_messages)').all();
+    if (!columns.some(({ name }) => name === 'author_name')) {
+      connection.exec('ALTER TABLE feedback_messages ADD COLUMN author_name TEXT');
+    }
+  });
 
   return {
     read: (work) => database.read((connection) => work(createReader(connection))),

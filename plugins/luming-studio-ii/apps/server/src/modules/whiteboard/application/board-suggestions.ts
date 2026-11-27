@@ -50,6 +50,7 @@ interface BoardSuggestionDependencies {
   readonly now: () => number;
   readonly newId: () => string;
   readonly digest: (input: string) => string;
+  readonly onChanged?: (boardId: string) => void;
   readonly readFeedbackSource?: (
     actor: BoardReviewActor,
     boardId: string,
@@ -292,7 +293,7 @@ function acceptPending(
   decodeEdit: DecodeBoardSuggestionEdit,
   timeMillis: number,
   digest: (input: string) => string,
-): BoardEditReceipt {
+): { receipt: BoardEditReceipt; changed: boolean } {
   const board = requireOwner(writer, actor, request.boardId, 'human');
   const { boardId, commandId, signature, proposalId, optionId } = request;
   const proposal = writer.getSuggestion(boardId, proposalId);
@@ -338,12 +339,12 @@ function acceptPending(
     });
   }
 
-  return edit;
+  return { receipt: edit, changed: review !== undefined && edit.outcome.kind === 'applied' };
 }
 
 export function createBoardSuggestionApplication(
   repository: BoardSuggestionRepository,
-  { now, newId, digest, readFeedbackSource }: BoardSuggestionDependencies,
+  { now, newId, digest, readFeedbackSource, onChanged }: BoardSuggestionDependencies,
 ): BoardSuggestionApplication {
   return {
     createSource(actor, request) {
@@ -364,7 +365,8 @@ export function createBoardSuggestionApplication(
       });
     },
     submit(actor, request, decodeEdit) {
-      return repository.write((writer) => {
+      let changed = false;
+      const result = repository.write((writer) => {
         const board = requireOwner(writer, actor, request.boardId, 'agent');
         const replay = commandReplay(writer, actor, request, 'submit');
         if (replay) {
@@ -404,9 +406,16 @@ export function createBoardSuggestionApplication(
         };
         writer.createSuggestion(proposal);
         preserveReceipt(writer, actor, request, 'submit', proposal.proposalId);
+        changed = true;
 
         return publicSuggestion(proposal);
       });
+
+      if (changed) {
+        onChanged?.(request.boardId);
+      }
+
+      return result;
     },
     list(actor, { boardId, limit, beforeProposalId }) {
       return repository.read((reader) => {
@@ -438,12 +447,20 @@ export function createBoardSuggestionApplication(
         };
       });
     },
-    accept: (actor, request, decodeEdit) =>
-      repository.write((writer) =>
+    accept(actor, request, decodeEdit) {
+      const { receipt, changed } = repository.write((writer) =>
         acceptPending(writer, actor, request, decodeEdit, now(), digest),
-      ),
+      );
+
+      if (changed) {
+        onChanged?.(request.boardId);
+      }
+
+      return receipt;
+    },
     reject(actor, request) {
-      return repository.write((writer) => {
+      let changed = false;
+      const result = repository.write((writer) => {
         const board = requireOwner(writer, actor, request.boardId, 'human');
         const replay = commandReplay(writer, actor, request, 'reject');
         if (replay) {
@@ -453,9 +470,16 @@ export function createBoardSuggestionApplication(
         const rejected = rejectPending(writer, request, BigInt(now()));
         writer.decideSuggestion(rejected);
         preserveReceipt(writer, actor, request, 'reject', rejected.proposalId);
+        changed = true;
 
         return publicSuggestion(rejected);
       });
+
+      if (changed) {
+        onChanged?.(request.boardId);
+      }
+
+      return result;
     },
   };
 }

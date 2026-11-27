@@ -20,15 +20,32 @@ const scene: CanvasScene = {
 
 describe('Canvas selection chrome', () => {
   let fixture: ReturnType<typeof createControlFixture>;
+  let controlBounds: DOMRect;
+  let titleBounds: DOMRect;
+  let handleBounds: DOMRect;
 
   beforeEach(() => {
     fixture = createControlFixture();
+    controlBounds = new DOMRect();
+    titleBounds = new DOMRect();
+    handleBounds = new DOMRect();
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function bounds(
       this: HTMLElement,
     ) {
-      return this.hasAttribute('data-canvas-selection-actions')
-        ? new DOMRect(0, 0, 100, 42)
-        : new DOMRect(0, 0, 640, 480);
+      if (this.hasAttribute('data-canvas-selection-actions')) {
+        return new DOMRect(0, 0, 100, 42);
+      }
+      if (this.hasAttribute('data-canvas-root')) {
+        return new DOMRect(0, 0, 640, 480);
+      }
+      if (this.hasAttribute('data-canvas-toolbar-obstacle')) {
+        return controlBounds;
+      }
+      if (this.hasAttribute('data-canvas-section-title')) {
+        return titleBounds;
+      }
+
+      return this.getAttribute('data-canvas-handle') === 'rotate' ? handleBounds : new DOMRect();
     });
   });
 
@@ -42,18 +59,23 @@ describe('Canvas selection chrome', () => {
     const onEditIntent = vi.fn();
     const onViewportChange = vi.fn();
     fixture.render(
-      <Canvas
-        viewId="selection-chrome"
-        label="选择状态画布"
-        scene={scene}
-        selection={['card']}
-        tool="select"
-        canEdit
-        onSelectionChange={onSelectionChange}
-        onEditIntent={onEditIntent}
-        onViewportChange={onViewportChange}
-        {...props}
-      />,
+      <div data-canvas-toolbar-scope="">
+        <Canvas
+          viewId="selection-chrome"
+          label="选择状态画布"
+          scene={scene}
+          selection={['card']}
+          tool="select"
+          canEdit
+          onSelectionChange={onSelectionChange}
+          onEditIntent={onEditIntent}
+          onViewportChange={onViewportChange}
+          {...props}
+        />
+        <div data-canvas-toolbar-obstacle="">
+          <button type="button">缩放</button>
+        </div>
+      </div>,
     );
     onViewportChange.mockClear();
 
@@ -136,5 +158,44 @@ describe('Canvas selection chrome', () => {
 
     expect(toolbar?.style.left).toBe('12px');
     expect(toolbar?.style.top).toBe('58px');
+  });
+
+  it('shifts the action toolbar sideways to keep the top-right viewport controls clear', () => {
+    controlBounds = new DOMRect(490, 20, 136, 56);
+    renderCanvas({
+      initialViewport: { x: 415, y: 0, zoom: 1 },
+      selectionActions: <button>观看选区</button>,
+    });
+    const toolbar = fixture.host.querySelector<HTMLElement>('[data-canvas-selection-actions]');
+
+    expect(toolbar?.style.visibility).toBe('visible');
+    expect(toolbar?.style.left).toBe('382px');
+    expect(toolbar?.style.top).toBe('70px');
+  });
+
+  it('keeps neighboring section titles and the selected object handles clear', () => {
+    handleBounds = new DOMRect(80, 100, 10, 26);
+    titleBounds = new DOMRect(100, 42, 90, 33);
+    renderCanvas({
+      scene: {
+        ...scene,
+        objects: [
+          ...scene.objects,
+          {
+            id: 'nearby-section',
+            kind: 'section',
+            label: '相邻标题',
+            geometry: { x: 100, y: 78, width: 90, height: 100, rotation: 0 },
+            version: 1,
+          },
+        ],
+      },
+      selectionActions: <button>观看选区</button>,
+    });
+    const toolbar = fixture.host.querySelector<HTMLElement>('[data-canvas-selection-actions]');
+
+    expect(toolbar?.style.visibility).toBe('visible');
+    expect(toolbar?.style.left).toBe('198px');
+    expect(toolbar?.style.top).toBe('50px');
   });
 });

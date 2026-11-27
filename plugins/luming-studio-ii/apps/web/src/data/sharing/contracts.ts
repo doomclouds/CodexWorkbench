@@ -32,6 +32,7 @@ export interface SharingMember {
   readonly removed: boolean;
   readonly active: boolean;
   readonly online?: boolean;
+  readonly lastSeenAtMillis?: number;
 }
 
 export interface BoardSharingState {

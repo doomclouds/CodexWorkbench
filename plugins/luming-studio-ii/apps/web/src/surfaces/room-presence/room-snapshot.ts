@@ -32,6 +32,7 @@ function sameChromeMember(current: BoardRoomParticipant, next: BoardRoomParticip
   const sameProfile = sameMember(current, next) && current.role === next.role;
   return (
     sameProfile &&
+    current.activityAtMillis === next.activityAtMillis &&
     current.following === next.following &&
     sameViewport(current.viewport, next.viewport)
   );
@@ -114,6 +115,8 @@ function sameChrome(current: BoardRoomState, next: BoardRoomState) {
   const sameAccess = current.status === next.status && current.canEdit === next.canEdit;
   return (
     sameAccess &&
+    current.feedbackUpdateKey === next.feedbackUpdateKey &&
+    current.suggestionsUpdateKey === next.suggestionsUpdateKey &&
     current.canReleaseAgentActivity === next.canReleaseAgentActivity &&
     sameAgentWorkspaces(current, next) &&
     sameViewer(current, next) &&

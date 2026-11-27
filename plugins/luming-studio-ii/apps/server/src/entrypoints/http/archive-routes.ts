@@ -13,6 +13,7 @@ import {
   type ArchiveImportReceipt,
   type ArchiveImportRejectionReason,
 } from '../../modules/archives/application/index.js';
+import { readArchivedSvgImage } from '../../modules/whiteboard/application/index.js';
 import { HttpRequestError, mediaType } from './request.js';
 import { sendProtobuf, sendStatus } from './response.js';
 import { unaryRoute, type HttpActor } from './unary-route.js';
@@ -115,14 +116,22 @@ function serveArchiveAsset(
     return;
   }
 
+  const bytes =
+    asset.mimeType === 'image/svg+xml' ? readArchivedSvgImage(asset.bytes) : asset.bytes;
+
+  if (!bytes) {
+    sendStatus(response, 404);
+    return;
+  }
+
   response.writeHead(200, {
     'content-type': asset.mimeType,
-    'content-length': asset.bytes.byteLength,
+    'content-length': bytes.byteLength,
     'cache-control': 'private, no-store',
     'content-security-policy': "default-src 'none'; sandbox",
     'x-content-type-options': 'nosniff',
   });
-  response.end(asset.bytes);
+  response.end(bytes);
 }
 
 interface ArchiveRoute {

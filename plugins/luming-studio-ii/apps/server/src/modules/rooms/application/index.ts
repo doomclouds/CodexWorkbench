@@ -22,6 +22,7 @@ import {
   type ReleaseAgentActivity,
 } from './agent-activity.js';
 import { RoomMemory, type RoomListener } from './room-memory.js';
+import type { RoomEventCursor } from './room-event-journal.js';
 import { executeTimerChange } from './timer-commands.js';
 
 export type {
@@ -55,6 +56,7 @@ export type {
   ReleaseAgentActivity,
 } from './agent-activity.js';
 export { createAgentActivity } from './agent-activity.js';
+export type { RoomEventCursor } from './room-event-journal.js';
 
 const maxRooms = 128;
 const maxChangedIds = 512;
@@ -62,6 +64,12 @@ const maxChangedMetadataBytes = 48 * 1024;
 
 interface RoomSubscription {
   readonly initial: RoomEvent;
+  readonly access: RoomAccess;
+  readonly release: () => void;
+}
+
+interface RoomEventSubscription {
+  readonly events: readonly RoomEvent[];
   readonly access: RoomAccess;
   readonly release: () => void;
 }
@@ -78,6 +86,12 @@ export interface RoomsApplication {
   publishPresence(boardId: string, actorId: string, input: PresenceInput): boolean;
   leavePresence(boardId: string, key: ParticipantKey, sequence: bigint): boolean;
   subscribe(boardId: string, key: ParticipantKey, listener: RoomListener): RoomSubscription;
+  subscribeAfter(
+    boardId: string,
+    key: ParticipantKey,
+    cursor: RoomEventCursor | undefined,
+    listener: RoomListener,
+  ): RoomEventSubscription;
   tick(boardId: string, boardRevision: bigint): void;
   notifyAccessChanged(boardId: string): void;
   revokeView(boardId: string, key: ParticipantKey): void;
@@ -89,6 +103,7 @@ export interface RoomsApplication {
   ): AgentActivityResult;
   releaseAgentActivity(request: ReleaseAgentActivity): AgentActivityResult;
   publishContentChange(change: RoomContentChange): void;
+  publishDiscussionChange(boardId: string, kind: 'feedbackChanged' | 'suggestionsChanged'): void;
   close(): void;
 }
 
@@ -204,6 +219,7 @@ export function createRoomsApplication(
     room.sweep(now);
     syncAgentWorkspaces(boardId, room, now);
 
+    const owner = stored.access.role === 'owner';
     const event = room.event(
       {
         kind: 'snapshot',
@@ -215,9 +231,12 @@ export function createRoomsApplication(
           timer: timerView(stored.timer, now),
           agentWorkspaces: room.agentWorkspaces,
           canReleaseAgentActivity: agentActivity !== undefined && stored.access.role === 'owner',
+          feedbackVersion: room.feedbackVersion,
+          suggestionsVersion: owner ? room.suggestionsVersion : undefined,
         },
       },
       now,
+      owner,
     );
 
     return { room, event, access: stored.access };
@@ -231,6 +250,15 @@ export function createRoomsApplication(
 
     room.baselineRevision = change.boardRevision;
     room.publish({ kind: 'contentChanged', change: limitedChange(change) }, clock.nowMillis());
+  }
+
+  function listen(room: RoomMemory, listener: RoomListener, access: RoomAccess): () => void {
+    const release = room.listen(listener, access.role === 'owner');
+    if (!release) {
+      throw new RoomCapacityError('Too many room connections');
+    }
+
+    return release;
   }
 
   return {
@@ -273,12 +301,28 @@ export function createRoomsApplication(
       }
 
       const { room, event, access } = readSnapshot(boardId, key.actorId, clock.nowMillis());
-      const release = room.listen(listener);
-      if (!release) {
-        throw new RoomCapacityError('Too many room connections');
+      return { initial: event, access, release: listen(room, listener, access) };
+    },
+    subscribeAfter(boardId, key, cursor, listener) {
+      if (!validViewId(key.viewId)) {
+        throw new RoomInputError('Invalid room presence identity');
       }
 
-      return { initial: event, access, release };
+      const now = clock.nowMillis();
+      const currentAccess = requireAccess(access(boardId, key.actorId));
+      const room = roomFor(boardId, currentAccess.boardRevision, now);
+      room.sweep(now);
+      syncAgentWorkspaces(boardId, room, now);
+      publishContentChange({
+        boardId,
+        boardRevision: currentAccess.boardRevision,
+        refreshScene: true,
+      });
+
+      const replay = cursor && room.replay(cursor, currentAccess.role === 'owner');
+      const events = replay ?? [readSnapshot(boardId, key.actorId, now).event];
+
+      return { events, access: currentAccess, release: listen(room, listener, currentAccess) };
     },
     tick(boardId, boardRevision) {
       rooms.get(boardId)?.sweep(clock.nowMillis());
@@ -326,6 +370,14 @@ export function createRoomsApplication(
       return result;
     },
     publishContentChange,
+    publishDiscussionChange(boardId, kind) {
+      const room = rooms.get(boardId);
+      if (room) {
+        const version =
+          kind === 'feedbackChanged' ? ++room.feedbackVersion : ++room.suggestionsVersion;
+        room.publish({ kind, version }, clock.nowMillis());
+      }
+    },
     close() {
       for (const room of rooms.values()) {
         room.close();

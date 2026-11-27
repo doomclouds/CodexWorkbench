@@ -25,15 +25,39 @@ function createSharingWriter(connection: SqliteConnection): SharingWriter {
       `)
         .run(boardId, role, Number(enabled), version, seed);
     },
-    saveMember(boardId, { actorId, name, nameKey, role, invitationVersion, removed }) {
+    saveMember(
+      boardId,
+      { actorId, name, nameKey, role, invitationVersion, removed, lastSeenAtMillis },
+    ) {
       connection
         .prepare(`
-        INSERT INTO board_sharing_members (board_id, actor_id, name, name_key, role, invitation_version, removed)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO board_sharing_members (
+          board_id, actor_id, name, name_key, role, invitation_version, removed, last_seen_at_millis
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (board_id, actor_id) DO UPDATE SET name = excluded.name, name_key = excluded.name_key,
-          role = excluded.role, invitation_version = excluded.invitation_version, removed = excluded.removed
+          role = excluded.role, invitation_version = excluded.invitation_version, removed = excluded.removed,
+          last_seen_at_millis = COALESCE(excluded.last_seen_at_millis, board_sharing_members.last_seen_at_millis)
       `)
-        .run(boardId, actorId, name, nameKey, role, invitationVersion, Number(removed));
+        .run(
+          boardId,
+          actorId,
+          name,
+          nameKey,
+          role,
+          invitationVersion,
+          Number(removed),
+          lastSeenAtMillis ?? null,
+        );
+    },
+    touchMember(boardId, actorId, now) {
+      connection
+        .prepare(`
+        UPDATE board_sharing_members SET last_seen_at_millis = ?
+        WHERE board_id = ? AND actor_id = ? AND removed = 0
+          AND (last_seen_at_millis IS NULL OR last_seen_at_millis < ?)
+      `)
+        .run(now, boardId, actorId, now);
     },
     deleteMember(boardId, actorId) {
       connection
@@ -64,7 +88,13 @@ function createSharingWriter(connection: SqliteConnection): SharingWriter {
 }
 
 export function createSharingRepository(database: SqliteDatabase): SharingRepository {
-  database.write((connection) => connection.exec(sharingSchema));
+  database.write((connection) => {
+    connection.exec(sharingSchema);
+    const columns = connection.prepare('PRAGMA table_info(board_sharing_members)').all();
+    if (!columns.some(({ name }) => name === 'last_seen_at_millis')) {
+      connection.exec('ALTER TABLE board_sharing_members ADD COLUMN last_seen_at_millis INTEGER');
+    }
+  });
 
   return {
     read: (work) => database.read((connection) => work(createSharingReader(connection))),

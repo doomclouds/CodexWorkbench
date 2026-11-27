@@ -10,7 +10,10 @@ import {
   BoardCatalogService,
   BoardSortOrder,
 } from '@codexworkbench/luming-studio-ii-contracts/catalog/service';
-import { WhiteboardService } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/service';
+import {
+  BoardExportFormat,
+  WhiteboardService,
+} from '@codexworkbench/luming-studio-ii-contracts/whiteboard/service';
 import { expect, test } from 'vitest';
 import {
   archiveReceiptWriteFailure,
@@ -26,7 +29,7 @@ const ownerId = 'archive-editor';
 const outsiderId = 'archive-outsider';
 const archivePath = '/' + BoardArchiveService.typeName + '/ImportBoardArchive';
 const { getArchiveImportReceipt } = BoardArchiveService.method;
-const { getBoardScene, getObjectPayloads } = WhiteboardService.method;
+const { exportBoard, getBoardScene, getObjectPayloads } = WhiteboardService.method;
 const { listBoards } = BoardCatalogService.method;
 const fixtures = new URL('../fixtures/archives/', import.meta.url);
 const currentArchive = new URL('legacy-v4.studio.zip', fixtures);
@@ -145,6 +148,34 @@ test('preserves ordinary document paths and rewrites exact declared archive asse
     value: `Read /assets/docs/manual or /assets/release-board/cover.svg. See ${assetPath} for the bundled cover.`,
   });
   expect((await loadArchiveAsset(assetPath, ownerId)).status).toBe(200);
+});
+
+test('exports the complete imported whiteboard and its archived SVG as SVG and PNG', async () => {
+  const receipt = await importReceipt(await upload(currentArchive, 'import-vector-image'));
+  assert.equal(receipt.outcome.case, 'imported');
+  const { boardId } = receipt.outcome.value;
+  const input = { boardId, expectedRevision: 0n, scope: { case: 'whole' as const, value: {} } };
+  const vector = await callProtobuf(server.address, ownerId, exportBoard, {
+    ...input,
+    format: BoardExportFormat.SVG,
+  });
+  assert.equal(vector.result.case, 'file');
+  assert.equal(vector.result.value.mimeType, 'image/svg+xml');
+  const markup = new TextDecoder().decode(vector.result.value.content);
+  const embedded = /data:image\/svg\+xml;base64,([^"]+)/u.exec(markup)?.[1];
+  assert.ok(embedded);
+  assert.match(Buffer.from(embedded, 'base64').toString('utf8'), /<path d="M22 57l29-23/u);
+
+  const raster = await callProtobuf(server.address, ownerId, exportBoard, {
+    ...input,
+    format: BoardExportFormat.PNG,
+  });
+  assert.equal(raster.result.case, 'file');
+  assert.equal(raster.result.value.mimeType, 'image/png');
+  assert.deepEqual(
+    raster.result.value.content.subarray(0, 8),
+    new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]),
+  );
 });
 
 test('rejects older backup formats and exposes the same rejection through receipt lookup', async () => {

@@ -16,6 +16,7 @@ import { renderExportPng, type SvgPngRenderer } from './export-png.js';
 import { executeMove } from './move-objects.js';
 
 export { createBoardBackup } from './export-backup.js';
+export { readArchivedSvgImage } from './prepare-board-image.js';
 
 export { BoardSuggestionError, createBoardSuggestionApplication } from './board-suggestions.js';
 export type { BoardSuggestionApplication } from './board-suggestions.js';

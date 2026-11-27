@@ -319,3 +319,7 @@
   font-size: 12px;
   line-height: 18px;
 }
+
+.whiteboard-editor__geometry-menu .studio-ui-action-menu__shortcut {
+  color: var(--board-chrome-muted, GrayText);
+}

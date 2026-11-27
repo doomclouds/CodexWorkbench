@@ -69,6 +69,7 @@ export function WhiteboardFeedbackSurface(props: WhiteboardFeedbackSurfaceProps)
     viewing,
     onReviewThread,
     contentPoints,
+    contentLocations,
     hostPicking,
     focusedObjectId,
   } = props;
@@ -110,6 +111,7 @@ export function WhiteboardFeedbackSurface(props: WhiteboardFeedbackSurfaceProps)
         draft={surface.draftShown ? createDraft?.target : undefined}
         objects={objectsById}
         contentPoints={contentPoints}
+        contentLocations={contentLocations}
         viewport={viewport}
         picking={surface.picking && !hostPicking}
         focusedObjectId={focusedObjectId}

@@ -164,6 +164,8 @@ function RecycleResults({
 
   const disabled = Boolean(actions.activity);
   const loading = directory.status === 'loading';
+  const failed = directory.status === 'failed';
+  const retryLabel = directory.nextCursor ? '重试加载更多' : '重试';
 
   return (
     <div aria-busy={loading}>
@@ -175,15 +177,15 @@ function RecycleResults({
         onSelect={actions.toggleSelection}
         onRestore={actions.restore}
         onDelete={onDelete}
-        renderThumbnail={directory.status === 'failed' ? undefined : renderThumbnail}
+        renderThumbnail={failed ? undefined : renderThumbnail}
       />
-      {directory.nextCursor && (
+      {(failed || directory.nextCursor) && (
         <div className="studio-recycle-pagination">
-          {directory.error && <p role="alert">{directory.error}</p>}
+          {failed && <p role="alert">{directory.error || '无法读取回收站。'}</p>}
           <Button
-            label={directory.error ? '重试加载更多' : '加载更多'}
+            label={failed ? retryLabel : '加载更多'}
             disabled={disabled || loading}
-            onActivate={directory.loadMore}
+            onActivate={failed ? directory.retry : directory.loadMore}
           />
         </div>
       )}

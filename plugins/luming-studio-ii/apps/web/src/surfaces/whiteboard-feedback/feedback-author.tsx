@@ -1,7 +1,7 @@
 import { User } from 'lucide-react';
 import type { FeedbackMessage } from '../../data/feedback/index.js';
 
-type FeedbackAuthor = Pick<FeedbackMessage, 'authorId' | 'authoredByViewer'>;
+type FeedbackAuthor = Pick<FeedbackMessage, 'authorId' | 'authorName' | 'authoredByViewer'>;
 
 const palette = [
   '#785ee8',
@@ -16,7 +16,7 @@ const contrastPivot = 0.179;
 const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 
 export function feedbackAuthorName(author: FeedbackAuthor) {
-  return author.authoredByViewer ? '我' : author.authorId.trim() || '协作者';
+  return author.authoredByViewer ? '我' : author.authorName?.trim() || '协作者';
 }
 
 function colorChannel(hex: string) {

@@ -63,3 +63,46 @@ export function seedPreviewScene(path: string, boardId: string, amount: number):
     database.close();
   }
 }
+
+export function seedPreviewContents(
+  path: string,
+  boardId: string,
+  contents: ReadonlyArray<{
+    readonly kind: string;
+    readonly label: string;
+    readonly bodyKind?: string;
+    readonly body: object;
+  }>,
+) {
+  const database = openSqliteDatabase(path);
+  try {
+    database.write((connection) => {
+      const insertObject = connection.prepare(`
+        INSERT INTO board_objects (board_id, object_id, kind, label, layer_index, x, y, width, height)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 320, 200)
+      `);
+      const insertPayload = connection.prepare(`
+        INSERT INTO object_payloads (board_id, object_id, payload_version, body_kind, body_json)
+        VALUES (?, ?, 1, ?, ?)
+      `);
+
+      for (const [index, { kind, label, bodyKind, body }] of contents.entries()) {
+        const id = 'preview-content-' + index;
+        insertObject.run(
+          boardId,
+          id,
+          kind,
+          label,
+          index + 200,
+          (index % 2) * 340,
+          Math.floor(index / 2) * 220,
+        );
+        insertPayload.run(boardId, id, bodyKind ?? kind, JSON.stringify(body));
+      }
+
+      connection.prepare('UPDATE boards SET revision = 1 WHERE board_id = ?').run(boardId);
+    });
+  } finally {
+    database.close();
+  }
+}

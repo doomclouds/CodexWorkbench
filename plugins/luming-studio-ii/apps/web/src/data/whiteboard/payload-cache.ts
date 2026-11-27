@@ -100,8 +100,15 @@ export function visiblePayloads(
 ): ReadonlyMap<string, WhiteboardPayload> {
   const projected = new Map<string, WhiteboardPayload>();
   for (const [id, entry] of cache) {
-    const version = objects.get(id)?.payloadVersion;
-    if (entry.payload && version !== undefined && entry.version >= version) {
+    const object = objects.get(id);
+    const version = object?.payloadVersion;
+    const current = version !== undefined && entry.version >= version;
+    const awaitingDocument =
+      version !== undefined &&
+      object?.kind === 'document' &&
+      entry.payload?.body.kind === 'document';
+
+    if (entry.payload && (current || awaitingDocument)) {
       projected.set(id, entry.payload);
     }
   }

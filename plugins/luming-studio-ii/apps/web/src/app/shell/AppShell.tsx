@@ -8,7 +8,7 @@ import {
 
 import { OperationNoticeSlot, type ShellOperationNotice } from './operation-notice/index.js';
 
-type GuestBoardAccess = Pick<BoardSharingState, 'role' | 'canEdit' | 'canComment'>;
+type GuestBoardAccess = Pick<BoardSharingState, 'role' | 'canEdit' | 'canComment' | 'scope'>;
 
 type StudioGuestEntry =
   | { readonly kind: 'invitation'; readonly boardId: string; readonly invitationToken: string }
@@ -180,7 +180,12 @@ export function AppShell({
   return (
     <div className="studio-whiteboard-app" data-theme={resolvedTheme}>
       {!guest && notice && <OperationNoticeSlot notice={notice} onDismiss={onDismissNotice} />}
-      <div className="studio-app-page">{guest ? <GuestShell {...guest} /> : children}</div>
+      <div
+        className="studio-app-page"
+        data-guest-invitation={guest?.entry.kind === 'invitation' || undefined}
+      >
+        {guest ? <GuestShell {...guest} /> : children}
+      </div>
     </div>
   );
 }

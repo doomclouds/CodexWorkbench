@@ -545,56 +545,73 @@ it('downloads real Canvas HTML and block JSON with escaped script text', async (
   expect(request).not.toHaveBeenCalled();
 });
 
-it('uses the authorized private image reader and embeds only its bytes when exporting HTML', async () => {
-  const View = documentExtension.View;
-  type ViewProps = Parameters<typeof View>[0];
-  type Download = NonNullable<ViewProps['downloadFile']>;
-  type Asset = { mimeType: string; content: Uint8Array };
-  type ReadAsset = (source: string, signal?: AbortSignal) => Promise<Asset>;
-  const downloadFile = vi.fn<Download>();
-  const readDocumentAsset = vi
-    .fn<ReadAsset>()
-    .mockResolvedValue({ mimeType: 'image/png', content: new Uint8Array([137, 80, 78, 71]) });
-  const archived = '/studio-archive-assets/test-board/image-paragraph';
-  const publicImage = 'https://example.test/never-read-for-export.png';
-  const value = {
-    ...initial,
-    document: {
-      schemaVersion: 1,
-      blocks: [
-        { id: 'private-image', type: 'image', props: { url: archived, caption: '正文附件' } },
-        { id: 'external-image', type: 'image', props: { url: publicImage, caption: '外部示意' } },
-      ],
-    },
-  };
-  const geometry = { x: 0, y: 0, width: 680, height: 560, rotation: 0 };
-  const injected = { downloadFile, readDocumentAsset };
-  fixture.render(
-    <View
-      object={{ kind: 'document', label: value.title, geometry }}
-      geometry={geometry}
-      payload={{ version: 4, value }}
-      zoom={1}
-      interactive
-      selected
-      readOnly
-      request={vi.fn()}
-      {...injected}
-    />,
-  );
-  click('导出文档');
-  await act(async () => button('全文 HTML').click());
-  const file = downloadFile.mock.calls[0]?.[0];
-  if (!file) {
-    throw new Error('Expected the confirmed document export');
-  }
+const archivedImageFixtures = [
+  {
+    mimeType: 'image/png',
+    content: new Uint8Array([137, 80, 78, 71]),
+    encoded: 'iVBORw==',
+  },
+  {
+    mimeType: 'image/svg+xml',
+    content: new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"/>'),
+    encoded: 'PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciLz4=',
+  },
+];
 
-  expect(readDocumentAsset.mock.calls.map(([source]) => source)).toEqual([archived, archived]);
-  const output = new TextDecoder().decode(file.content);
-  expect(output).toContain('data:image/png;base64,iVBORw==');
-  expect(output).not.toContain(publicImage);
-  expect(output).toContain('图片尚未嵌入 · 外部示意');
-});
+it.each(archivedImageFixtures)(
+  'renders and exports authorized private $mimeType bytes',
+  async ({ mimeType, content, encoded }) => {
+    const View = documentExtension.View;
+    type ViewProps = Parameters<typeof View>[0];
+    type Download = NonNullable<ViewProps['downloadFile']>;
+    type Asset = { mimeType: string; content: Uint8Array };
+    type ReadAsset = (source: string, signal?: AbortSignal) => Promise<Asset>;
+    const downloadFile = vi.fn<Download>();
+    const readDocumentAsset = vi.fn<ReadAsset>().mockResolvedValue({ mimeType, content });
+    const archived = '/studio-archive-assets/test-board/image-paragraph';
+    const publicImage = 'https://example.test/never-read-for-export.png';
+    const value = {
+      ...initial,
+      document: {
+        schemaVersion: 1,
+        blocks: [
+          { id: 'private-image', type: 'image', props: { url: archived, caption: '正文附件' } },
+          { id: 'external-image', type: 'image', props: { url: publicImage, caption: '外部示意' } },
+        ],
+      },
+    };
+    const geometry = { x: 0, y: 0, width: 680, height: 560, rotation: 0 };
+    const injected = { downloadFile, readDocumentAsset };
+    fixture.render(
+      <View
+        object={{ kind: 'document', label: value.title, geometry }}
+        geometry={geometry}
+        payload={{ version: 4, value }}
+        zoom={1}
+        interactive
+        selected
+        readOnly
+        request={vi.fn()}
+        {...injected}
+      />,
+    );
+    const source = 'data:' + mimeType + ';base64,' + encoded;
+    await act(() => Promise.resolve());
+    expect(query('img[alt="正文附件"]').getAttribute('src')).toBe(source);
+    click('导出文档');
+    await act(async () => button('全文 HTML').click());
+    const file = downloadFile.mock.calls[0]?.[0];
+    if (!file) {
+      throw new Error('Expected the confirmed document export');
+    }
+
+    expect(readDocumentAsset.mock.calls.map(([source]) => source)).toEqual([archived, archived]);
+    const output = new TextDecoder().decode(file.content);
+    expect(output).toContain(source);
+    expect(output).not.toContain(publicImage);
+    expect(output).toContain('图片尚未嵌入 · 外部示意');
+  },
+);
 
 it('uses the original automatic white ink on a dark Canvas document fill', () => {
   const View = documentExtension.View;
@@ -734,6 +751,192 @@ it('retains a rejected draft without retrying automatically and compares it agai
       overwrite: true,
     }),
   );
+});
+
+function remoteDocument(version: number, title: string, heading: string): DocumentValue {
+  const blocks = initial.document.blocks.map((block) =>
+    block.id === 'alpha' ? { ...block, content: heading } : block,
+  );
+  blocks.push({ id: 'remote-added', type: 'paragraph', props: {}, content: '远端新增段落' });
+
+  return { version, title, document: { schemaVersion: 1, blocks } };
+}
+
+it('replays only actual BlockNote edits over the latest remote blocks and title after comparison', async () => {
+  const latest = remoteDocument(8, latestTitle, '远端修改的标题块');
+  const remote = {
+    ...latest,
+    document: {
+      ...latest.document,
+      blocks: latest.document.blocks.map((block) =>
+        block.id === 'beta' ? { ...block, props: { backgroundColor: 'red' } } : block,
+      ),
+    },
+  };
+  const save = vi
+    .fn<(commit: DocumentCommit) => Promise<DocumentCommitResult>>()
+    .mockResolvedValueOnce({ ok: false, current: remote, message: '版本冲突' })
+    .mockImplementation(async (commit) => saveReply(commit));
+  render({ onCommit: save });
+  await openEditor();
+  await typeBody(editorParagraph('beta'), '本地修改的正文');
+  await act(() => vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1), { timeout: 2000 }));
+  click('比较最新内容');
+  await act(async () => button('保存此草稿').click());
+
+  const commit = save.mock.calls[1]?.[0];
+  expect(commit).toMatchObject({ title: latestTitle, expectedVersion: 8 });
+  expect(commit?.document.blocks.find(({ id }) => id === 'alpha')).toEqual(
+    remote.document.blocks[0],
+  );
+  expect(commit?.document.blocks.find(({ id }) => id === 'remote-added')).toEqual(
+    remote.document.blocks.at(-1),
+  );
+  expect(commit?.document.blocks.find(({ id }) => id === 'beta')).toMatchObject({
+    props: { backgroundColor: 'red' },
+    content: expect.arrayContaining([expect.objectContaining({ text: '本地修改的正文' })]),
+  });
+});
+
+function paragraphBlock(id: string, content = id) {
+  return { id, type: 'paragraph', props: {}, content } as const;
+}
+
+function structureValue(version: number, blocks: DocumentContent['blocks']): DocumentValue {
+  return { version, title: '文档结构', document: { schemaVersion: 1, blocks } };
+}
+
+function editorBlock(id: string) {
+  return query<HTMLDivElement>(
+    `[data-document-editor] [data-node-type="blockOuter"][data-id="${id}"]`,
+  );
+}
+
+async function editStructure(change: () => void) {
+  const root = query('[data-document-editor] [contenteditable="true"]');
+  await act(async () => {
+    change();
+    root.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 50);
+    });
+  });
+}
+
+it('replays a block insertion, removal and move while keeping an unrelated remote block', async () => {
+  const first = paragraphBlock('one');
+  const second = paragraphBlock('two');
+  const third = paragraphBlock('three');
+  const fourth = paragraphBlock('four');
+  const remoteOnly = paragraphBlock('remote-only');
+  const base = structureValue(4, [first, second, third, fourth]);
+  const remote = structureValue(8, [remoteOnly, first, second, third, fourth]);
+  const save = vi
+    .fn<(commit: DocumentCommit) => Promise<DocumentCommitResult>>()
+    .mockResolvedValueOnce({ ok: false, current: remote, message: '版本冲突' })
+    .mockImplementation(async (commit) => saveReply(commit));
+  render({ value: base, onCommit: save });
+  await openEditor();
+  await editStructure(() => {
+    const before = editorBlock('one');
+    const moved = editorBlock('four');
+    const added = moved.cloneNode(true) as HTMLDivElement;
+    added.dataset.id = 'added';
+    query('[data-node-type="blockContainer"]', added).dataset.id = 'added';
+    query('p', added).textContent = '本地新增';
+    before.after(moved, added);
+    editorBlock('three').remove();
+  });
+  await act(() => vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1), { timeout: 2000 }));
+  expect(save.mock.calls[0]?.[0].document.blocks.map(({ id }) => id)).toEqual([
+    'one',
+    'four',
+    'added',
+    'two',
+  ]);
+  click('比较最新内容');
+  await act(async () => button('保存此草稿').click());
+
+  expect(save.mock.calls[1]?.[0].document.blocks.map(({ id }) => id)).toEqual([
+    'remote-only',
+    'one',
+    'four',
+    'added',
+    'two',
+  ]);
+});
+
+it('retains a child a collaborator moved outside the subtree removed by the local editor', async () => {
+  const parent = paragraphBlock('parent');
+  const child = paragraphBlock('child');
+  const sibling = paragraphBlock('sibling');
+  const base = structureValue(4, [{ ...parent, children: [child] }, sibling]);
+  const remote = structureValue(8, [parent, child, sibling]);
+  const save = vi
+    .fn<(commit: DocumentCommit) => Promise<DocumentCommitResult>>()
+    .mockResolvedValueOnce({ ok: false, current: remote, message: '版本冲突' })
+    .mockImplementation(async (commit) => saveReply(commit));
+  render({ value: base, onCommit: save });
+  await openEditor();
+  await editStructure(() => editorBlock('parent').remove());
+  await act(() => vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1), { timeout: 2000 }));
+  expect(save.mock.calls[0]?.[0].document.blocks).toEqual([sibling]);
+  click('比较最新内容');
+  await act(async () => button('保存此草稿').click());
+
+  expect(save.mock.calls[1]?.[0].document.blocks).toEqual([child, sibling]);
+});
+
+it('keeps the original local edits for another comparison when the replay also conflicts', async () => {
+  const firstRemote = remoteDocument(8, latestTitle, '第一次远端修改');
+  const secondRemote = remoteDocument(9, '远端再改标题', '第二次远端修改');
+  const save = vi
+    .fn<(commit: DocumentCommit) => Promise<DocumentCommitResult>>()
+    .mockResolvedValueOnce({ ok: false, current: firstRemote, message: '版本冲突' })
+    .mockResolvedValueOnce({ ok: false, current: secondRemote, message: '版本再次冲突' })
+    .mockImplementation(async (commit) => saveReply(commit));
+  render({ onCommit: save });
+  await openEditor();
+  changeTitle('本地标题');
+  await typeBody(editorParagraph('beta'), '本地正文');
+  await act(() => vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1), { timeout: 2000 }));
+  click('比较最新内容');
+  await act(async () => button('保存此草稿').click());
+  expect(query('[aria-label="比较文档草稿"]').textContent).toContain('第二次远端修改');
+  await act(async () => button('保存此草稿').click());
+
+  const commit = save.mock.calls[2]?.[0];
+  expect(commit).toMatchObject({ title: '本地标题', expectedVersion: 9 });
+  expect(commit?.document.blocks.find(({ id }) => id === 'alpha')).toEqual(
+    secondRemote.document.blocks[0],
+  );
+  expect(commit?.document.blocks.find(({ id }) => id === 'beta')?.content).toEqual(
+    expect.arrayContaining([expect.objectContaining({ text: '本地正文' })]),
+  );
+});
+
+it('retains the comparison and performs no write when a remote edit deleted the locally edited block', async () => {
+  const current: DocumentValue = {
+    version: 8,
+    title: initial.title,
+    document: {
+      schemaVersion: 1,
+      blocks: initial.document.blocks.filter(({ id }) => id !== 'beta'),
+    },
+  };
+  const save = vi
+    .fn<(commit: DocumentCommit) => Promise<DocumentCommitResult>>()
+    .mockResolvedValueOnce({ ok: false, current, message: '版本冲突' });
+  render({ onCommit: save });
+  await openEditor();
+  await typeBody(editorParagraph('beta'), '本地未保存正文');
+  await act(() => vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1), { timeout: 2000 }));
+  click('比较最新内容');
+  await act(async () => button('保存此草稿').click());
+
+  expect(save).toHaveBeenCalledTimes(1);
+  expect(query('[aria-label="比较文档草稿"]').textContent).toContain('本地未保存正文');
+  expect(document.body.textContent).toContain('草稿已保留');
 });
 
 it('does not persist a draft after losing edit permission and keeps it available on re-entry', async () => {

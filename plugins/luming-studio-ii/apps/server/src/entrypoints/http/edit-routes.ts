@@ -18,7 +18,7 @@ const {
 } = BoardEditService.method;
 
 export const boardImageRoutePath = '/' + BoardEditService.typeName + '/' + attachBoardImage.name;
-export const boardImageRequestLimit = 8 * 1024 * 1024 + 32 * 1024;
+export const boardImageRequestLimit = 20 * 1024 * 1024 + 32 * 1024;
 
 export function createBoardEditRoutes(
   application: BoardEditorApplication,

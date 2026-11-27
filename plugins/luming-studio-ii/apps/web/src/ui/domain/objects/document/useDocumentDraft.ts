@@ -5,6 +5,7 @@ import type {
   DocumentObjectProps,
   DocumentValue,
 } from './contracts.js';
+import { replayDocumentDraft } from './document-replay.js';
 import { sameDraft } from './model.js';
 
 interface DraftState {
@@ -47,6 +48,7 @@ function mergeInput(state: DraftState, value: DocumentValue): DraftState {
 
 function mergeCommit(
   state: DraftState,
+  authored: DocumentDraft,
   submitted: DocumentDraft,
   result: DocumentCommitResult,
 ): DraftState {
@@ -61,8 +63,18 @@ function mergeCommit(
   const value = result.value;
   const confirmed = value.version >= state.confirmed.version ? value : state.confirmed;
   const next = { ...state, saving: false, confirmed, failure: undefined };
-  if (sameDraft(state.draft, submitted)) {
+  if (sameDraft(state.draft, authored)) {
     return { ...next, base: confirmed, draft: confirmed };
+  }
+
+  if (!sameDraft(authored, submitted)) {
+    try {
+      const draft = replayDocumentDraft(authored, state.draft, value);
+
+      return { ...next, base: value, draft };
+    } catch (error) {
+      return { ...next, failure: error instanceof Error ? error.message : genericError };
+    }
   }
   if (sameDraft(submitted, value)) {
     return { ...next, base: value };
@@ -126,19 +138,23 @@ export function useDocumentDraft(options: DraftOptions) {
     overwrite: boolean,
   ) {
     const source = overwrite ? snapshot.confirmed : snapshot.base;
-    const { title, document } = snapshot.draft;
-    const draft = { title, document };
+    const authored = snapshot.draft;
+    let submitted = authored;
     update({ ...snapshot, saving: true, failure: undefined });
 
     let result: DocumentCommitResult;
     try {
-      result = await callback({ ...draft, expectedVersion: source.version, overwrite });
+      if (overwrite) {
+        submitted = replayDocumentDraft(snapshot.base, authored, source);
+      }
+      const { title, document } = submitted;
+      result = await callback({ title, document, expectedVersion: source.version, overwrite });
     } catch (error) {
       const message = error instanceof Error ? error.message : genericError;
       result = { ok: false, message };
     }
 
-    update(mergeCommit(latest.current, draft, result));
+    update(mergeCommit(latest.current, authored, submitted, result));
 
     return result.ok;
   }

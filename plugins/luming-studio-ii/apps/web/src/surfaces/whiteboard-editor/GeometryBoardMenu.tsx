@@ -174,6 +174,7 @@ export function GeometryBoardMenu(props: BoardMenuProps) {
         anchor={anchor}
         label="白板操作"
         items={boardMenuItems(props)}
+        announceShortcuts
         onAction={handleAction}
         onRequestClose={onRequestClose}
         returnFocus={returnFocus}

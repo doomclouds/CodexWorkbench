@@ -9,7 +9,7 @@ import type {
 } from '../domain/index.js';
 import { archiveImageSource } from '../domain/index.js';
 import type { BoardEditRepository } from '../ports/index.js';
-import { planVideoEdit } from './attach-image.js';
+import { planImageEdit, planVideoEdit } from './attach-image.js';
 import { pasteBoardObjects } from './clipboard-paste.js';
 import {
   planDocumentImageUpload,
@@ -18,7 +18,7 @@ import {
 } from './document-image.js';
 import { planContentEdit } from './edit-content.js';
 import { planGeometryEdit } from './edit-geometry.js';
-import { createAttachImage, type RenderUploadedSvg } from './prepare-board-image.js';
+import { createImageEdit, type ValidateUploadedSvg } from './prepare-board-image.js';
 import { planBoardReverse, type BoardReverseSource } from './reverse-board-edit.js';
 import { readBoardEditReceipt, runBoardEdit } from './run-board-edit.js';
 
@@ -35,7 +35,7 @@ export interface BoardEditorApplication {
   uploadDocumentImage(
     actor: Actor,
     command: BoardCommand<DocumentImageOperation>,
-  ): DocumentImageUpload;
+  ): Promise<DocumentImageUpload>;
   reverseEdit(actor: Actor, command: BoardCommand<BoardReverseSource>): BoardEditReceipt;
   getEditReceipt(actor: Actor, identity: BoardEditIdentity): BoardEditReceipt | undefined;
 }
@@ -43,8 +43,10 @@ export interface BoardEditorApplication {
 export function createBoardEditorApplication(
   repository: BoardEditRepository,
   now: () => number,
-  renderUploadedSvg?: RenderUploadedSvg,
+  validateUploadedSvg?: ValidateUploadedSvg,
 ): BoardEditorApplication {
+  const editImage = createImageEdit(repository, now, validateUploadedSvg);
+
   return {
     editGeometry(actor, { operation, signature, boardId, commandId }) {
       return runBoardEdit(
@@ -67,7 +69,7 @@ export function createBoardEditorApplication(
         (writer, board) => planContentEdit(writer, board, operation),
       );
     },
-    attachImage: createAttachImage(repository, now, renderUploadedSvg),
+    attachImage: (actor, command) => editImage(actor, command, planImageEdit),
     attachVideo(actor, { operation, signature, boardId, commandId }) {
       return runBoardEdit(
         repository,
@@ -77,20 +79,14 @@ export function createBoardEditorApplication(
         (writer, board) => planVideoEdit(writer, board, operation),
       );
     },
-    uploadDocumentImage(actor, { operation, signature, boardId, commandId }) {
-      const receipt = runBoardEdit(
-        repository,
-        actor,
-        { boardId, commandId },
-        { kind: 'image', signature, savedAtMillis: now() },
-        (writer, board) => planDocumentImageUpload(writer, board, operation),
-      );
+    async uploadDocumentImage(actor, command) {
+      const receipt = await editImage(actor, command, planDocumentImageUpload);
 
       return {
         receipt,
         assetUrl:
           receipt.outcome.kind === 'applied'
-            ? archiveImageSource(boardId, operation.assetId)
+            ? archiveImageSource(command.boardId, command.operation.assetId)
             : undefined,
       };
     },

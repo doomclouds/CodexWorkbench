@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react';
 import { StatusText } from '../../../base/index.js';
 import type { DocumentBlock, DocumentObjectProps } from './contracts.js';
-import { isPrivateDocumentAssetSource, safeDocumentImage } from './model.js';
+import {
+  isPrivateDocumentAssetSource,
+  safeDocumentImage,
+  safeResolvedDocumentImage,
+} from './model.js';
 
 interface DocumentImageProps {
   readonly block: DocumentBlock;
@@ -46,7 +50,7 @@ export function DocumentImage({ block, resolveImage }: DocumentImageProps) {
     Promise.resolve()
       .then(() => (controller.signal.aborted ? undefined : resolveImage(source, controller.signal)))
       .then((reply) => {
-        const url = safeDocumentImage(reply);
+        const url = safeResolvedDocumentImage(reply);
         if (!controller.signal.aborted) {
           setResolved({ requested: source, url });
         }

@@ -239,10 +239,10 @@ export function TimerDigits({
 
 export function TimerEntry({
   entry,
-  disabled,
+  readOnly,
 }: {
   readonly entry: ReturnType<typeof useTimerEntry>;
-  readonly disabled: boolean;
+  readonly readOnly: boolean;
 }) {
   return (
     <>
@@ -251,7 +251,7 @@ export function TimerEntry({
         {fields.map((field) => (
           <input
             key={field}
-            disabled={disabled}
+            readOnly={readOnly}
             ref={(node) => entry.assign(field, node)}
             type="text"
             role="spinbutton"
@@ -263,19 +263,19 @@ export function TimerEntry({
             enterKeyHint="done"
             autoComplete="off"
             value={entry.digits[field]}
-            onChange={(event) => entry.handleChange(field, event)}
-            onCompositionEnd={(event) => entry.typeDigits(field, event.data)}
-            onPaste={(event) => entry.handlePaste(field, event)}
-            onKeyDown={(event) => entry.handleKeyDown(field, event)}
+            onChange={readOnly ? undefined : (event) => entry.handleChange(field, event)}
+            onCompositionEnd={readOnly ? undefined : (event) => entry.typeDigits(field, event.data)}
+            onPaste={readOnly ? undefined : (event) => entry.handlePaste(field, event)}
+            onKeyDown={readOnly ? undefined : (event) => entry.handleKeyDown(field, event)}
             onKeyUp={(event) => {
-              if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+              if (!readOnly && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
                 entry.finish();
               }
             }}
             onFocus={entry.restartDigits}
             onPointerDown={entry.restartDigits}
             onSelect={handleDigitSelect}
-            onBlur={(event) => entry.handleBlur(field, event)}
+            onBlur={readOnly ? undefined : (event) => entry.handleBlur(field, event)}
           />
         ))}
       </div>

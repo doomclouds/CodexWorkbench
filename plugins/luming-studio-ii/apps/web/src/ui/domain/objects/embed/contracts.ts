@@ -43,6 +43,12 @@ export interface EmbedSelection {
   readonly screenPoint?: EmbedPoint;
 }
 
+interface EmbedAnnotationLocations {
+  readonly nodeIds: readonly string[];
+  readonly reveal?: { readonly nodeId: string; readonly sequence: number };
+  readonly onChange: (points: ReadonlyMap<string, EmbedPoint | null>) => void;
+}
+
 export type EmbedNavigationEvent =
   | { readonly kind: 'space'; readonly held: boolean }
   | {
@@ -75,6 +81,7 @@ export interface EmbedObjectProps {
   readonly panMode?: boolean;
   readonly onReadingScroll?: (point: EmbedPoint) => void;
   readonly onSelection?: (selection: EmbedSelection) => void;
+  readonly annotationLocations?: EmbedAnnotationLocations;
   readonly onToolShortcut?: (key: string) => void;
   readonly onEscape?: () => void;
   readonly onPointerPosition?: (point: EmbedPoint | null) => void;

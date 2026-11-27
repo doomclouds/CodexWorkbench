@@ -8,10 +8,12 @@ interface FeedbackPagesQuery<T extends { readonly id: string }, Page extends Fee
 interface CursorRequest<T extends { readonly id: string }, Page extends FeedbackPage<T>> {
   readonly query: FeedbackPagesQuery<T, Page>;
   readonly cursor: string;
+  readonly version: string;
 }
 
 interface FeedbackPagesResult<T extends { readonly id: string }, Page extends FeedbackPage<T>> {
   readonly query: FeedbackPagesQuery<T, Page>;
+  readonly version: string;
   readonly cursor?: string;
   readonly page?: Page;
   readonly items: readonly T[];
@@ -27,12 +29,15 @@ function uniqueItems<T extends { readonly id: string }>(
 
 export function useFeedbackPages<T extends { readonly id: string }, Page extends FeedbackPage<T>>(
   query: FeedbackPagesQuery<T, Page> | undefined,
+  version: string,
 ) {
   const [request, setRequest] = useState<CursorRequest<T, Page>>();
   const [result, setResult] = useState<FeedbackPagesResult<T, Page>>();
-  const cursor = request?.query === query ? request?.cursor : undefined;
+  const cursor =
+    request?.query === query && request?.version === version ? request.cursor : undefined;
   const active = result?.query === query ? result : undefined;
-  const pending = Boolean(query) && (!active || active.cursor !== cursor);
+  const pending =
+    Boolean(query) && (!active || active.version !== version || active.cursor !== cursor);
 
   useEffect(() => {
     if (!query) {
@@ -47,6 +52,7 @@ export function useFeedbackPages<T extends { readonly id: string }, Page extends
         signal.throwIfAborted();
         setResult((previous) => ({
           query,
+          version,
           cursor,
           page,
           items:
@@ -60,6 +66,7 @@ export function useFeedbackPages<T extends { readonly id: string }, Page extends
           const message = error instanceof Error ? error.message : '备注服务暂不可用。';
           setResult((previous) => ({
             query,
+            version,
             cursor,
             page: previous?.query === query ? previous.page : undefined,
             items: previous?.query === query ? previous.items : [],
@@ -69,11 +76,11 @@ export function useFeedbackPages<T extends { readonly id: string }, Page extends
       });
 
     return () => controller.abort();
-  }, [query, cursor]);
+  }, [query, cursor, version]);
 
   function loadMore() {
     if (query && active?.page?.nextCursor && !pending) {
-      setRequest({ query, cursor: active.page.nextCursor });
+      setRequest({ query, cursor: active.page.nextCursor, version });
     }
   }
 

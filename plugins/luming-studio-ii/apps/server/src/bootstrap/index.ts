@@ -3,6 +3,7 @@ import {
   boardSuggestionSubmitPath,
   createWhiteboardHttpServer,
   createWhiteboardRequestHandler,
+  toPayloadResult,
   type GuestHttpOptions,
 } from '../entrypoints/http/index.js';
 import {
@@ -15,13 +16,14 @@ import { createFeedbackRepository } from '../infrastructure/adapters/feedback/in
 import {
   createBoardSuggestionRepository,
   createWhiteboardRepository,
+  decodeImportedPayload,
 } from '../infrastructure/adapters/index.js';
 import { createRoomsRepository } from '../infrastructure/adapters/rooms/index.js';
 import { createSharingRepository } from '../infrastructure/adapters/sharing/index.js';
 import {
   openSqliteDatabase,
   renderSvgPng,
-  renderSvgUpload,
+  validateSvgUpload,
 } from '../infrastructure/platform/index.js';
 import { createArchiveImportApplication } from '../modules/archives/application/index.js';
 import { createCatalogApplication } from '../modules/catalog/application/index.js';
@@ -124,6 +126,7 @@ function stopListening(server: HttpServer): Promise<void> {
 
 export function createWhiteboardServer(options: WhiteboardServerOptions): WhiteboardServer {
   const database = openSqliteDatabase(options.databasePath);
+  const ownerDisplayName = options.sharing?.ownerDisplayName?.trim() || undefined;
   let server: HttpServer;
   let httpOptions: HttpOptions;
   let rooms: RoomsApplication;
@@ -132,11 +135,19 @@ export function createWhiteboardServer(options: WhiteboardServerOptions): Whiteb
     const repository = createWhiteboardRepository(database);
     const application = createWhiteboardApplication(repository, Date.now, {
       renderPng: renderSvgPng,
-      exportArchive: createBoardBackup(repository, packWhiteboardBackup, (time) =>
-        new Date(time).toISOString(),
+      exportArchive: createBoardBackup(
+        repository,
+        packWhiteboardBackup,
+        (time) => new Date(time).toISOString(),
+        ownerDisplayName,
       ),
     });
-    const archives = createArchiveImportRepository(database);
+    const archives = createArchiveImportRepository(database, (object) => {
+      const payload = decodeImportedPayload(object);
+      if (payload) {
+        toPayloadResult({ kind: 'payload', payload });
+      }
+    });
     const catalog = createCatalogRepository(database);
     const catalogApplication = createCatalogApplication(catalog, {
       newBoardId: randomUUID,
@@ -147,13 +158,19 @@ export function createWhiteboardServer(options: WhiteboardServerOptions): Whiteb
       now: Date.now,
     });
     const feedbackRepository = createFeedbackRepository(database);
-    const feedback = createFeedbackApplication(feedbackRepository, { now: Date.now, digest });
+    const feedback = createFeedbackApplication(feedbackRepository, {
+      now: Date.now,
+      digest,
+      ownerDisplayName,
+      onChanged: (boardId) => rooms.publishDiscussionChange(boardId, 'feedbackChanged'),
+    });
     const suggestions = createBoardSuggestionApplication(
       createBoardSuggestionRepository(database),
       {
         now: Date.now,
         newId: randomUUID,
         digest,
+        onChanged: (boardId) => rooms.publishDiscussionChange(boardId, 'suggestionsChanged'),
         readFeedbackSource(actor, boardId, feedbackThreadId) {
           try {
             const { thread } = feedback.getThread(actor, boardId, feedbackThreadId, {
@@ -185,7 +202,10 @@ export function createWhiteboardServer(options: WhiteboardServerOptions): Whiteb
       inviteOrigin: options.sharing?.inviteOrigin ?? (() => undefined),
     });
     rooms = createRoomsApplication(
-      createRoomsRepository(database, readBoardAccess),
+      createRoomsRepository(database, (connection, boardId, actorId) => {
+        const access = readBoardAccess(connection, boardId, actorId);
+        return access?.isOwner && !access.name ? { ...access, name: ownerDisplayName } : access;
+      }),
       { nowMillis: Date.now },
       randomUUID(),
       { mintGeneration: randomUUID, resolveScope: createRoomWorkspaceScope(repository) },
@@ -196,7 +216,7 @@ export function createWhiteboardServer(options: WhiteboardServerOptions): Whiteb
       catalogApplication,
       archiveApplication,
       features: {
-        editor: createBoardEditorApplication(repository, Date.now, renderSvgUpload),
+        editor: createBoardEditorApplication(repository, Date.now, validateSvgUpload),
         history: createBoardHistoryApplication(repository, Date.now, renderSvgPng),
         feedback,
         rooms,
@@ -207,7 +227,7 @@ export function createWhiteboardServer(options: WhiteboardServerOptions): Whiteb
         application: sharing,
         activateScope: options.sharing?.activateScope,
         onlineActorIds: (boardId) => rooms.onlineActorIds(boardId),
-        ownerDisplayName: options.sharing?.ownerDisplayName,
+        ownerDisplayName,
         newBrowserToken: () => randomBytes(32).toString('base64url'),
         onActivationError: options.onError,
         onAccessChanged: (boardId) => rooms.notifyAccessChanged(boardId),

@@ -21,6 +21,7 @@ export interface WhiteboardExportContext {
   readonly title: string;
   readonly revision: bigint;
   readonly selectedIds: readonly string[];
+  readonly selectedHtmlId?: string;
 }
 
 export interface WhiteboardExportSurfaceProps {
@@ -60,6 +61,7 @@ const backup = {
   label: '完整作品备份',
   description: '包含历史记录与资源',
 } as const;
+const htmlSource = { format: 'html', label: 'HTML 源码' } as const;
 
 const rejectionMessages: Record<ExportBoardRejection, string> = {
   invalidSelection: '部分选中对象已发生变化。请重新选择导出范围。',
@@ -135,6 +137,10 @@ function OpenExport({
   const firstFormat = useRef<HTMLButtonElement>(null);
   const selectionCount = context.selectedIds.length;
   const selectionUnavailable = scope === 'selection' && selectionCount === 0;
+  const exportHtmlSource =
+    scope === 'selection' &&
+    selectionCount === 1 &&
+    context.selectedHtmlId === context.selectedIds[0];
 
   useLayoutEffect(() => () => pending.current?.abort(), []);
 
@@ -151,8 +157,9 @@ function OpenExport({
     }
 
     const { boardId, revision, selectedIds } = context;
+    const isHtmlSource = format === 'html' && exportHtmlSource;
     const selectedScope =
-      scope === 'selection' && supportsSelection(format)
+      scope === 'selection' && (supportsSelection(format) || isHtmlSource)
         ? { kind: 'selection' as const, objectIds: [...selectedIds] }
         : { kind: 'whole' as const };
     const controller = new AbortController();
@@ -242,7 +249,9 @@ function OpenExport({
       />
       <div className="whiteboard-export__formats">
         <p className="whiteboard-export__revision">选择导出格式</p>
-        {formats.map(renderFormat)}
+        {formats.map((option) =>
+          renderFormat(option.format === 'html' && exportHtmlSource ? htmlSource : option),
+        )}
       </div>
       {canBackup && renderFormat(backup)}
       {pendingFormat && <StatusText message="正在导出…" announcement="polite" busy />}

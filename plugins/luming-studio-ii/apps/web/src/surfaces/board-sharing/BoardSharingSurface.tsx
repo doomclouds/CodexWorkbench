@@ -1,4 +1,4 @@
-import { X } from 'lucide-react';
+import { Moon, Sun, X } from 'lucide-react';
 import { useRef, useState, type ReactNode } from 'react';
 
 import type { BoardSharingService, InvitationRole } from '../../data/sharing/index.js';
@@ -16,6 +16,11 @@ export interface BoardSharingSurfaceProps {
   readonly createCommandId: () => string;
   readonly copyLink: (url: string) => Promise<void>;
   readonly exportContent?: ReactNode;
+  readonly theme?: {
+    readonly resolvedTheme: 'light' | 'dark';
+    readonly onThemeChange: (theme: 'light' | 'dark') => void;
+  };
+  readonly onLanSharingChange?: (active: boolean) => void;
   readonly onRequestClose: () => void;
   readonly restoreFocus: () => void;
 }
@@ -214,6 +219,8 @@ export function BoardSharingSurface({
   createCommandId,
   copyLink,
   exportContent,
+  theme,
+  onLanSharingChange,
   onRequestClose,
   restoreFocus,
 }: BoardSharingSurfaceProps) {
@@ -221,8 +228,16 @@ export function BoardSharingSurface({
   const [confirmation, setConfirmation] = useState<SharingConfirmation>();
   const closeButton = useRef<ButtonHandle>(null);
   const open = Boolean(anchor);
-  const sharing = useBoardSharing({ boardId, open, service, createCommandId, copyLink });
+  const sharing = useBoardSharing({
+    boardId,
+    open,
+    service,
+    createCommandId,
+    copyLink,
+    onLanSharingChange,
+  });
   const showExport = sharing.snapshot?.role === 'owner' && exportContent;
+  const dark = theme?.resolvedTheme === 'dark';
   const shareBody = (
     <ShareBody
       sharing={sharing}
@@ -277,6 +292,16 @@ export function BoardSharingSurface({
           />
         ) : (
           shareBody
+        )}
+        {theme && (
+          <footer className="board-sharing__footer">
+            <Button
+              label={dark ? '切换为明亮主题' : '切换为暗色主题'}
+              icon={dark ? <Sun size={17} /> : <Moon size={17} />}
+              variant="ghost"
+              onActivate={() => theme.onThemeChange(dark ? 'light' : 'dark')}
+            />
+          </footer>
         )}
         {confirmation ? (
           <ConfirmSharing

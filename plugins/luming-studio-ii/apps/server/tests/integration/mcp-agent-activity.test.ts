@@ -5,6 +5,7 @@ import {
   BoardRoomService,
   type ChangeAgentActivityRequest,
 } from '@codexworkbench/luming-studio-ii-contracts/rooms/service';
+import { BoardEditService } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/edits';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { Buffer } from 'node:buffer';
@@ -31,7 +32,7 @@ function encodeReply(result: MessageInitShape<typeof activity.output>['result'])
   });
 }
 
-async function mcpFixture(dispatch?: Dispatch) {
+async function mcpFixture(dispatch?: Dispatch, createFile?: McpOptions['createFile']) {
   const ownerRequests: LocalRequest[] = [];
   const errors: unknown[] = [];
   let allocation = 0;
@@ -40,7 +41,7 @@ async function mcpFixture(dispatch?: Dispatch) {
     pluginVersion: '1.0.0',
     now: () => now,
     allocateId: () => '11111111-1111-4111-8111-' + String(++allocation).padStart(12, '0'),
-    createFile: () => Promise.reject(new Error('Unexpected MCP transfer spool.')),
+    createFile: createFile ?? (() => Promise.reject(new Error('Unexpected MCP transfer spool.'))),
     dispatch: (request) => {
       ownerRequests.push(request);
 
@@ -256,6 +257,117 @@ test('allows the owner App to route release for its session board only', async (
     expect(fixture.ownerRequests[0]?.route).toBe(
       '/luming.studio.v1.BoardRoomService/ChangeAgentActivity',
     );
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('forwards a panel room wait only for the board authorized by its session', async () => {
+  const fixture = await mcpFixture();
+  const method = BoardRoomService.method.waitBoardRoomEvents;
+  const after = { roomInstanceId: 'room-one', sequence: 7n };
+  const input = { boardId, viewId: 'test-panel', after };
+  try {
+    const open = await fixture.client.callTool({ name: 'studio_open', arguments: { boardId } });
+    expect(open.isError).not.toBe(true);
+
+    function wait(board: string) {
+      const body = toBinary(method.input, create(method.input, { ...input, boardId: board }));
+
+      return fixture.client.callTool({
+        name: 'studio_app_request',
+        arguments: {
+          version: 1,
+          action: 'request',
+          sessionId: '11111111-1111-4111-8111-000000000001',
+          service: BoardRoomService.typeName,
+          method: method.name,
+          body: Buffer.from(body).toString('base64'),
+        },
+      });
+    }
+
+    expect((await wait('another-board')).isError).toBe(true);
+    expect((await wait(boardId))._meta?.response).toMatchObject({ status: 403 });
+    expect(fixture.ownerRequests).toEqual([
+      expect.objectContaining({
+        method: 'POST',
+        route: '/luming.studio.v1.BoardRoomService/WaitBoardRoomEvents',
+      }),
+    ]);
+    const body = fixture.ownerRequests[0]?.body;
+    expect(body).toBeInstanceOf(Uint8Array);
+    if (body instanceof Uint8Array) {
+      expect(fromBinary(method.input, body)).toMatchObject(input);
+    }
+  } finally {
+    await fixture.close();
+  }
+});
+
+test.each([
+  BoardEditService.method.attachBoardImage,
+  BoardEditService.method.uploadBoardDocumentImage,
+])('forwards a 20 MiB $name and rejects media for another board', async (method) => {
+  const fixture = await mcpFixture(undefined, () => {
+    const chunks: Uint8Array<ArrayBuffer>[] = [];
+
+    return Promise.resolve({
+      append(bytes) {
+        chunks.push(new Uint8Array(bytes));
+        return Promise.resolve();
+      },
+      read: () => Promise.reject(new Error('Unexpected download.')),
+      body: () => Promise.resolve(new Blob(chunks)),
+      dispose() {
+        chunks.length = 0;
+        return Promise.resolve();
+      },
+    });
+  });
+  const sessionId = '11111111-1111-4111-8111-000000000001';
+  const send = (args: Record<string, unknown>) =>
+    fixture.client.callTool({
+      name: 'studio_app_request',
+      arguments: { version: 1, sessionId, ...args },
+    });
+  const route = { service: BoardEditService.typeName, method: method.name, action: 'request' };
+
+  try {
+    const opened = await fixture.client.callTool({ name: 'studio_open', arguments: { boardId } });
+    expect(opened.isError).not.toBe(true);
+    const other = { boardId: 'another-board', assetId: 'test-asset' };
+    const foreignUpload = toBinary(method.input, create(method.input, { boardId: other.boardId }));
+    expect(
+      (await send({ ...route, body: Buffer.from(foreignUpload).toString('base64') })).isError,
+    ).toBe(true);
+    expect((await send({ action: 'asset', ...other })).isError).toBe(true);
+
+    const content = new Uint8Array(20 * 1024 * 1024);
+    const body = toBinary(method.input, create(method.input, { boardId, content }));
+    const chunkSize = 128 * 1024;
+    let transferId: string | undefined;
+    for (let offset = 0; offset < body.byteLength; offset += chunkSize) {
+      const result = await send({
+        action: 'upload',
+        offset,
+        size: body.byteLength,
+        data: Buffer.from(body.subarray(offset, offset + chunkSize)).toString('base64'),
+        ...(transferId && { transferId }),
+      });
+      const transfer = result._meta?.transfer;
+      expect(transfer).toMatchObject({ transferId: expect.any(String) });
+      transferId = (transfer as { transferId: string }).transferId;
+    }
+
+    const result = await send({ ...route, uploadId: transferId });
+    expect(result.isError).not.toBe(true);
+    expect(fixture.ownerRequests).toHaveLength(1);
+    expect(fixture.ownerRequests[0]).toMatchObject({
+      route: '/luming.studio.v1.BoardEditService/' + method.name,
+      body: { size: body.byteLength },
+    });
+    expect(fixture.errors).toEqual([]);
   } finally {
     await fixture.close();
   }

@@ -7,8 +7,14 @@ import {
 } from '@codexworkbench/luming-studio-ii-contracts/feedback/service';
 import { act } from 'react';
 import { expect, test } from 'vitest';
-import { StudioApp, type StudioAppProps } from '../../src/app/index.js';
+import { StudioApp, WhiteboardApp, type StudioAppProps } from '../../src/app/index.js';
 import { createBoardFeedbackService, type FeedbackPost } from '../../src/data/feedback/index.js';
+import {
+  createBoardRoomSession,
+  type BoardRoomEvent,
+  type BoardRoomService,
+  type BoardRoomStreamObserver,
+} from '../../src/data/rooms/index.js';
 import { createWhiteboardService } from '../../src/data/whiteboard/index.js';
 import { createWhiteboardRpcMock, sampleBoardId } from '../fixtures/whiteboard-rpc.js';
 import { createControlFixture } from '../support/render-control.js';
@@ -54,12 +60,13 @@ function click(button: HTMLButtonElement) {
 
 function createFeedbackPost() {
   let reads = 0;
+  let threads: readonly (typeof noteThread)[] = [noteThread];
   const post: FeedbackPost = async (path, body) => {
     if (path.endsWith('/' + listThreads.name)) {
       expect(fromBinary(listThreads.input, body).boardId).toBe(sampleBoardId);
       return toBinary(
         listThreads.output,
-        create(listThreads.output, { threads: [noteThread], canWrite: true }),
+        create(listThreads.output, { threads: [...threads], canWrite: true }),
       );
     }
     if (path.endsWith('/' + getThread.name)) {
@@ -77,7 +84,13 @@ function createFeedbackPost() {
     throw new Error('Unexpected feedback method ' + path);
   };
 
-  return { post, countThreadReads: () => reads };
+  return {
+    post,
+    countThreadReads: () => reads,
+    setThreads: (value: typeof threads) => {
+      threads = value;
+    },
+  };
 }
 
 test('opens discussion through the assembled Studio board and transfers focus to the original pin', async () => {
@@ -131,6 +144,73 @@ test('opens discussion through the assembled Studio board and transfers focus to
     expect(notes.getAttribute('aria-expanded')).toBe('false');
     expect(document.activeElement).toBe(pin);
     expect(rpc.moves).toHaveLength(0);
+  } finally {
+    fixture.dispose();
+  }
+});
+
+test('refreshes an open discussion list after a room feedback event', async () => {
+  const fixture = createControlFixture();
+  const feedback = createFeedbackPost();
+  feedback.setThreads([]);
+  let observer: BoardRoomStreamObserver | undefined;
+  const snapshot: BoardRoomEvent = {
+    kind: 'snapshot',
+    boardId: sampleBoardId,
+    actorId: 'local',
+    instanceId: 'review-room',
+    sequence: 0n,
+    revision: 0n,
+    serverTimeUnixMs: 10,
+    canEdit: true,
+    participants: [],
+    timer: { version: 0n, phase: 'idle', durationMs: 0, remainingMs: 0 },
+    feedbackVersion: 0n,
+  };
+  const roomService: BoardRoomService = {
+    subscribe(_boardId, _viewId, current) {
+      observer = current;
+      observer.onEvent(snapshot);
+    },
+    getRoom: async () => snapshot,
+    updatePresence: async () => true,
+    leavePresence: async () => true,
+    changeTimer: async () => ({ serverTimeUnixMs: 10 }),
+    getTimerReceipt: async () => ({ serverTimeUnixMs: 10 }),
+  };
+  const room = createBoardRoomSession({
+    boardId: sampleBoardId,
+    viewId: 'local-view',
+    service: roomService,
+    clock: { now: () => 10, schedule: () => () => undefined },
+  });
+
+  try {
+    await act(async () =>
+      fixture.render(
+        <WhiteboardApp
+          boardId={sampleBoardId}
+          service={createWhiteboardService(createWhiteboardRpcMock().post)}
+          createCommandId={() => 'review-command'}
+          feedbackService={createBoardFeedbackService(feedback.post)}
+          room={room}
+        />,
+      ),
+    );
+    const notes = findButton(fixture.host, notesLabel);
+    await click(notes);
+    expect(fixture.host.textContent).toContain('还没有备注');
+    feedback.setThreads([noteThread]);
+    await act(async () =>
+      observer?.onEvent({
+        ...snapshot,
+        kind: 'feedbackChanged',
+        sequence: 1n,
+        version: 1n,
+      }),
+    );
+    expect(notes.getAttribute('aria-expanded')).toBe('true');
+    expect(fixture.host.textContent).toContain(noteThread.first.text);
   } finally {
     fixture.dispose();
   }

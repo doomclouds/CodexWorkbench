@@ -72,7 +72,7 @@ function readAccess(
     boardRevision: row.revision,
     canEdit,
     role: role ?? (isOwner ? 'owner' : fallbackRole),
-    displayName: name?.trim() || (isOwner ? '房主' : actorId),
+    displayName: name?.trim() || (isOwner ? '所有者' : '协作者'),
   };
 }
 

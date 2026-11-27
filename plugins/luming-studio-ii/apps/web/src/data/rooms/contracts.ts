@@ -45,6 +45,7 @@ export interface BoardRoomParticipant extends BoardRoomParticipantKey, BoardRoom
   readonly role: string;
   readonly sequence: bigint;
   readonly expiresAtMillis: number;
+  readonly activityAtMillis?: number;
   readonly gestureExpiresAtMillis?: number;
 }
 
@@ -96,6 +97,8 @@ type RoomEventPayload =
       readonly timer: BoardRoomTimer;
       readonly agentWorkspaces?: readonly BoardRoomAgentWorkspace[];
       readonly canReleaseAgentActivity?: boolean;
+      readonly feedbackVersion?: bigint;
+      readonly suggestionsVersion?: bigint;
     }
   | {
       readonly kind: 'participants';
@@ -104,6 +107,7 @@ type RoomEventPayload =
     }
   | { readonly kind: 'timer'; readonly timer: BoardRoomTimer }
   | { readonly kind: 'contentChanged'; readonly change: BoardRoomContentChange }
+  | { readonly kind: 'feedbackChanged' | 'suggestionsChanged'; readonly version: bigint }
   | { readonly kind: 'agentWorkspaces'; readonly workspaces: readonly BoardRoomAgentWorkspace[] }
   | { readonly kind: 'accessLost' };
 
@@ -189,6 +193,8 @@ export interface BoardRoomState {
   readonly notice?: string;
   readonly agentWorkspaces?: readonly BoardRoomAgentWorkspace[];
   readonly canReleaseAgentActivity?: boolean;
+  readonly feedbackUpdateKey?: string;
+  readonly suggestionsUpdateKey?: string;
 }
 
 export interface BoardRoomObserver {

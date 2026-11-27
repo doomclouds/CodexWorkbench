@@ -2,6 +2,7 @@ import type { BoardChanges, BoardEditAsset, BoardEditRejected } from './board-ed
 import { readGifSize } from './gif-image.js';
 import { geometryInWorld } from './geometry-edits.js';
 import type { Geometry } from './model.js';
+import { encodeSafeSvgImage, type SafeSvgImage } from './svg-image.js';
 
 export interface ImageOperation {
   readonly objectId: string;
@@ -24,7 +25,7 @@ const archiveAssetPath = '/studio-archive-assets/';
 const pathSegment = /^[A-Za-z0-9_-]{1,128}$/u;
 const unsafeName = /[/\\]|\p{Cc}|^[A-Za-z]:/u;
 const maximumDisplayName = 160;
-const maximumImageBytes = 8 * 1024 * 1024;
+export const maximumBoardImageBytes = 20 * 1024 * 1024;
 const maximumDimension = 16_384;
 const maximumPixels = 32 * 1024 * 1024;
 
@@ -428,42 +429,55 @@ export function archiveImageSource(boardId: string, assetId: string): string {
   return archiveAssetPath + boardId + '/' + assetId;
 }
 
+function inspectImageAsset(content: Uint8Array, vector?: SafeSvgImage) {
+  const bytes = vector ? encodeSafeSvgImage(vector, maximumBoardImageBytes) : content;
+  if (content.byteLength > maximumBoardImageBytes || bytes.byteLength > maximumBoardImageBytes) {
+    return { kind: 'rejected', reason: 'tooLarge' } as const;
+  }
+
+  const image = vector
+    ? { mimeType: 'image/svg+xml', size: vector.size }
+    : inspectCanvasImage(content);
+
+  if (!image?.size) {
+    return { kind: 'rejected', reason: 'invalidImage' } as const;
+  }
+
+  return { kind: 'image', mimeType: image.mimeType, size: image.size, bytes } as const;
+}
+
 export function planDocumentImageAsset(
   boardId: string,
   assetId: string,
   content: Uint8Array,
+  vector?: SafeSvgImage,
 ): ImageChanges | BoardEditRejected {
-  if (content.byteLength > maximumImageBytes) {
-    return { kind: 'rejected', reason: 'tooLarge' };
-  }
   if (!pathSegment.test(boardId) || !pathSegment.test(assetId)) {
     return { kind: 'rejected', reason: 'invalidEdit' };
   }
 
-  const image = inspectImage(content);
-  if (!image?.size) {
-    return { kind: 'rejected', reason: 'invalidImage' };
+  const image = inspectImageAsset(content, vector);
+  if (image.kind === 'rejected') {
+    return image;
   }
 
-  return { kind: 'changes', assets: [{ assetId, mimeType: image.mimeType, bytes: content }] };
+  return { kind: 'changes', assets: [{ assetId, mimeType: image.mimeType, bytes: image.bytes }] };
 }
 
 export function planImageChanges(
   boardId: string,
   operation: ImageOperation,
+  vector?: SafeSvgImage,
 ): ImageChanges | BoardEditRejected {
   const { objectId, displayName, geometry, content } = operation;
   const assetId = assetIdPrefix + objectId;
-  if (content.byteLength > maximumImageBytes) {
-    return { kind: 'rejected', reason: 'tooLarge' };
-  }
   if (!validImagePlacement(boardId, assetId, operation)) {
     return { kind: 'rejected', reason: 'invalidEdit' };
   }
 
-  const image = inspectCanvasImage(content);
-  if (!image?.size) {
-    return { kind: 'rejected', reason: 'invalidImage' };
+  const image = inspectImageAsset(content, vector);
+  if (image.kind === 'rejected') {
+    return image;
   }
 
   return {
@@ -490,6 +504,6 @@ export function planImageChanges(
         },
       },
     ],
-    assets: [{ assetId, mimeType: image.mimeType, bytes: content }],
+    assets: [{ assetId, mimeType: image.mimeType, bytes: image.bytes }],
   };
 }

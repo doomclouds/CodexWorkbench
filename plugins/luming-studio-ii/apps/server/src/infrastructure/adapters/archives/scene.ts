@@ -63,7 +63,7 @@ function sceneKind(element: ArchiveData): string {
   return type;
 }
 
-function sceneObject(
+export function prepareArchiveObject(
   objectId: string,
   element: ArchiveData,
   ids: ReadonlySet<string>,
@@ -89,11 +89,7 @@ function sceneObject(
   };
 }
 
-export function prepareArchiveObjects(
-  values: readonly unknown[],
-  resolveSource: SourceResolver,
-  origin?: ArchiveSceneOrigin,
-): readonly ArchiveSceneObject[] {
+export function indexArchiveObjects(values: readonly unknown[]) {
   const ids = new Set<string>();
   const objectsById = values.map((value) => {
     const element = record(value, 'object');
@@ -109,5 +105,5 @@ export function prepareArchiveObjects(
     return { id, element };
   });
 
-  return objectsById.map(({ id, element }) => sceneObject(id, element, ids, resolveSource, origin));
+  return { ids, objectsById };
 }

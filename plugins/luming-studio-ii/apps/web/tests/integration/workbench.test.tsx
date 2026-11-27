@@ -331,4 +331,37 @@ describe('legacy Workbench creation through the Studio app', () => {
       fixture.dispose();
     }
   });
+
+  it('restores search and the pinned scope when returning from a board', async () => {
+    const { props, opened } = appMock();
+    const requests: ListRequest[] = [];
+    const catalog: BoardCatalogService = {
+      ...props.catalog,
+      listBoards(request) {
+        requests.push(request);
+        return Promise.resolve({ boards: [{ ...existingBoard, pinned: true }] });
+      },
+    };
+    const fixture = createControlFixture();
+
+    try {
+      await act(async () => fixture.render(<StudioApp {...props} catalog={catalog} />));
+      await click(fixture.host, '筛选作品');
+      await click(fixture.host, '已固定');
+      await click(fixture.host, '搜索作品');
+      await enterSearch(fixture.host, '产品发布');
+      await click(fixture.host, '打开白板：产品发布工作台');
+      expect(opened).toEqual([existingBoard.boardId]);
+
+      await click(fixture.host, '返回 Luming Studio');
+      expect(fixture.host.querySelector('h1')?.textContent).toBe('已固定');
+      expect(fixture.host.querySelector('input[aria-label="搜索作品名称"]')).toHaveProperty(
+        'value',
+        '产品发布',
+      );
+      expect(requests.at(-1)).toMatchObject({ query: '产品发布', pinnedOnly: true });
+    } finally {
+      fixture.dispose();
+    }
+  });
 });

@@ -127,10 +127,19 @@ function timerPanel() {
   return fixture.host.querySelector<HTMLElement>('[role="dialog"][aria-label="共享计时器"]');
 }
 
-async function pressKey(key: string, type = 'keydown') {
+function deferredReceipt() {
+  let resolve!: (receipt: BoardRoomTimerReceipt) => void;
+  const promise = new Promise<BoardRoomTimerReceipt>((complete) => {
+    resolve = complete;
+  });
+
+  return { promise, resolve };
+}
+
+async function pressKey(key: string, type = 'keydown', repeat = false) {
   await act(async () => {
     fixture.host.ownerDocument.activeElement?.dispatchEvent(
-      new KeyboardEvent(type, { key, bubbles: true, cancelable: true }),
+      new KeyboardEvent(type, { key, repeat, bubbles: true, cancelable: true }),
     );
   });
 }
@@ -175,6 +184,9 @@ test('cancels a timer draft with Escape, moves between fields and saves on arrow
   expect(timerPanel()).not.toBeNull();
   expect(durationField('计时分钟').value).toBe('05');
   expect(room.changeTimer).not.toHaveBeenCalled();
+  await pressKey('Escape', 'keydown', true);
+  expect(timerPanel()).not.toBeNull();
+  expect(document.activeElement).toBe(durationField('计时秒数'));
   await pressKey('ArrowLeft');
   expect(document.activeElement).toBe(durationField('计时分钟'));
   await pressKey('.');
@@ -362,6 +374,90 @@ test('pauses, resumes and resets using the latest room versions', async () => {
   expect(durationField('计时分钟').value).toBe('05');
 });
 
+test('keeps the panel and play button steady while start and pause await room replies', async () => {
+  const room = mockTimer();
+  const running: BoardRoomTimer = {
+    ...idleTimer,
+    phase: 'running',
+    version: 1n,
+    deadlineUnixMs: serverTime + idleTimer.durationMs,
+  };
+  const paused: BoardRoomTimer = {
+    ...idleTimer,
+    phase: 'paused',
+    version: 2n,
+    remainingMs: idleTimer.durationMs - 650,
+  };
+
+  for (const [action, nextLabel, nextTimer] of [
+    ['开始', '暂停', running],
+    ['暂停', '继续', paused],
+  ] as const) {
+    const reply = deferredReceipt();
+    room.changeTimer.mockReturnValueOnce(reply.promise);
+    if (!timerPanel()) {
+      await press('共享计时器');
+    }
+    const panel = timerPanel();
+    const play = findButton(action);
+    const announcement = panel?.querySelector('[role="status"]');
+    play?.focus();
+    await press(action);
+    await press(action);
+    await press('增加一分钟');
+    act(() => room.advance(650));
+
+    expect(room.changeTimer).toHaveBeenCalledTimes(Number(nextTimer.version));
+    expect(timerPanel()).toBe(panel);
+    expect(document.activeElement).toBe(play);
+    expect(play?.disabled).toBe(false);
+    expect(play?.getAttribute('aria-disabled')).toBe('true');
+    expect(findButton(nextLabel)).toBeUndefined();
+    expect(announcement?.className).toBe('whiteboard-shared-timer__status');
+    expect(announcement?.textContent).toBe('正在核对计时命令…');
+    expect(panel?.querySelector('.studio-ui-status-text')).toBeNull();
+
+    const commandId = 'timer-op-' + nextTimer.version;
+    await act(async () => {
+      room.update({ timer: nextTimer });
+      reply.resolve({ kind: 'applied', commandId, timer: nextTimer });
+    });
+
+    expect(findButton(nextLabel)).toBe(play);
+    expect(document.activeElement).toBe(play);
+    expect(play?.hasAttribute('aria-disabled')).toBe(false);
+    expect(announcement?.textContent).toBe('');
+  }
+});
+
+test('keeps the focused duration field read-only until the saved duration is confirmed', async () => {
+  const room = mockTimer();
+  const reply = deferredReceipt();
+  room.changeTimer.mockReturnValueOnce(reply.promise);
+  await press('共享计时器');
+  pasteDuration('01:21');
+  const seconds = durationField('计时秒数');
+  await pressKey('Enter');
+  await pressKey('ArrowDown');
+  await pressKey('ArrowDown', 'keyup');
+  pasteDuration('09:59');
+
+  expect(document.activeElement).toBe(seconds);
+  expect(seconds.readOnly).toBe(true);
+  expect(seconds.value).toBe('21');
+  expect(room.changeTimer).toHaveBeenCalledOnce();
+
+  const timer = { ...idleTimer, version: 1n, durationMs: 81_000, remainingMs: 81_000 };
+  await act(async () => {
+    room.update({ timer });
+    reply.resolve({ kind: 'applied', commandId: 'timer-op-1', timer });
+  });
+
+  expect(document.activeElement).toBe(seconds);
+  expect(seconds.readOnly).toBe(false);
+  expect(seconds.value).toBe('21');
+});
+
 test('retains the original command across closing and reconnecting, then retries it after lookup', async () => {
   const room = mockTimer();
   room.changeTimer.mockRejectedValueOnce(new Error('写入连接中断'));
@@ -397,18 +493,16 @@ test('retains the original command across closing and reconnecting, then retries
 
 test('drops timer controls and aborts an inflight mutation on access loss', async () => {
   const room = mockTimer();
-  let finish!: (receipt: BoardRoomTimerReceipt) => void;
-  room.changeTimer.mockReturnValue(
-    new Promise((resolve) => {
-      finish = resolve;
-    }),
-  );
+  const reply = deferredReceipt();
+  room.changeTimer.mockReturnValue(reply.promise);
   await press('共享计时器');
   await press('开始');
   act(() => room.update({ status: 'accessLost', canEdit: false, timer: undefined }));
   expect(fixture.host.textContent).toBe('');
   expect(room.changeTimer.mock.lastCall?.[1]?.aborted).toBe(true);
   expect(room.tasks.size).toBe(0);
-  await act(async () => finish({ commandId: 'timer-op-1', kind: 'applied', timer: idleTimer }));
+  await act(async () =>
+    reply.resolve({ commandId: 'timer-op-1', kind: 'applied', timer: idleTimer }),
+  );
   expect(room.changeTimer).toHaveBeenCalledOnce();
 });

@@ -29,6 +29,7 @@ export const sharingSchema = `
     role TEXT NOT NULL CHECK (role IN ('editor', 'commenter', 'viewer')),
     invitation_version INTEGER NOT NULL CHECK (invitation_version >= 0),
     removed INTEGER NOT NULL CHECK (removed IN (0, 1)),
+    last_seen_at_millis INTEGER CHECK (last_seen_at_millis >= 0),
     PRIMARY KEY (board_id, actor_id),
     UNIQUE (board_id, name_key)
   ) STRICT;

@@ -7,7 +7,7 @@ import {
 import { BoardEditService } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/edits';
 import { expect, test } from 'vitest';
 import { pngImage } from '../fixtures/board-image-bytes.js';
-import { seedPreviewScene } from '../support/catalog-database.js';
+import { seedPreviewContents, seedPreviewScene } from '../support/catalog-database.js';
 import { grantCatalogEditor } from '../support/catalog-lifecycle-database.js';
 import { callWhiteboard, sendWhiteboardRequest } from '../support/whiteboard-client.js';
 import { useWhiteboardTestServer } from './whiteboard-test-server.js';
@@ -158,4 +158,104 @@ test('uses a representative bounded sample once a saved scene exceeds the previe
 
   const svg = readSvg(await readThumbnail(boardId, 1n));
   expect(svg.match(/<ellipse\b/g)).toHaveLength(160);
+});
+
+const htmlDiagram = `<!doctype html>
+<head><style>.grid { display: grid; grid-template-columns: 1fr 1fr; color: #ffffff; background: #31578c }
+#diagram { padding: 12px } p {background-image:url(https://example.invalid/pixel)}</style></head>
+<body><main id="diagram" class="grid" onclick="window.location='https://example.invalid'">
+<h2 style="background:linear-gradient(url(//example.invalid/hidden),#fff)">Saved HTML diagram</h2>
+<svg width="72" height="52" viewBox="0 0 72 52">
+<defs><marker id="tip" viewBox="0 0 10 10" markerWidth="6" markerHeight="6" refX="5" refY="5"><path d="M0 0L10 5L0 10Z"/></marker></defs>
+<rect x="1" y="1" width="20" height="30" rx="2" fill="#80ab55"/>
+<path d="M20 10L55 10" marker-end="url(#tip)" stroke="#263345"/>
+<use href="https://example.invalid/sprite"/>
+</svg></main><p hidden>Hidden text</p><script>live content</script>
+<iframe src="https://example.invalid/frame"></iframe></body>`;
+
+const documentBody = {
+  title: 'Project notes',
+  blocks: [
+    {
+      content: [{ text: 'Saved document paragraph' }],
+      children: [{ content: [{ text: 'Nested note' }] }],
+    },
+  ],
+};
+
+const todoBody = {
+  title: 'Checklist',
+  items: [
+    { text: 'Completed task', checked: true },
+    { text: 'Open task', checked: false },
+  ],
+};
+
+test('shows saved document, checklist, diagram, picture, and sticker contents in a small cover', async () => {
+  const { boardId } = await create();
+  seedPreviewContents(server.databasePath, boardId, [
+    { kind: 'html', label: 'HTML frame', bodyKind: 'embed', body: { html: htmlDiagram } },
+    { kind: 'document', label: 'Document frame', body: documentBody },
+    { kind: 'todo', label: 'Checklist frame', body: todoBody },
+    { kind: 'sticker', label: 'Sticker frame', body: { stickerId: 'heart' } },
+    { kind: 'note', label: 'Note frame', bodyKind: 'text', body: { text: 'Saved sticky note' } },
+    {
+      kind: 'image',
+      label: 'Photo frame',
+      body: {
+        src: 'data:image/png;base64,' + Buffer.from(pngImage).toString('base64'),
+        crop: { zoom: 2, x: 0.5, y: 0.3 },
+        naturalSize: { width: 1, height: 1 },
+      },
+    },
+  ]);
+
+  const svg = readSvg(await readThumbnail(boardId, 1n));
+  expect(svg).toContain('display:grid;grid-template-columns:1fr 1fr');
+  expect(svg).toContain('Saved HTML diagram');
+  expect(svg).toContain('fill="#80ab55"');
+  expect(svg).toContain('marker-end="url(#thumbnail-html-0-tip)"');
+  expect(svg).toContain('Saved document paragraph');
+  expect(svg).toContain('Nested note');
+  expect(svg).toContain('✓ Completed task');
+  expect(svg).toContain('□ Open task');
+  expect(svg).toContain('viewBox="0 0 24 24"');
+  expect(svg).toContain('Saved sticky note');
+  expect(svg).toContain('href="data:image/png;base64,');
+  expect(svg).toContain('preserveAspectRatio="none" href="data:image/png;base64,');
+  expect(svg).not.toMatch(
+    /hidden text|live content|onclick|example\.invalid|<script|<iframe|<use\b/iu,
+  );
+});
+
+test('keeps small saved content when an adjacent payload exceeds the read budget', async () => {
+  const { boardId } = await create();
+  seedPreviewContents(server.databasePath, boardId, [
+    {
+      kind: 'html',
+      label: 'Large source',
+      bodyKind: 'embed',
+      body: { html: '<p>Large source content</p>'.repeat(4_100) },
+    },
+    { kind: 'document', label: 'Document frame', body: documentBody },
+  ]);
+
+  const svg = readSvg(await readThumbnail(boardId, 1n));
+  expect(svg).toContain('Large source</text>');
+  expect(svg).toContain('Saved document paragraph');
+  expect(svg).not.toContain('Large source content');
+});
+
+test('does not render detailed payload contents in a large board overview', async () => {
+  const { boardId } = await create();
+  seedPreviewScene(server.databasePath, boardId, 40);
+  seedPreviewContents(server.databasePath, boardId, [
+    { kind: 'html', label: 'HTML frame', bodyKind: 'embed', body: { html: htmlDiagram } },
+    { kind: 'document', label: 'Document frame', body: documentBody },
+  ]);
+
+  const svg = readSvg(await readThumbnail(boardId, 1n));
+  expect(svg).toContain('HTML frame');
+  expect(svg).toContain('Document frame');
+  expect(svg).not.toMatch(/<foreignObject|Saved HTML diagram|Saved document paragraph/u);
 });

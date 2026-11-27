@@ -15,7 +15,7 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function sameValue(left: unknown, right: unknown, depth: number): boolean {
+export function sameValue(left: unknown, right: unknown, depth = 0): boolean {
   if (left === right) {
     return true;
   }
@@ -137,6 +137,14 @@ export function safeDocumentImage(value: unknown) {
   }
 
   return safeDocumentLink(value);
+}
+
+export function safeResolvedDocumentImage(value: unknown) {
+  if (typeof value === 'string' && /^data:image\/svg\+xml;base64,[a-z0-9+/=]+$/iu.test(value)) {
+    return value;
+  }
+
+  return safeDocumentImage(value);
 }
 
 export function isDocumentAssetPath(value: string) {

@@ -18,6 +18,7 @@ const writableKinds = new Set<CanvasObjectKind>([
   ...textKinds,
   'table',
   'html',
+  'diagram',
   'sticker',
   'image',
   'link',

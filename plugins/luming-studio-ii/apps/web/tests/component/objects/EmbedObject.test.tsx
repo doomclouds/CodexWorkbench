@@ -112,6 +112,86 @@ it('anchors a verified sandbox selection to a node or to the clicked object posi
   expect(props.request).not.toHaveBeenCalled();
 });
 
+it('tracks only requested HTML nodes after reflow and reveals them in the same sandbox', async () => {
+  const host = mount();
+  const report = vi.fn();
+  const props = canvasEmbedProps();
+  const target = { kind: 'html', nodeIds: ['value'], sourceRevision: 2n } as const;
+  const requests = [
+    { id: 'private-note-id', target, u: 0.5, v: 0.5 },
+    { id: 'other-revision', target: { ...target, sourceRevision: 1n }, u: 0.5, v: 0.5 },
+    { id: 'invented-target', target: { ...target, nodeIds: ['unknown'] }, u: 0.5, v: 0.5 },
+  ];
+  const render = (reveal?: number) =>
+    host.root.render(
+      <CanvasEmbed
+        {...props}
+        contentTracking={{
+          requests: requests.map((request, index) =>
+            index === 0 ? { ...request, reveal } : request,
+          ),
+          report,
+        }}
+      />,
+    );
+  await act(async () => render());
+  const frame = host.dom.window.document.querySelector('iframe')!;
+  vi.spyOn(frame, 'getBoundingClientRect').mockReturnValue(
+    new host.dom.window.DOMRect(0, 0, 1024, 768),
+  );
+  const runtime = await connectRuntime(host, frame);
+  const node = runtime.document.querySelector('[data-studio-id="value"]')!;
+  let y = 100;
+  const reveal = vi.fn(() => {
+    y = 140;
+  });
+  Object.defineProperty(node, 'scrollIntoView', { value: reveal });
+  vi.spyOn(node, 'getBoundingClientRect').mockImplementation(
+    () => new host.dom.window.DOMRect(120, y, 80, 20),
+  );
+
+  await runtime.draw();
+  const firstRequest = runtime.post.mock.calls
+    .map(([message]) => message)
+    .find(({ type }) => type === 'studio-html-track-annotations');
+  expect(firstRequest).toEqual({
+    ...runtime.identity,
+    type: 'studio-html-track-annotations',
+    sequence: 1,
+    nodeIds: ['value'],
+    reveal: undefined,
+  });
+  expect(report).toHaveBeenLastCalledWith(
+    new Map([['private-note-id', { point: { x: 200, y: 106 }, reveal: undefined }]]),
+  );
+
+  const spoofed = {
+    ...runtime.identity,
+    type: 'studio-html-annotation-locations',
+    sequence: 1,
+    points: [{ id: 'unknown', point: { x: 0, y: 0 } }],
+  };
+  host.send(frame, spoofed);
+  host.send(frame, { ...spoofed, points: [{ id: 'value', point: { x: 2, y: 0 } }] });
+  host.send(frame, { ...spoofed, sequence: 0, points: [] });
+  host.send(frame, { ...spoofed, points: [] }, null);
+  expect(report).toHaveBeenCalledOnce();
+
+  y = 220;
+  node.setAttribute('class', 'reordered');
+  await runtime.draw();
+  expect(report).toHaveBeenLastCalledWith(
+    new Map([['private-note-id', { point: { x: 200, y: 226 }, reveal: undefined }]]),
+  );
+
+  await act(async () => render(3));
+  await runtime.draw();
+  expect(reveal).toHaveBeenCalledOnce();
+  expect(report).toHaveBeenLastCalledWith(
+    new Map([['private-note-id', { point: { x: 200, y: 146 }, reveal: 3 }]]),
+  );
+});
+
 it.each(extensions)(
   'registers $kind as embedded Canvas content',
   ({ kind, capabilities, placement }) => {
@@ -566,6 +646,7 @@ function mount() {
 
 async function connectRuntime(host: ReturnType<typeof mount>, frame: HTMLIFrameElement) {
   const { post, identity } = await host.messages(frame);
+  const layoutFrames: FrameRequestCallback[] = [];
   let embedded: JSDOM | undefined;
   post.mockImplementation((message: unknown) => {
     if (embedded) {
@@ -583,6 +664,7 @@ async function connectRuntime(host: ReturnType<typeof mount>, frame: HTMLIFrameE
       beforeParse(window) {
         Object.defineProperty(window, 'CSS', { value: { escape: (value: string) => value } });
         Object.defineProperty(window, 'TextEncoder', { value: TextEncoder });
+        window.requestAnimationFrame = (callback) => layoutFrames.push(callback);
         window.postMessage = (message: unknown) => {
           host.send(frame, message);
         };
@@ -598,6 +680,15 @@ async function connectRuntime(host: ReturnType<typeof mount>, frame: HTMLIFrameE
   return {
     identity,
     post,
+    document: runtime.window.document,
+    async draw() {
+      await act(async () => {
+        await Promise.resolve();
+        for (const callback of layoutFrames.splice(0)) {
+          callback(0);
+        }
+      });
+    },
     load: () => runtime.window.eval('studioEmbed.load()') as Json,
     save: (state: Json) => runtime.window.eval(`studioEmbed.save(${JSON.stringify(state)})`),
     click(selector: string, clientX: number, clientY: number) {

@@ -6,11 +6,13 @@
   --timer-hover: #eaeae7;
   --timer-focus: #7962ba;
   --timer-shadow: 0 10px 36px #171a2020;
+  display: inline-flex;
   align-self: stretch;
+  align-items: center;
 }
 
 :is([data-studio-theme='dark'], [data-theme='dark']) .whiteboard-shared-timer {
-  --timer-surface: #1e1f21;
+  --timer-surface: #1d1f21;
   --timer-border: #383d42;
   --timer-text: #f0f0ef;
   --timer-muted: #a6adb5;
@@ -22,11 +24,14 @@
 .whiteboard-shared-timer__trigger {
   inline-size: auto;
   min-inline-size: 33px;
-  block-size: 33px;
+  block-size: 30px;
   gap: 5px;
   border-radius: 7px;
+  color: var(--timer-muted);
+  background: transparent;
 }
 
+.whiteboard-shared-timer__trigger:hover,
 .whiteboard-shared-timer__trigger[aria-expanded='true'] {
   color: var(--timer-text);
   background: var(--timer-hover);
@@ -46,8 +51,17 @@
   padding: 0;
   border-radius: 16px;
   box-shadow: var(--timer-shadow);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
   font-size: 13px;
   line-height: 1.5;
+}
+
+.whiteboard-shared-timer > .studio-ui-anchored-popover[data-placement='bottom'] {
+  translate: 0 2px;
+}
+
+.whiteboard-shared-timer > .studio-ui-anchored-popover[data-placement='top'] {
+  translate: 0 -2px;
 }
 
 .whiteboard-shared-timer > .studio-ui-anchored-popover[style*='--studio-ui-anchor-offset']::before {
@@ -117,6 +131,13 @@
   justify-content: center;
   min-inline-size: 140px;
   block-size: 54px;
+}
+
+.whiteboard-shared-timer__display {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-inline-size: 140px;
 }
 
 .whiteboard-shared-timer__digits {
@@ -229,6 +250,12 @@
   justify-content: center;
   padding: 0;
   border: 0;
+  cursor: pointer;
+}
+
+.whiteboard-shared-timer__adjust > button:disabled {
+  opacity: 0.48;
+  cursor: default;
 }
 
 .whiteboard-shared-timer__adjust > button,
@@ -243,6 +270,7 @@
   background: var(--timer-hover);
 }
 
+.whiteboard-shared-timer__trigger:focus-visible,
 .whiteboard-shared-timer__adjust > button:focus-visible,
 .whiteboard-shared-timer__reset:focus-visible {
   outline: 2px solid var(--timer-focus);

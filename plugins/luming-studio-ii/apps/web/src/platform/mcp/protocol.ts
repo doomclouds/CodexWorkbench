@@ -1,6 +1,7 @@
 export const protocolVersion = 1;
 export const chunkBytes = 128 * 1024;
 export const maximumBytes = 128 * 1024 * 1024;
+const maximumResponseBytes = maximumBytes + 32 * 1024;
 export const protobufContentType = 'application/protobuf';
 
 type Packet = Readonly<Record<string, unknown>>;
@@ -170,7 +171,7 @@ export function readResponse(result: Packet): BinaryResponse {
   const mimeType =
     typeof rawType === 'string' ? rawType.split(';', 1)[0]?.trim().toLowerCase() : undefined;
 
-  if (!boundedInteger(size, maximumBytes)) {
+  if (!boundedInteger(size, maximumResponseBytes)) {
     throw new Error('宿主返回的白板数据超过大小限制。');
   }
   if (typeof mimeType !== 'string' || !contentType.test(mimeType)) {

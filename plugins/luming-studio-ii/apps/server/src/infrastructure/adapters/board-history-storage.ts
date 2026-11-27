@@ -6,6 +6,7 @@ import type {
   PayloadRecord,
 } from '../../modules/whiteboard/ports/index.js';
 import type { SqliteConnection, SqliteRow } from '../platform/index.js';
+import { retainBackupGuest } from './board-backup-metadata.js';
 import { decodeSceneObject } from './board-object-storage.js';
 import { decodePayload, storedText, storedVersion } from './stored-values.js';
 
@@ -166,6 +167,7 @@ export function publishBoardVersion(
 
   const { boardId, title } = before;
   const { actorId, kind, savedAtMillis, sourceRevision, changedObjectCount } = commit;
+  retainBackupGuest(connection, boardId, actorId);
   connection
     .prepare(`
     INSERT INTO board_versions (board_id, ${versionColumns})

@@ -8,6 +8,7 @@ import { createBoardFeedbackService } from '../data/feedback/index.js';
 import {
   createBoardRoomService,
   createBoardRoomSession,
+  createBoardRoomStream,
   type BoardRoomService,
 } from '../data/rooms/index.js';
 import { createBoardSharingService } from '../data/sharing/index.js';
@@ -23,6 +24,7 @@ import {
   copyShareLink,
   createBoardDraftStorage,
   createCommandId,
+  createRoomStreamTransport,
   downloadBoardFile,
   isGuestAccessDenied,
   postArchive,
@@ -43,9 +45,8 @@ import {
   replaceStudioGuestLocation,
   resolveArchiveAssetUrl,
   subscribeGuestAccessRefresh,
-  subscribeGuestRoomEvents,
-  subscribeRoomEvents,
   subscribeStudioLocation,
+  subscribeTheme,
   writeStudioLocation,
 } from '../platform/browser/index.js';
 import { StudioApp } from './index.js';
@@ -69,8 +70,14 @@ const catalog = createBoardCatalogService(postProtobuf);
 const catalogManagement = createCatalogManagementService(postProtobuf);
 const archiveImport = createArchiveImportService(postArchive, postProtobuf);
 const sharingService = createBoardSharingService(postProtobuf);
-const roomService = createBoardRoomService(postProtobuf, subscribeRoomEvents);
-const guestRoomService = createBoardRoomService(postGuestProtobuf, subscribeGuestRoomEvents);
+const roomService = createBoardRoomService(
+  postProtobuf,
+  createBoardRoomStream(createRoomStreamTransport('owner')),
+);
+const guestRoomService = createBoardRoomService(
+  postGuestProtobuf,
+  createBoardRoomStream(createRoomStreamTransport('guest')),
+);
 
 function roomFactory(service: BoardRoomService) {
   return (boardId: string) =>
@@ -156,6 +163,6 @@ createRoot(container).render(
       write: writeStudioLocation,
       subscribe: subscribeStudioLocation,
     }}
-    preferences={{ ...readPreferences(), rememberLayout, rememberTheme }}
+    preferences={{ ...readPreferences(), rememberLayout, rememberTheme, subscribeTheme }}
   />,
 );

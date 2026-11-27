@@ -899,6 +899,145 @@ export function selectionRuntime(
     scrollTarget = { x, y };
     restoreScroll();
   };
+
+  const locationSelector = '[data-studio-id]';
+  const hiddenLocation =
+    'script,style,template,noscript,[data-studio-runtime],[hidden],[aria-hidden="true"]';
+  const clippedOverflow = new Set(['auto', 'scroll', 'hidden', 'clip']);
+  let locationSequence = 0;
+  let locationIds = new Set<string>();
+  let revealLocation: string | undefined;
+  let locationFrame = 0;
+  let lastLocations = '';
+  const observedLocations = new Set<Element>();
+  const locationObserver =
+    typeof ResizeObserver === 'function' ? new ResizeObserver(scheduleLocations) : undefined;
+  const locationMutations = new MutationObserver((records) => {
+    if (
+      records.some(({ target }) => {
+        const element = target instanceof Element ? target : target.parentElement;
+        return !element?.closest('[data-studio-runtime]');
+      })
+    ) {
+      scheduleLocations();
+    }
+  });
+
+  function locationPoint(element: Element) {
+    const rect = element.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0 || getComputedStyle(element).visibility === 'hidden') {
+      return null;
+    }
+
+    const x = Math.min(rect.right, Math.max(rect.left, window.innerWidth - 1));
+    const y = rect.top + Math.min(6, rect.height / 2);
+    const outsideFrameX = x < 0 || x > window.innerWidth;
+    const outsideFrameY = y < 0 || y > window.innerHeight;
+    if (outsideFrameX || outsideFrameY) {
+      return null;
+    }
+
+    for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+      const { overflowX, overflowY } = getComputedStyle(parent);
+      if (clippedOverflow.has(overflowX) || clippedOverflow.has(overflowY)) {
+        const { left, right, top, bottom } = parent.getBoundingClientRect();
+        const outsideX = clippedOverflow.has(overflowX) && (x < left || x > right);
+        const outsideY = clippedOverflow.has(overflowY) && (y < top || y > bottom);
+        if (outsideX || outsideY) {
+          return null;
+        }
+      }
+    }
+
+    return { x: x / window.innerWidth, y: y / window.innerHeight };
+  }
+
+  function reportLocations() {
+    locationFrame = 0;
+    const nodes = new Map<string, Element | undefined>();
+    for (const element of document.querySelectorAll(locationSelector)) {
+      const id = element.getAttribute('data-studio-id');
+      if (id && locationIds.has(id) && !element.closest(hiddenLocation)) {
+        nodes.set(id, nodes.has(id) ? undefined : element);
+      }
+    }
+    const reveal = revealLocation && nodes.get(revealLocation);
+    if (reveal) {
+      revealLocation = undefined;
+      reveal.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    }
+    const points = [...nodes].flatMap(([id, element]) => {
+      if (!element) {
+        return [];
+      }
+
+      if (!observedLocations.has(element)) {
+        observedLocations.add(element);
+        locationObserver?.observe(element);
+      }
+
+      return [{ id, point: locationPoint(element) }];
+    });
+    const signature = JSON.stringify(points);
+    if (signature !== lastLocations) {
+      lastLocations = signature;
+      window.parent.postMessage(
+        {
+          type: 'studio-html-annotation-locations',
+          channel: config.channel,
+          regionId: config.regionId,
+          sourceRevision: config.sourceRevision,
+          sequence: locationSequence,
+          points,
+        },
+        '*',
+      );
+    }
+  }
+
+  function scheduleLocations() {
+    if (!locationFrame && locationIds.size) {
+      locationFrame = requestAnimationFrame(reportLocations);
+    }
+  }
+
+  function receiveLocationRequest({ sequence, nodeIds, reveal }: Record<string, unknown>) {
+    const newSequence =
+      typeof sequence === 'number' && Number.isSafeInteger(sequence) && sequence > locationSequence;
+    const validIds =
+      Array.isArray(nodeIds) &&
+      nodeIds.length <= 256 &&
+      nodeIds.every((id) => typeof id === 'string' && id.length <= 192);
+
+    if (!newSequence || !validIds) {
+      return;
+    }
+
+    locationSequence = sequence;
+    locationIds = new Set(nodeIds);
+    revealLocation = typeof reveal === 'string' && locationIds.has(reveal) ? reveal : undefined;
+    lastLocations = '';
+    locationObserver?.disconnect();
+    observedLocations.clear();
+    locationMutations.disconnect();
+    if (locationIds.size) {
+      locationObserver?.observe(document.documentElement);
+      if (document.body) {
+        locationObserver?.observe(document.body);
+      }
+      locationMutations.observe(document.documentElement, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        characterData: true,
+      });
+      scheduleLocations();
+    }
+  }
+
+  window.addEventListener('scroll', scheduleLocations, { capture: true, passive: true });
+  window.addEventListener('resize', scheduleLocations);
+  window.addEventListener('load', scheduleLocations, true);
   window.addEventListener('message', (event: MessageEvent) => {
     const { data } = event;
     if (event.source !== window.parent || !data || data.channel !== config.channel) {
@@ -909,6 +1048,11 @@ export function selectionRuntime(
     }
 
     switch (data.type) {
+      case 'studio-html-track-annotations':
+        if (data.sourceRevision === config.sourceRevision) {
+          receiveLocationRequest(data);
+        }
+        return;
       case 'studio-html-scroll-restore':
         if (data.sourceRevision === config.sourceRevision) {
           receiveScrollRestore(data);

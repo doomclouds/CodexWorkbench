@@ -85,6 +85,7 @@ message FeedbackMessage {
   uint64 updated_at_millis = 6;
   uint64 version = 7;
   bool can_edit = 8;
+  optional string author_name = 9;
 }
 
 message FeedbackThread {

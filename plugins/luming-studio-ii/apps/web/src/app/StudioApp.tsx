@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
 import type { ArchiveImportService } from '../data/archive-import/index.js';
 import type { BoardCatalogService, CatalogManagementService } from '../data/catalog/index.js';
-import { createCatalogBoardRename } from '../data/catalog/index.js';
+import { createCatalogBoardRename, createCatalogDirectory } from '../data/catalog/index.js';
 import type { BoardSharingService } from '../data/sharing/index.js';
 import type { ExportBoard, ExportBoardFile, WhiteboardService } from '../data/whiteboard/index.js';
 import type { StudioLocation } from '../platform/browser/index.js';
@@ -34,6 +34,7 @@ interface GuestPorts extends Pick<
 
 interface StudioNavigation {
   readonly read: () => StudioLocation;
+  readonly readBoardView?: () => BoardPageProps['initialBoardView'];
   readonly write: (location: StudioLocation) => void;
   readonly subscribe: (listener: () => void) => () => void;
 }
@@ -145,6 +146,7 @@ export function StudioApp({
   const [layout, setLayout] = useState(preferences.layout);
   const [resolvedTheme, setTheme] = useState(preferences.resolvedTheme);
   const subscribeTheme = preferences.subscribeTheme;
+  const directory = useMemo(() => createCatalogDirectory(catalog), [catalog]);
   const routeGeneration = useRef(0);
   const shareEntry = useRef<string>(undefined);
   const renameBoard = useMemo(
@@ -234,6 +236,8 @@ export function StudioApp({
     setTheme(next);
   }
 
+  const theme = { resolvedTheme, onThemeChange: changeTheme };
+
   function renderPage() {
     if (location.kind === 'whiteboard') {
       return (
@@ -242,6 +246,8 @@ export function StudioApp({
           service={service}
           createCommandId={createCommandId}
           createRoomSession={createRoomSession}
+          fitOnMount
+          initialBoardView={navigation.readBoardView?.()}
           onViewContext={onViewContext}
           onBack={openWorkbench}
           exportBoard={exportBoard}
@@ -263,16 +269,16 @@ export function StudioApp({
           readHtmlSource={readHtmlSource}
           sharingService={sharingService}
           copyShareLink={copyShareLink}
+          theme={theme}
           consumeShareEntry={() => consumeShareEntry(location.boardId)}
         />
       );
     }
 
     const pagePreferences = {
+      ...theme,
       layout,
-      resolvedTheme,
       onLayoutChange: changeLayout,
-      onThemeChange: changeTheme,
     };
 
     if (location.kind === 'recycle-bin') {
@@ -290,6 +296,7 @@ export function StudioApp({
     return (
       <WorkbenchPage
         catalog={catalog}
+        directory={directory}
         renderThumbnail={renderThumbnail}
         management={catalogManagement}
         createCommandId={createCommandId}
@@ -318,6 +325,8 @@ export function StudioApp({
         createCommandId={createCommandId}
         createRoomSession={guest.createRoomSession}
         onRoomAccessLost={recheckAccess}
+        fitOnMount
+        initialBoardView={navigation.readBoardView?.()}
         onViewContext={onViewContext}
         exportBoard={guest.exportBoard}
         downloadExport={downloadExport}
@@ -333,6 +342,8 @@ export function StudioApp({
         readHtmlSource={access.canEdit ? readHtmlSource : undefined}
         sharingService={guest.sharingService}
         copyShareLink={copyShareLink}
+        theme={theme}
+        lanSharing={access.scope === 'lan'}
       />
     );
   }

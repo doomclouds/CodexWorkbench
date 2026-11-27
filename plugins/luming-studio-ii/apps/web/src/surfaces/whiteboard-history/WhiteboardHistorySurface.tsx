@@ -15,7 +15,8 @@ import './whiteboard-history.css';
 interface HistoricalPreview {
   readonly scene: WhiteboardScene;
   readonly controller: AbortController;
-  readonly trigger: HTMLElement;
+  readonly trigger: HTMLButtonElement;
+  readonly fallback: HTMLElement;
 }
 
 function BoardHistorySession({
@@ -32,6 +33,7 @@ function BoardHistorySession({
   renderPreview,
 }: WhiteboardHistorySurfaceProps) {
   const [preview, setPreview] = useState<HistoricalPreview>();
+  const returningPreview = useRef<HistoricalPreview>(undefined);
   const restoreTrigger = useRef<() => void>(undefined);
   const notifyPreview = useEffectEvent((active: boolean) => onPreviewChange?.(active));
   const restore = useVersionRestore({
@@ -59,24 +61,36 @@ function BoardHistorySession({
     return () => {
       preview.controller.abort();
       notifyPreview(false);
-      if (preview.trigger.isConnected) {
-        preview.trigger.focus({ preventScroll: true });
-      }
     };
   }, [preview]);
 
-  function handlePreview(scene: WhiteboardScene) {
+  useLayoutEffect(() => {
+    if (preview || !returningPreview.current) {
+      return;
+    }
+
+    const { trigger, fallback } = returningPreview.current;
+    returningPreview.current = undefined;
+    const target = trigger.isConnected && !trigger.disabled ? trigger : fallback;
+    if (target.isConnected) {
+      target.focus({ preventScroll: true });
+    }
+  }, [preview]);
+
+  function handlePreview(scene: WhiteboardScene, trigger: HTMLButtonElement) {
     if (anchor && preview?.scene.revision !== scene.revision) {
-      setPreview({ scene, controller: new AbortController(), trigger: anchor });
+      setPreview({ scene, trigger, fallback: anchor, controller: new AbortController() });
     }
   }
 
   function handleExit() {
     restore.handleCancelRestore();
+    returningPreview.current = preview;
     setPreview(undefined);
   }
 
   function handleRestored(receipt: BoardEditReceipt) {
+    returningPreview.current = preview;
     setPreview(undefined);
     onRestored(receipt);
   }
@@ -93,7 +107,7 @@ function BoardHistorySession({
 
   function focusAfterConfirmation() {
     if (restore.recovery) {
-      (anchor ?? preview?.trigger)?.focus({ preventScroll: true });
+      (anchor ?? preview?.fallback)?.focus({ preventScroll: true });
     } else {
       restoreTrigger.current?.();
     }

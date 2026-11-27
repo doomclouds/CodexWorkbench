@@ -35,6 +35,8 @@ import {
 import { studioObjectExtensions } from '../../ui/domain/objects/index.js';
 import { documentExtension } from '../../ui/domain/objects/document/index.js';
 import { LinkDialog } from '../../ui/domain/objects/media/index.js';
+import { textExtension } from '../../ui/domain/objects/text/index.js';
+import { isTodoOverview } from '../../ui/domain/objects/todo/index.js';
 import { canvasOwnsClipboard } from './board-clipboard.js';
 import type { BoardTool } from './BoardChrome.js';
 import { BoardDraftRecovery } from './BoardDraftRecovery.js';
@@ -59,6 +61,7 @@ import { renderSuggestionPreview } from './suggestion-preview.js';
 import { useBoardPresentation } from './use-board-presentation.js';
 import { useBoardClipboard } from './use-board-clipboard.js';
 import { useBoardTitle, type RenameBoard } from './use-board-title.js';
+import { useBoardContentTracking } from './use-board-content-tracking.js';
 import { useBoardUndo } from './use-board-undo.js';
 import { useContentEdits } from './use-content-edits.js';
 import { record } from './content-edit-value.js';
@@ -234,6 +237,22 @@ function selectedSection(objects: ReturnType<typeof selectedObjectsFor>) {
   return objects.length === 1 && first?.kind === 'section' ? first : undefined;
 }
 
+function selectedHtmlObjectId(
+  objects: ReturnType<typeof selectedObjectsFor>,
+  payloads: ReadyState['payloads'],
+) {
+  const [object] = objects;
+  if (objects.length !== 1 || !object) {
+    return undefined;
+  }
+  if (object.kind !== 'html' && object.kind !== 'diagram') {
+    return undefined;
+  }
+
+  const body = payloads.get(object.id)?.body;
+  return body?.kind === 'embed' && typeof body.value.html === 'string' ? object.id : undefined;
+}
+
 function welcomeAvailable(
   viewOnly: boolean,
   annotating: boolean,
@@ -315,21 +334,58 @@ function readFeedbackView(
 }
 
 interface BoardViewReporterProps extends BoardViewContext {
-  readonly onViewContext: (context: BoardViewContext | undefined) => void;
+  readonly enabled: boolean;
+  readonly onViewContext?: WhiteboardEditorFeatures['onViewContext'];
 }
 
 function BoardViewReporter({
   boardId,
   selectedIds,
   viewport: { x, y, zoom },
+  focusedObjectId,
+  returnViewport,
+  enabled,
   onViewContext,
 }: BoardViewReporterProps) {
-  const publish = useEffectEvent(onViewContext);
+  const publish = useEffectEvent((context: BoardViewContext | undefined) =>
+    onViewContext?.(context),
+  );
   useEffect(() => {
-    publish({ boardId, selectedIds, viewport: { x, y, zoom } });
-  }, [boardId, selectedIds, x, y, zoom]);
+    publish(
+      enabled
+        ? { boardId, selectedIds, viewport: { x, y, zoom }, focusedObjectId, returnViewport }
+        : undefined,
+    );
+  }, [boardId, selectedIds, x, y, zoom, focusedObjectId, returnViewport, enabled]);
   useEffect(() => () => publish(undefined), []);
+
   return null;
+}
+
+function initialWorkspaceView({
+  state,
+  projection,
+  features,
+}: Pick<BoardWorkspaceProps, 'state' | 'projection' | 'features'>) {
+  const initial = features.initialBoardView;
+  const restored = initial?.boardId === state.scene.boardId ? initial : undefined;
+  const savedFocus = restored?.focusedObjectId;
+  const returnViewport = restored?.returnViewport;
+  const focus =
+    savedFocus && projection.objectsById.has(savedFocus)
+      ? { id: savedFocus, returnViewport }
+      : undefined;
+  const viewport =
+    savedFocus && !focus ? (returnViewport ?? restored?.viewport) : restored?.viewport;
+  const viewportRequest: CanvasViewportRequest | undefined =
+    focus && !viewport ? { fit: 'auto', requestId: '0' } : undefined;
+
+  return {
+    selectedIds: restored?.selectedIds ?? [],
+    viewport,
+    viewportRequest,
+    focus,
+  };
 }
 
 function BoardWorkspace({
@@ -343,6 +399,7 @@ function BoardWorkspace({
   features,
 }: BoardWorkspaceProps) {
   const board = state.scene;
+  const initial = initialWorkspaceView({ state, projection, features });
   const canvasRef = useRef<CanvasHandle>(null);
   const mediaUploadRef = useRef<BoardMediaUpload | undefined>(undefined);
   const handleUploadReady = useCallback((upload: BoardMediaUpload | undefined) => {
@@ -350,19 +407,21 @@ function BoardWorkspace({
   }, []);
   const suggestionTrigger = useRef<HTMLButtonElement>(null);
   const [canvasArea, setCanvasArea] = useState<HTMLDivElement | null>(null);
-  const [selected, setSelected] = useState<readonly string[]>([]);
+  const [selected, setSelected] = useState<readonly string[]>(initial.selectedIds);
   const [tool, setTool] = useState<BoardTool>('select');
   const [showGrid, setShowGrid] = useState(true);
   const [singleKeys, setSingleKeys] = useState(true);
   const [penColor, setPenColor] = useState('#2d3142');
   const [annotationActive, setAnnotationActive] = useState(false);
   const [unresolvedFeedback, setUnresolvedFeedback] = useState(false);
+  const [lanSharing, setLanSharing] = useState(false);
   const [annotationRequest, setAnnotationRequest] =
     useState<BoardFeedbackFrame['annotationRequest']>();
   const [contentAnnotationRequest, setContentAnnotationRequest] =
     useState<BoardFeedbackFrame['contentAnnotationRequest']>();
   const [pointAnnotationRequest, setPointAnnotationRequest] =
     useState<BoardFeedbackFrame['pointAnnotationRequest']>();
+  const contentTracking = useBoardContentTracking();
   const [nativeSourceRequest, setNativeSourceRequest] =
     useState<CanvasProps['nativeSourceRequest']>();
   const [sourceIssue, setSourceIssue] = useState<string>();
@@ -374,11 +433,16 @@ function BoardWorkspace({
   const nextFormatRequest = useRef(0);
   const newTextIds = useRef(new Set<string>());
   const selectionEpoch = useRef(0);
+  const selectionBeforePlacement = useRef<readonly string[]>([]);
   const nextWelcomePlacement = useRef(0);
-  const [viewport, setViewport] = useState<CanvasViewport>({ x: 0, y: 0, zoom: 1 });
+  const [viewport, setViewport] = useState<CanvasViewport>(
+    () => initial.viewport ?? { x: 0, y: 0, zoom: 1 },
+  );
   const [viewportSize, setViewportSize] = useState<CanvasViewportSize>();
   const [detachSequence, setDetachSequence] = useState(0);
-  const [viewportRequest, setViewportRequest] = useState<CanvasViewportRequest>();
+  const [viewportRequest, setViewportRequest] = useState<CanvasViewportRequest | undefined>(
+    initial.viewportRequest,
+  );
   const panels = useBoardPanels();
   const creation = useBoardHtmlCreation();
   const selection = useMemo(
@@ -462,9 +526,10 @@ function BoardWorkspace({
     fitViewport('auto');
   }
 
-  const { scope, enter, exit } = useBoardPresentation({
+  const { scope, focusedObjectId, returnViewport, enter, exit } = useBoardPresentation({
     objects: projection.objectsById,
     viewport,
+    initialFocus: initial.focus,
     onRestore: restoreViewport,
     onFit: fitPresentation,
     focusCanvas,
@@ -490,6 +555,30 @@ function BoardWorkspace({
     panels.historyPreview,
   );
   const { documentReading, viewport: feedbackViewport } = feedbackView;
+
+  function focusContentObject(id: string) {
+    const object = projection.objectsById.get(id);
+    if (!object || scope?.focusObjectId === id) {
+      return;
+    }
+
+    if (scope) {
+      exit();
+    }
+    const { geometry, kind } = object;
+    const { width, height } = geometry;
+    if (kind === 'todo' && isTodoOverview(width * viewport.zoom, height * viewport.zoom)) {
+      const fit = () => canvasRef.current?.fitToObjects([id]);
+      if (scope) {
+        requestAnimationFrame(fit);
+      } else {
+        fit();
+      }
+      return;
+    }
+
+    focusWorldPoint({ x: geometry.x + geometry.width / 2, y: geometry.y + geometry.height / 2 });
+  }
   const previewing = panels.historyPreview || panels.suggestionPreview;
   const { viewOnly, online, canComment, canEditExpanded } = availableEditAccess(
     mayEdit,
@@ -521,6 +610,7 @@ function BoardWorkspace({
   function handleEditApplied(
     receipt: Extract<BoardEditReceipt, { kind: 'applied' }>,
     ids?: readonly string[],
+    context?: { readonly selectionCurrent: boolean; readonly editText: boolean },
   ) {
     session.acceptEdit(receipt);
     undo.recordEdit(receipt);
@@ -533,8 +623,13 @@ function BoardWorkspace({
       if (insertedText) {
         newTextIds.current.add(insertedText.id);
       }
-      setMenuAnchor(null);
-      setSelected(ids);
+      if (context?.selectionCurrent !== false) {
+        setMenuAnchor(null);
+        setSelected(ids);
+        if (context?.editText && insertedText) {
+          editObject(insertedText.id);
+        }
+      }
       creation.complete(receipt, ids);
     }
   }
@@ -543,12 +638,25 @@ function BoardWorkspace({
     boardId: board.boardId,
     revision: board.revision,
     canEdit: editingReady,
+    canWrite: mayEdit,
     service: editService,
     createCommandId,
     objectsById: projection.objectsById,
     payloadVersion: (id) =>
       state.payloads.get(id)?.version ??
       board.objects.find((object) => object.id === id)?.payloadVersion,
+    readSelectionEpoch: () => selectionEpoch.current,
+    onPlacementStarted: (id) => {
+      selectionBeforePlacement.current = selection;
+      setMenuAnchor(null);
+      setSelected([id]);
+    },
+    onPlacementFailed: (id, selectionCurrent) => {
+      const previous = selectionBeforePlacement.current;
+      setSelected((current) =>
+        selectionCurrent ? previous : current.filter((item) => item !== id),
+      );
+    },
     onApplied: handleEditApplied,
     onConflict: session.reload,
   });
@@ -572,6 +680,7 @@ function BoardWorkspace({
     onChange: (direction: 'undo' | 'redo') => undo[direction](),
   };
   const selectedObjects = selectedObjectsFor(projection, selection);
+  const selectedHtmlId = selectedHtmlObjectId(selectedObjects, state.payloads);
 
   async function handleObjectIntent(intent: CanvasObjectIntent) {
     const { objectId, kind, name, value } = intent;
@@ -743,23 +852,9 @@ function BoardWorkspace({
       return;
     }
 
-    const isTextPlacement = intent.kind === 'create' && intent.object.kind === 'text';
-    if (!isTextPlacement) {
-      geometry.handleEdit(intent);
-      return;
-    }
-
     geometry
-      .submitEdit(intent)
-      ?.then((result) => {
-        if (result && 'receipt' in result && result.receipt.kind === 'applied') {
-          const [created] = result.receipt.objects;
-          if (created) {
-            editObject(created.id);
-          }
-        }
-      })
-      .catch(geometry.reportEditFailure);
+      .submitEdit(intent, intent.kind === 'create' && !intent.link)
+      ?.catch(geometry.reportEditFailure);
   }
 
   function handleRestore(receipt: BoardEditReceipt) {
@@ -863,12 +958,13 @@ function BoardWorkspace({
     setSourceIssue(undefined);
     exit();
     detachFollow();
-    setSelected([source.elementId]);
+    changeSelection([source.elementId]);
     fitViewport('selection');
     setNativeSourceRequest((current) => ({ source, sequence: (current?.sequence ?? 0) + 1 }));
   }
 
   function handleToolChange(nextTool: BoardTool) {
+    selectionEpoch.current += 1;
     setAnnotationActive(false);
     setMenuAnchor(null);
     setFormatObjectRequest(undefined);
@@ -896,7 +992,7 @@ function BoardWorkspace({
   }
 
   function handleContextMenu(anchor: CanvasPoint, ids: readonly string[]) {
-    setSelected(ids);
+    changeSelection(ids);
     setMenuAnchor(anchor);
   }
 
@@ -941,6 +1037,7 @@ function BoardWorkspace({
       canEdit={canEdit}
       onOpenViewing={(trigger) => handleOpenViewing(selection, trigger)}
       onEditObject={editObject}
+      selectedHtmlId={selectedHtmlId}
       onAction={geometry.handleSelectionAction}
       moreOpen={menuAnchor !== null}
       onOpenMore={handleSelectionMenu}
@@ -953,6 +1050,19 @@ function BoardWorkspace({
     />
   );
   const pendingEdits = moving ? move.pendingEdits : geometry.pendingEdits;
+  const pendingPlacement = geometry.pendingPlacement;
+  const canvasScene = useMemo(() => {
+    const scene = projected.scene;
+    if (!pendingPlacement || projection.objectsById.has(pendingPlacement.id)) {
+      return scene;
+    }
+
+    return { ...scene, objects: [...scene.objects, pendingPlacement] };
+  }, [projected.scene, projection.objectsById, pendingPlacement]);
+  const canvasSelection = useMemo(() => {
+    const id = pendingPlacement?.id;
+    return id && selected.includes(id) && !selection.includes(id) ? [...selection, id] : selection;
+  }, [pendingPlacement, selected, selection]);
   function renderCanvas(room?: BoardPresenceSlot) {
     return (
       <WorkspaceCanvas
@@ -962,16 +1072,18 @@ function BoardWorkspace({
           ref: canvasRef,
           viewId: board.boardId,
           label: title,
-          scene: projected.scene,
-          selection,
+          scene: viewOnly ? projected.scene : canvasScene,
+          selection: canvasSelection,
           tool,
           penStyle: { stroke: penColor },
-          fitOnMount: Boolean(onBack),
+          fitOnMount: features.fitOnMount,
+          initialViewport: initial.viewport,
           viewportRequest,
           showGrid,
           presentation: scope,
           selectionActions,
           canEdit,
+          pendingResizeObjectId: online && !annotationActive ? pendingPlacement?.id : undefined,
           canEditExpandedObject: canEditExpanded,
           pendingEdits,
           objectExtensions: editService ? studioObjectExtensions : moveExtensions,
@@ -979,6 +1091,7 @@ function BoardWorkspace({
           onSelectionChange: changeSelection,
           onToolChange: handleToolChange,
           onContextMenu: handleContextMenu,
+          blankDoubleClickPlacement: textExtension.placement,
           editObjectRequest: objectEdit,
           formatObjectRequest,
           onEditIntent: handleEdit,
@@ -990,6 +1103,7 @@ function BoardWorkspace({
           uploadDocumentImage: features.uploadDocumentImage,
           annotationActive,
           onAnnotateContent: renderFeedback && canComment ? attachContentAnnotation : undefined,
+          contentTracking: contentTracking.tracking,
           nativeSourceRequest,
           onOpenNativeSource: openNativeSource,
           nativeSourceLabel,
@@ -1026,7 +1140,7 @@ function BoardWorkspace({
           state={state}
           session={session}
           unsafePayloadVersion={projected.unsafePayloadVersion}
-          renameError={boardTitle.error}
+          renameFailure={boardTitle.failure}
         />
         {sourceIssue && (
           <OperationNotice
@@ -1086,14 +1200,15 @@ function BoardWorkspace({
 
     return (
       <>
-        {!viewOnly && features.onViewContext && (
-          <BoardViewReporter
-            boardId={board.boardId}
-            selectedIds={selection}
-            viewport={viewport}
-            onViewContext={features.onViewContext}
-          />
-        )}
+        <BoardViewReporter
+          boardId={board.boardId}
+          selectedIds={selection}
+          viewport={viewport}
+          focusedObjectId={focusedObjectId}
+          returnViewport={returnViewport}
+          enabled={!previewing}
+          onViewContext={features.onViewContext}
+        />
         <WorkspaceHeader
           title={title}
           watching={watching}
@@ -1104,6 +1219,7 @@ function BoardWorkspace({
           suggestionsOpen={Boolean(panels.suggestionAnchor)}
           suggestionTrigger={suggestionTrigger}
           shareOpen={Boolean(exportAnchor)}
+          lanSharing={features.lanSharing ?? lanSharing}
           consumeShareEntry={features.consumeShareEntry}
           annotationActive={annotationActive}
           unresolvedFeedback={unresolvedFeedback}
@@ -1114,7 +1230,7 @@ function BoardWorkspace({
           notice={content.notice}
           participants={room?.participants}
           onBack={onBack}
-          onRename={boardTitle.rename}
+          titleEditor={boardTitle.editor}
           {...boardPanelActions(features, panels)}
           onToggleAnnotation={annotation.onToggleAnnotation}
           readNotices={renderEditNotices()}
@@ -1131,6 +1247,7 @@ function BoardWorkspace({
           />
           <div
             className="whiteboard-editor__live-canvas"
+            data-canvas-toolbar-scope=""
             inert={previewing}
             {...clipboard.handlers}
             onDragOver={handleDragOver}
@@ -1186,7 +1303,7 @@ function BoardWorkspace({
                 onUploadReady={handleUploadReady}
               />
             </div>
-            {welcomeAvailable(viewOnly, annotationActive, tool, projected.scene.objects.length) && (
+            {welcomeAvailable(viewOnly, annotationActive, tool, canvasScene.objects.length) && (
               <BoardWelcome
                 canEdit={board.canEdit}
                 disabled={!canInsert}
@@ -1198,6 +1315,7 @@ function BoardWorkspace({
           <WorkspacePanels
             features={features}
             feedback={{
+              updateKey: room?.feedbackUpdateKey,
               boardId: board.boardId,
               canEdit: canComment,
               viewing: feedbackView.hidingFeedback,
@@ -1208,6 +1326,9 @@ function BoardWorkspace({
               onPanelOpenChange: panels.setFeedbackOpen,
               anchor: panels.feedbackAnchor,
               focusWorldPoint,
+              focusContentObject,
+              contentLocations: contentTracking.locations,
+              onContentLocationRequests: contentTracking.requestLocations,
               annotationActive,
               onAnnotationActiveChange: changeAnnotation,
               onUnresolvedChange: setUnresolvedFeedback,
@@ -1231,6 +1352,7 @@ function BoardWorkspace({
               renderPreview: renderBoardHistoryCanvas,
             }}
             suggestions={{
+              updateKey: room?.suggestionsUpdateKey,
               boardId: board.boardId,
               revision: board.revision,
               selection,
@@ -1281,9 +1403,11 @@ function BoardWorkspace({
             title,
             revision: board.revision,
             selectedIds: selection,
+            selectedHtmlId,
           }}
           render={renderExport}
           onClose={panels.closeExport}
+          onLanSharingChange={setLanSharing}
         />
       </>
     );
@@ -1306,19 +1430,28 @@ interface BoardReadNoticesProps {
   readonly state: ReadyState;
   readonly session: WhiteboardSession;
   readonly unsafePayloadVersion: boolean;
-  readonly renameError?: string;
+  readonly renameFailure?: ReturnType<typeof useBoardTitle>['failure'];
 }
 
 function BoardReadNotices({
   state,
   session,
   unsafePayloadVersion,
-  renameError,
+  renameFailure,
 }: BoardReadNoticesProps) {
   return (
     <>
-      {renameError && (
-        <OperationNotice id="whiteboard-rename-failed" level="error" message={renameError} />
+      {renameFailure && (
+        <OperationNotice
+          id="whiteboard-rename-failed"
+          level="error"
+          message={renameFailure.message}
+          actions={
+            renameFailure.retry && [
+              { id: 'retry-rename', label: '重试改名', onActivate: renameFailure.retry },
+            ]
+          }
+        />
       )}
       {state.sceneError && (
         <OperationNotice

@@ -205,3 +205,27 @@ test('shows the original labels and only lets the owner request a full archive',
   expect(readElement('[role="status"]').textContent).toContain('文件大小上限');
   expect(surface.download).not.toHaveBeenCalled();
 });
+
+test('downloads original HTML for the saved selection of one embedded region', async () => {
+  const source: ExportBoardFile = { ...file, filename: '图解.html', mimeType: 'text/html' };
+  const exportBoard = vi.fn<ExportBoard>().mockResolvedValue({ kind: 'file', file: source });
+  const surface = mount(exportBoard);
+  surface.render({
+    context: { ...context, selectedIds: ['diagram'], selectedHtmlId: 'diagram' },
+  });
+  expect(formatButton('html').getAttribute('aria-label')).toBe('整板网页（HTML）');
+  act(chooseSelection);
+  expect(formatButton('html').getAttribute('aria-label')).toBe('HTML 源码');
+  await act(async () => formatButton('html').click());
+
+  expect(exportBoard).toHaveBeenCalledExactlyOnceWith(
+    {
+      boardId: context.boardId,
+      expectedRevision: context.revision,
+      scope: { kind: 'selection', objectIds: ['diagram'] },
+      format: 'html',
+    },
+    expect.any(AbortSignal),
+  );
+  expect(surface.download).toHaveBeenCalledExactlyOnceWith(source);
+});

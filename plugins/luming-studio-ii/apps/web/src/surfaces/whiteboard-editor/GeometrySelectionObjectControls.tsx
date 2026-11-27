@@ -44,6 +44,7 @@ interface SelectionObjectControlsProps {
   readonly theme?: 'light' | 'dark';
   readonly textStyleById?: ReadonlyMap<string, SelectionTextStyle>;
   readonly onEditObject?: (id: string) => void;
+  readonly selectedHtmlId?: string;
   readonly onFormatObject?: (id: string, format: CanvasInlineFormat) => void;
   readonly onAction: (action: GeometrySelectionAction, ids: readonly string[]) => void;
 }
@@ -576,6 +577,7 @@ function ObjectControls({
   canEdit,
   disabled,
   onEditObject,
+  selectedHtmlId,
   onAction,
 }: Omit<SelectionObjectControlsProps, 'selection'> & { readonly selected?: CanvasObject }) {
   if (!selected) {
@@ -591,7 +593,7 @@ function ObjectControls({
         <span className="whiteboard-editor__selection-label" title={title}>
           {title}
         </span>
-        {kind === 'html' && canEdit && onEditObject && (
+        {id === selectedHtmlId && canEdit && onEditObject && (
           <button
             type="button"
             className="whiteboard-editor__selection-icon"
@@ -635,6 +637,7 @@ export function GeometrySelectionObjectControls({
   textStyleById,
   onAction,
   onEditObject,
+  selectedHtmlId,
   onFormatObject,
 }: SelectionObjectControlsProps) {
   const selected = selection.length === 1 ? selection[0] : undefined;
@@ -645,6 +648,7 @@ export function GeometrySelectionObjectControls({
       disabled={disabled}
       onAction={onAction}
       onEditObject={onEditObject}
+      selectedHtmlId={selectedHtmlId}
     />
   );
 

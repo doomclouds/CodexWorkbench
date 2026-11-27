@@ -7,6 +7,7 @@ import { BoardExportFormat } from '@codexworkbench/luming-studio-ii-contracts/wh
 import assert from 'node:assert/strict';
 import { Buffer } from 'node:buffer';
 import { expect, test } from 'vitest';
+import { svgImage } from '../fixtures/board-image-bytes.js';
 import { actorHeader, callWhiteboard } from '../support/whiteboard-client.js';
 import { editorId, mainBoardId, outsiderId, viewerId } from '../support/whiteboard-database.js';
 import { useWhiteboardTestServer } from './whiteboard-test-server.js';
@@ -75,7 +76,7 @@ test('retains the original two-frame GIF across storage, restart and SVG export'
   assert.deepEqual(new Uint8Array(Buffer.from(animation, 'base64')), loopingGif);
 });
 
-test('normalizes safe SVG to a PNG and returns the original idempotent receipt', async () => {
+test('persists safe SVG as a vector and returns the original idempotent receipt', async () => {
   const content = new TextEncoder().encode(allowedSvg);
   const saved = await upload(content, 'gradient.svg');
   assert.equal(saved.receipt?.outcome.case, 'applied');
@@ -85,13 +86,33 @@ test('normalizes safe SVG to a PNG and returns the original idempotent receipt',
     value: { reason: BoardEditRejectionReason.COMMAND_ID_REUSE },
   });
 
+  await server.restart();
   const asset = await download();
   assert.equal(asset.status, 200);
-  assert.equal(asset.headers.get('content-type'), 'image/png');
-  const raster = new DataView(await asset.arrayBuffer());
-  assert.equal(raster.getUint32(0), 0x89504e47);
-  assert.equal(raster.getUint32(16), 32);
-  assert.equal(raster.getUint32(20), 18);
+  assert.equal(asset.headers.get('content-type'), 'image/svg+xml');
+  assert.equal(asset.headers.get('content-security-policy'), "default-src 'none'; sandbox");
+  const markup = await asset.text();
+  assert.match(markup, /width="32" height="18" viewBox="0 0 32 18"/u);
+  assert.match(markup, /<linearGradient id="fade">/u);
+  assert.match(markup, /<rect width="32" height="18" fill="url\(#fade\)"\/>/u);
+  assert.equal((await download(outsiderId)).status, 404);
+});
+
+test('accepts a 20 MiB image over HTTP and rejects a larger image', async () => {
+  const size = 20 * 1024 * 1024;
+  const content = svgImage(size);
+  const oversized = new Uint8Array(size + 1);
+  oversized.set(content);
+  oversized[size] = 32;
+
+  expect((await upload(oversized, 'too-large.svg')).receipt?.outcome).toMatchObject({
+    case: 'rejected',
+    value: { reason: BoardEditRejectionReason.TOO_LARGE },
+  });
+  assert.equal((await upload(content, 'at-limit.svg')).receipt?.outcome.case, 'applied');
+  const asset = await download();
+  assert.equal(asset.headers.get('content-length'), String(size));
+  assert.deepEqual(new Uint8Array(await asset.arrayBuffer()), content);
 });
 
 test('rejects script, active DOM and external references before publishing SVG assets', async () => {

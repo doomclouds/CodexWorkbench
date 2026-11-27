@@ -21,6 +21,7 @@ export interface ActionMenuProps {
   anchor: ActionMenuAnchor | null;
   label: string;
   items: readonly ActionMenuItem[];
+  announceShortcuts?: boolean;
   returnFocus?: () => void;
   onAction: (id: string) => void;
   onRequestClose: (reason: ActionMenuCloseReason) => void;
@@ -67,6 +68,7 @@ export function ActionMenu({
   anchor,
   label,
   items,
+  announceShortcuts = false,
   returnFocus,
   onAction,
   onRequestClose,
@@ -179,7 +181,11 @@ export function ActionMenu({
             type="button"
             role="menuitem"
             tabIndex={-1}
-            aria-label={item.shortcut ? item.label : undefined}
+            aria-label={
+              item.shortcut
+                ? item.label + (announceShortcuts ? ' ' + item.shortcut : '')
+                : undefined
+            }
             aria-disabled={item.disabled || undefined}
             onClick={() => handleAction(item)}
           >

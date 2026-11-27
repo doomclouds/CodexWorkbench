@@ -100,6 +100,7 @@ function recycleApp(entries: readonly TrashedBoardSummary[]) {
   const locations: Location[] = [];
   let current: Location = { kind: 'recycle-bin' };
   let loseReply = false;
+  let loseRead = false;
   let count = 0;
 
   function purgeItem({
@@ -122,6 +123,11 @@ function recycleApp(entries: readonly TrashedBoardSummary[]) {
   const management: CatalogManagementService = {
     async listTrashedBoards(request) {
       listRequests.push(request);
+      if (loseRead) {
+        loseRead = false;
+        throw new Error('回收站读取中断。');
+      }
+
       const start = Number(request.cursor ?? 0);
       const matches = [...trash.values()].filter(({ board }) =>
         board.title.includes(request.query),
@@ -216,6 +222,10 @@ function recycleApp(entries: readonly TrashedBoardSummary[]) {
     loseReply = true;
   }
 
+  function interruptRead() {
+    loseRead = true;
+  }
+
   return {
     ...fixture,
     mount,
@@ -227,6 +237,7 @@ function recycleApp(entries: readonly TrashedBoardSummary[]) {
     locations,
     receiptRequests,
     interruptReply,
+    interruptRead,
   };
 }
 
@@ -324,6 +335,28 @@ describe('recycle bin through the Studio app', () => {
         { boardId: 'retry', expectedEntryVersion: 2n },
       ]);
       expect(app.host.textContent).toContain('回收站为空');
+    } finally {
+      app.dispose();
+    }
+  });
+
+  it('shows a retry after a refresh fails while other rows remain', async () => {
+    const app = recycleApp([trashBoard('restore', '待恢复作品'), trashBoard('keep', '保留作品')]);
+    try {
+      await app.mount();
+      app.interruptRead();
+      await click(app.host, '恢复作品：待恢复作品');
+      expect(app.host.querySelector('.studio-recycle-pagination [role="alert"]')?.textContent).toBe(
+        '回收站读取中断。',
+      );
+      expect(button(app.host, '恢复作品：保留作品')).toBeDefined();
+      expect(app.trash.has('restore')).toBe(false);
+
+      await click(app.host, '重试');
+      expect(app.listRequests).toHaveLength(3);
+      expect(app.listRequests.at(-1)).toEqual(app.listRequests.at(-2));
+      expect(app.host.textContent).not.toContain('回收站读取中断。');
+      expect(button(app.host, '恢复作品：保留作品')).toBeDefined();
     } finally {
       app.dispose();
     }

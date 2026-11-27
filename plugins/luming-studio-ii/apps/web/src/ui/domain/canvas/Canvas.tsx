@@ -188,6 +188,7 @@ function CanvasSession(props: CanvasProps) {
     pending,
     registry,
     canEdit,
+    props.pendingResizeObjectId,
   );
   const activeEmbedId =
     selecting && !input.pointerActive && props.selection.length === 1
@@ -411,6 +412,7 @@ function CanvasSession(props: CanvasProps) {
           nativeSourceRequest={props.nativeSourceRequest}
           annotationActive={props.annotationActive}
           onAnnotateContent={props.onAnnotateContent}
+          contentTracking={props.contentTracking}
           isLocked={(id) => isObjectLocked(index, id)}
           canWriteObject={props.canWriteObject}
           onObjectIntent={props.onObjectIntent}

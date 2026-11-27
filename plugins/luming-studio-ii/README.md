@@ -57,6 +57,8 @@ pnpm --filter @codexworkbench/luming-studio-ii build:runtime
 - Web 采用 React、TypeScript 和 Vite。页面协调跨 Surface 的用户动作，Surface 管理局部流程，数据层持有服务确认的投影。画布运行时处理手势、视口和绘制预览。
 - 后端先用 Node.js 和 TypeScript。HTTP 与 MCP 入口调用同一应用用例。领域维护业务规则，消费方定义出站端口，由基础设施实现，启动层负责装配。跨上下文同步协作走公开应用服务，持久化提交后分发集成事件。
 - 前后端业务协议采用 Protobuf，模式放在 `packages/contracts/proto/luming/studio/v1/`。协议版本独立于插件版本。后续 Rust 服务端沿用这一协议和同一套行为验收，Codex 宿主接入继续使用 MCP JSON-RPC。
+- 浏览器和局域网访客使用二进制 gRPC-Web 订阅 `BoardRoomService.StreamBoardRoomEvents`，现有 SSE 入口继续可用。创建、保存和查回执仍是单次调用。房间事件按权限范围分配游标，访客接收已授权的协作更新，房主另可接收私人建议的更新通知。
+- Codex 面板通过应用专用工具调用 `WaitBoardRoomEvents`。有事件时立即返回，空闲请求最多保留 20 秒；隐藏面板时取消等待，恢复时携带游标续读。事件超出保留范围时读取房间快照。宿主支持恢复视图上下文时，重新打开面板可恢复白板、选区和相机。
 
 前端的 `ui/base` 提供按钮、菜单等交互原语，组件样式随组件共置。`ui/domain` 提供多个 Surface 共用的画布和内容组件。画布将视口、手势、选区、场景、对象呈现、适配器和覆盖层分开，局部预览留在当前画布会话。`platform` 适配浏览器、Codex 及传输。
 
@@ -145,7 +147,9 @@ pnpm --filter @codexworkbench/luming-studio-ii-server build
 
 ### 一期前端
 
-白板编辑 Surface 使用真实 Canvas、对象扩展和基础控件。开板先读场景，正文按可见对象和正文版本分批请求。拖动在 Canvas 中立即预览，松手后提交一条移动命令。成功回执更新已确认位置。出现冲突时重新读取场景。结果未知时可以查询回执或用原命令重试。对象正文在这一阶段用于查看。
+白板编辑 Surface 使用 Canvas、对象扩展和基础控件。开板先读场景，可见对象再按正文版本分批读取。拖动在 Canvas 中立即预览，松手后提交移动命令。创建对象后可以继续选择、取消选择或调整新对象的尺寸。服务端回执确认持久化版本，结果未知时可以查询原命令。
+
+两人同时编辑一篇文档时，冲突弹窗会显示最新正文与本地草稿。「保存此草稿」将本地对块、顺序和标题的修改应用到最新版本。若目标段落已删除，或比较期间又有新版本，编辑器保留草稿供继续核对。
 
 Web 子项目的架构 Lint 约束层间依赖和公开入口。Protobuf 编解码由数据层负责，浏览器网络和命令 ID 由平台层提供。集成测试通过 AppMock 挂载真实应用，在传输边界注入二进制请求和响应。
 
@@ -167,7 +171,9 @@ Web 根路径进入工作台。搜索、排序和分页从 `BoardCatalogService`
 
 ### 导入作品
 
-工作台的「＋」菜单接收初代 Luming Studio 当前导出的 `.studio.zip`，归档清单版本为 `4`。服务端在暂存区验证清单、白板内容和素材，随后在同一个 SQLite 事务中发布到工作台并保存导入回执。归档原件分块保留，导入后打开白板的最新内容。
+工作台的「＋」菜单接收版本为 `4` 的 `.studio.zip`。从初代迁入的白板保留最终板面及其引用的素材。Studio II 导出的「完整作品备份」同时包含可恢复的历史、批注、冻结来源和历史引用的素材。导入后生成独立白板，导入者成为所有者，需要共享时重新邀请成员。
+
+服务端先验证归档，在同一个 SQLite 事务中写入白板、素材索引、恢复记录和命令回执。用同一命令 ID 重试可以取回原结果。单项素材上限为 20 MiB，归档文件上限为 128 MiB。
 
 `POST /luming.studio.v1.BoardArchiveService/ImportBoardArchive` 接收 `application/zip` 和 `X-Studio-Command-Id`，返回 Protobuf 回执。`GetArchiveImportReceipt` 查询当前操作者的回执。导入素材通过受白板成员权限保护的 `/studio-archive-assets/` 路径读取。本机预览的同源代理配置已包含这些路径。
 

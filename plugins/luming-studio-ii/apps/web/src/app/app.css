@@ -45,6 +45,10 @@ body,
   min-height: 0;
 }
 
+.studio-app-page[data-guest-invitation] {
+  overflow-y: auto;
+}
+
 .studio-whiteboard-app[data-theme='light'] {
   color-scheme: light;
 }

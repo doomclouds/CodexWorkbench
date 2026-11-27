@@ -3,13 +3,13 @@ import {
   useEffectEvent,
   useLayoutEffect,
   useRef,
-  useState,
   type KeyboardEvent,
   type PointerEvent,
   type ReactNode,
 } from 'react';
 
 import type { GeometryToolbarProps } from './GeometryToolbar.js';
+import type { BoardTitleEditor } from './use-board-title.js';
 import './board-chrome.css';
 
 export { GeometryToolbar as BoardToolbar } from './GeometryToolbar.js';
@@ -22,11 +22,12 @@ interface BoardHeaderProps {
   readonly participants?: ReactNode;
   readonly canManage?: boolean;
   readonly onBack?: () => void;
-  readonly onRename?: (title: string) => void;
+  readonly titleEditor?: BoardTitleEditor;
   readonly onOpenHistory?: (trigger: HTMLButtonElement) => void;
   readonly historyOpen?: boolean;
   readonly onOpenShare?: (trigger: HTMLButtonElement) => void;
   readonly shareOpen?: boolean;
+  readonly lanSharing?: boolean;
   readonly consumeShareEntry?: () => boolean;
   readonly onToggleFeedback?: (trigger: HTMLButtonElement) => void;
   readonly feedbackOpen?: boolean;
@@ -35,7 +36,7 @@ interface BoardHeaderProps {
   readonly unresolvedFeedback?: boolean;
 }
 
-type BoardTitleProps = Pick<BoardHeaderProps, 'title' | 'onRename'>;
+type BoardTitleProps = Pick<BoardHeaderProps, 'title' | 'titleEditor'>;
 type FeedbackToolsProps = Pick<
   BoardHeaderProps,
   | 'onToggleFeedback'
@@ -54,49 +55,37 @@ export function BoardDocumentChrome(props: FeedbackToolsProps) {
 }
 
 const unavailable = '当前白板服务暂未提供此操作';
+const lanSharingLabel = '局域网共享已开启';
 const titleLimit = 200;
 
-function BoardTitle({ title, onRename }: BoardTitleProps) {
-  const [edit, setEdit] = useState({ title, draft: title });
-  const cancelled = useRef(false);
-  if (edit.title !== title) {
-    setEdit({ title, draft: title });
-  }
-
-  function changeTitle(draft: string) {
-    setEdit({ title, draft });
-  }
+function BoardTitle({ title, titleEditor }: BoardTitleProps) {
+  const skipBlur = useRef(false);
 
   function handleTitleBlur() {
-    if (cancelled.current) {
-      cancelled.current = false;
-      return;
-    }
-    if (!onRename) {
+    if (skipBlur.current) {
+      skipBlur.current = false;
       return;
     }
 
-    const normalized = edit.draft.trim();
-    changeTitle(title);
-    if (normalized && normalized !== title) {
-      onRename(normalized);
-    }
+    titleEditor?.submit();
   }
 
   function handleTitleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
-    if (event.nativeEvent.isComposing || !onRename) {
+    if (event.nativeEvent.isComposing || !titleEditor || titleEditor.saving) {
       return;
     }
 
     if (event.key === 'Enter') {
       event.preventDefault();
+      skipBlur.current = true;
+      titleEditor.submit(true);
       event.currentTarget.blur();
     }
     if (event.key === 'Escape') {
       event.preventDefault();
       event.stopPropagation();
-      cancelled.current = true;
-      changeTitle(title);
+      skipBlur.current = true;
+      titleEditor.discard();
       event.currentTarget.blur();
     }
   }
@@ -108,9 +97,9 @@ function BoardTitle({ title, onRename }: BoardTitleProps) {
       aria-label="白板名称"
       title={title}
       maxLength={titleLimit}
-      value={onRename ? edit.draft : title}
-      readOnly={!onRename}
-      onChange={(event) => changeTitle(event.currentTarget.value)}
+      value={titleEditor?.draft ?? title}
+      readOnly={!titleEditor || titleEditor.saving}
+      onChange={(event) => titleEditor?.change(event.currentTarget.value)}
       onBlur={handleTitleBlur}
       onKeyDown={handleTitleKeyDown}
     />
@@ -169,12 +158,13 @@ export function BoardHeader({
   status,
   participants,
   onBack,
-  onRename,
-  canManage = onBack !== undefined || onRename !== undefined,
+  titleEditor,
+  canManage = onBack !== undefined || titleEditor !== undefined,
   onOpenHistory,
   historyOpen = false,
   onOpenShare,
   shareOpen = false,
+  lanSharing = false,
   consumeShareEntry,
   onToggleFeedback,
   feedbackOpen,
@@ -184,6 +174,7 @@ export function BoardHeader({
 }: BoardHeaderProps) {
   const shareButton = useRef<HTMLButtonElement>(null);
   const canOpenOnEntry = Boolean(onOpenShare && consumeShareEntry);
+  const shareHint = onOpenShare ? '分享（可导出本地副本）' : '当前白板服务暂未接通分享';
   const openShareEntry = useEffectEvent(() => {
     const anchor = shareButton.current;
     if (anchor && onOpenShare && consumeShareEntry?.()) {
@@ -211,7 +202,7 @@ export function BoardHeader({
           </button>
         )}
         {!canManage && <Share2 className="whiteboard-chrome__guest" size={22} aria-hidden="true" />}
-        <BoardTitle title={title} onRename={canManage ? onRename : undefined} />
+        <BoardTitle title={title} titleEditor={canManage ? titleEditor : undefined} />
         <div className="whiteboard-chrome__status">{status}</div>
       </div>
       <div className="whiteboard-chrome__actions">
@@ -231,7 +222,8 @@ export function BoardHeader({
           ref={shareButton}
           className="whiteboard-chrome__action whiteboard-chrome__share"
           aria-label="分享"
-          title={onOpenShare ? '分享（可导出本地副本）' : '当前白板服务暂未接通分享'}
+          aria-description={lanSharing ? lanSharingLabel : undefined}
+          title={lanSharing ? lanSharingLabel : shareHint}
           aria-expanded={onOpenShare ? shareOpen : undefined}
           aria-haspopup={onOpenShare ? 'dialog' : undefined}
           type="button"
@@ -239,7 +231,8 @@ export function BoardHeader({
           onClick={(event) => onOpenShare?.(event.currentTarget)}
         >
           <Share2 size={19} />
-          <span>分享</span>
+          <span className="whiteboard-chrome__share-label">分享</span>
+          {lanSharing && <span className="whiteboard-chrome__lan-dot" aria-hidden="true" />}
         </button>
         <FeedbackTools
           onToggleFeedback={onToggleFeedback}

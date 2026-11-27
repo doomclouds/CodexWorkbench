@@ -13,6 +13,7 @@ interface ActiveBoardGuest {
   readonly name: string;
   readonly scope: 'local' | 'lan';
   readonly version: bigint;
+  readonly lastSeenAtMillis?: number;
 }
 
 function readFlag(value: unknown): boolean {
@@ -60,7 +61,7 @@ export function readActiveBoardGuest(
   }
 
   const query = connection.prepare(`
-    SELECT m.role, m.name, s.scope, s.version
+    SELECT m.role, m.name, s.scope, s.version, m.last_seen_at_millis
     FROM board_sharing_members AS m
     JOIN sharing_browser_sessions AS b ON b.actor_id = m.actor_id
     JOIN board_sharing AS s ON s.board_id = m.board_id AND s.enabled = 1
@@ -87,7 +88,10 @@ export function readActiveBoardGuest(
     throw new Error('Invalid stored guest access.');
   }
 
-  return { role, name, scope, version };
+  const lastSeenAtMillis =
+    typeof row.last_seen_at_millis === 'bigint' ? Number(row.last_seen_at_millis) : undefined;
+
+  return { role, name, scope, version, lastSeenAtMillis };
 }
 
 export function readBoardAccess(

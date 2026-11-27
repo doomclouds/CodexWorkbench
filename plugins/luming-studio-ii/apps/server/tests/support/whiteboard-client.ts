@@ -17,6 +17,7 @@ export function sendWhiteboardRequest<Input extends DescMessage>(
   actorId: string | undefined,
   method: DescMethodUnary<Input>,
   input: MessageInitShape<Input>,
+  signal = AbortSignal.timeout(requestTimeoutMs),
 ): Promise<Response> {
   const headers = new Headers({ 'content-type': contentType });
   if (actorId) {
@@ -27,7 +28,7 @@ export function sendWhiteboardRequest<Input extends DescMessage>(
     method: 'POST',
     headers,
     body: Buffer.from(toBinary(method.input, create(method.input, input))),
-    signal: AbortSignal.timeout(requestTimeoutMs),
+    signal,
   });
 }
 
@@ -36,8 +37,9 @@ export async function callWhiteboard<Input extends DescMessage, Output extends D
   actorId: string,
   method: DescMethodUnary<Input, Output>,
   input: MessageInitShape<Input>,
+  signal?: AbortSignal,
 ) {
-  const response = await sendWhiteboardRequest(address, actorId, method, input);
+  const response = await sendWhiteboardRequest(address, actorId, method, input, signal);
   assert.equal(response.status, 200, method.name);
   assert.equal(response.headers.get('content-type'), contentType);
   const wire = new Uint8Array(await response.arrayBuffer());

@@ -104,7 +104,7 @@ function appFixture(
   const downloads: ExportBoardFile[] = [];
   let nextCommand = 0;
 
-  async function open() {
+  async function mount() {
     await act(async () =>
       fixture.render(
         <WhiteboardApp
@@ -124,14 +124,53 @@ function appFixture(
       ),
     );
 
-    const trigger = provideAnchor(button(fixture.host, '分享'));
+    return provideAnchor(button(fixture.host, '分享'));
+  }
+
+  async function open() {
+    const trigger = await mount();
     await click(trigger);
 
     return trigger;
   }
 
-  return { ...fixture, open, copied, downloads };
+  return { ...fixture, mount, open, copied, downloads };
 }
+
+test('shows the current LAN scope before opening share and after changing it', async () => {
+  let sharing: BoardSharingState = { ...owner, enabled: true, scope: 'lan' };
+  const app = appFixture(
+    fixtureService({
+      getBoardSharing: async () => sharing,
+      updateBoardSharing: async ({ boardId, commandId, operation }) => {
+        if (operation.kind !== 'setScope') {
+          throw new Error('Unexpected sharing operation');
+        }
+
+        sharing = { ...sharing, scope: operation.scope, version: sharing.version + 1n };
+        return { kind: 'applied', boardId, commandId, version: sharing.version };
+      },
+    }),
+  );
+
+  try {
+    const share = await app.mount();
+    expect(share.getAttribute('aria-description')).toBe('局域网共享已开启');
+    await click(share);
+    await click(provideAnchor(button(app.host, '一般访问权限')));
+    await click(button(app.host, '仅这台电脑'));
+    await click(button(app.host, '关闭分享'));
+    expect(share.hasAttribute('aria-description')).toBe(false);
+
+    await click(share);
+    await click(provideAnchor(button(app.host, '一般访问权限')));
+    await click(button(app.host, '局域网可访问'));
+    await click(button(app.host, '关闭分享'));
+    expect(share.getAttribute('aria-description')).toBe('局域网共享已开启');
+  } finally {
+    app.dispose();
+  }
+});
 
 test('opens local invitation copying and uses the same panel for the existing revision-pinned export', async () => {
   let sharing = owner;

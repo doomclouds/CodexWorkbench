@@ -23,6 +23,8 @@ type ThreadOperation = Extract<FeedbackOperation, { readonly expectedThreadVersi
 export interface FeedbackServices {
   readonly now: () => number;
   readonly digest: (value: string) => string;
+  readonly ownerDisplayName?: string;
+  readonly onChanged?: (boardId: string) => void;
 }
 
 interface CommandContext {
@@ -31,6 +33,7 @@ interface CommandContext {
   readonly access: FeedbackBoardAccess;
   readonly boardId: string;
   readonly now: () => number;
+  readonly authorName?: string;
 }
 
 export interface FeedbackCommand {
@@ -125,6 +128,7 @@ function makeMessage(
   return {
     messageId,
     authorActorId: context.actor.id,
+    authorName: context.authorName,
     text,
     version: 1n,
     createdAtMillis: updatedAtMillis,
@@ -306,7 +310,8 @@ export function applyFeedback(
 ): FeedbackReceipt {
   const { boardId, commandId, operation } = command;
 
-  return repository.write((writer) => {
+  let changed = false;
+  const receipt = repository.write((writer): FeedbackReceipt => {
     const access = requireWriteAccess(writer, actor, boardId);
     const signature = services.digest(commandSignature(operation));
     const previous = writer.getReceipt(boardId, actor.id, commandId);
@@ -319,12 +324,26 @@ export function applyFeedback(
     }
 
     const outcome = executeCommand(
-      { writer, actor, access, boardId, now: services.now },
+      {
+        writer,
+        actor,
+        access,
+        boardId,
+        now: services.now,
+        authorName: access.isOwner ? services.ownerDisplayName : access.name,
+      },
       operation,
     );
     const receipt = { boardId, commandId, outcome };
     writer.saveReceipt(actor.id, { signature, receipt });
+    changed = outcome.kind === 'applied';
 
     return receipt;
   });
+
+  if (changed) {
+    services.onChanged?.(boardId);
+  }
+
+  return receipt;
 }

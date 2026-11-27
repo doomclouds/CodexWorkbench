@@ -47,6 +47,7 @@ const alignments = new Map([
 ]);
 const attachmentSource =
   /(?<![\w/:.])\/studio-archive-assets\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+(?![\w./%-])/gu;
+const maxLegacyVersion = BigInt(Number.MAX_SAFE_INTEGER);
 
 function object(value: JsonValue | undefined): JsonObject {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -58,6 +59,22 @@ function array(value: JsonValue | undefined): JsonValue[] {
 
 function rewrite(value: JsonValue | undefined, source: Source) {
   return typeof value === 'string' ? value.replaceAll(attachmentSource, source) : value;
+}
+
+function portableData(value: JsonValue, source: Source): JsonValue {
+  if (typeof value === 'string') {
+    return value.replaceAll(attachmentSource, source);
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => portableData(item, source));
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, portableData(item, source)]),
+    );
+  }
+
+  return value;
 }
 
 function legacyVersion(value: JsonValue | undefined) {
@@ -106,7 +123,10 @@ function todoItem(value: JsonValue): Fields {
             elementId: source.objectId,
             blockId: source.blockId,
             itemId: source.itemId,
-            version: legacyVersion(source.version),
+            version:
+              source.version === undefined
+                ? undefined
+                : Math.max(1, legacyVersion(source.version) ?? 1),
           },
   };
 }
@@ -186,6 +206,8 @@ function contentFields(
         color: data.color,
         fontFamily: data.fontFamily,
         fontSize: data.fontSize,
+        bold: data.bold,
+        italic: data.italic,
         textAlign: typeof data.align === 'string' ? alignments.get(data.align) : undefined,
       };
   }
@@ -211,6 +233,17 @@ function connectorFields(detail: ConnectorDetail): Fields {
   };
 }
 
+function legacyAppearance({ appearance, detail }: BoardObject): Fields {
+  return {
+    kind: detail?.kind === 'shape' ? detail.outline : undefined,
+    fill: appearance?.fill,
+    stroke: appearance?.stroke,
+    strokeWidth: detail?.kind === 'ink' ? detail.width : appearance?.strokeWidth,
+    dash: appearance?.dashed,
+    hollow: detail?.kind === 'section' ? detail.transparent : appearance?.hollow,
+  };
+}
+
 export function backupElement(
   element: BoardObject,
   payload: PayloadRecord | undefined,
@@ -224,17 +257,14 @@ export function backupElement(
   }
 
   const { width, height, x, y, rotation } = geometry;
-  const styled = {
-    fill: appearance?.fill,
-    stroke: appearance?.stroke,
-    strokeWidth: detail?.kind === 'ink' ? detail.width : appearance?.strokeWidth,
-    dash: appearance?.dashed,
-    hollow: detail?.kind === 'section' ? detail.transparent : appearance?.hollow,
-  };
+  const { geometryVersion, payloadVersion } = element;
+  const version =
+    geometryVersion > (payloadVersion ?? 0n) ? geometryVersion : (payloadVersion ?? 0n);
 
   return {
     id: objectId,
     type: legacyType.get(kind) ?? kind,
+    version: Number(version < maxLegacyVersion ? version + 1n : maxLegacyVersion),
     x,
     y,
     w: width,
@@ -245,9 +275,17 @@ export function backupElement(
     locked,
     parentId,
     groupId,
-    kind: detail?.kind === 'shape' ? detail.outline : undefined,
-    ...styled,
+    ...legacyAppearance(element),
     ...contentFields(element, payload, source),
     ...(detail?.kind === 'connector' ? connectorFields(detail) : undefined),
+    studioII: {
+      kind,
+      geometryVersion: String(geometryVersion),
+      payloadVersion: payloadVersion?.toString(),
+      appearance,
+      detail,
+      bodyKind: payload?.bodyKind,
+      data: payload && portableData(payload.data, source),
+    },
   };
 }

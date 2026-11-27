@@ -133,6 +133,12 @@
   padding: 19px 0 0;
 }
 
+.board-sharing__footer {
+  margin-block-start: 16px;
+  padding-block-start: 12px;
+  border-block-start: 1px solid var(--studio-ui-border);
+}
+
 .board-sharing__section + .board-sharing__section {
   margin-top: 21px;
 }

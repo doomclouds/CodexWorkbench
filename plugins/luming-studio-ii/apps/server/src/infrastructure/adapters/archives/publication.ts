@@ -9,12 +9,12 @@ import {
 } from '../../platform/archives/index.js';
 import type { SqliteConnection } from '../../platform/index.js';
 import { readBoardAccess } from '../authorization/index.js';
-import { ArchiveObjectError, prepareArchiveObjects } from './scene.js';
+import { writeArchiveHistory, type ArchiveHistoryObject } from './history.js';
+import { prepareArchiveScene, type ValidateNativeObject } from './restore-scene.js';
+import { prepareRestoredMetadata, writeRestoredMetadata } from './restored-metadata.js';
+import { ArchiveObjectError } from './scene.js';
 
-export interface ArchivePublication {
-  readonly objects: ReturnType<typeof prepareArchiveObjects>;
-  readonly assetIds: ReadonlySet<string>;
-}
+export type ArchivePublication = ReturnType<typeof preparePublication>;
 
 const webMediaTypes = new Set([
   'image/avif',
@@ -37,8 +37,9 @@ const webMediaTypes = new Set([
 
 export function preparePublication(
   archive: StagedCurrentArchive,
-  boardId: string,
-): ArchivePublication {
+  { actorId, boardId }: ArchiveImportCommand,
+  validate: ValidateNativeObject,
+) {
   const prefix = `/assets/${archive.sourceBoardId}/`;
   const assetIds = new Set<string>();
   function resolveSource(source: string, kind: 'reference' | 'text'): string {
@@ -59,75 +60,90 @@ export function preparePublication(
     return `/studio-archive-assets/${boardId}/${assetId}`;
   }
 
-  const objects = prepareArchiveObjects(archive.objects, resolveSource, {
-    sourceBoardId: archive.sourceBoardId,
-    boardId,
-  });
+  const origin = { sourceBoardId: archive.sourceBoardId, boardId };
+  const scene = prepareArchiveScene(
+    archive.objects,
+    resolveSource,
+    origin,
+    validate,
+    archive.restoration,
+  );
+  const details = archive.restoration?.details;
+  const metadata = details ? prepareRestoredMetadata(details, actorId) : undefined;
 
-  return { objects, assetIds };
+  return { ...scene, assetIds, metadata };
 }
 
 function writeBoard(
   connection: SqliteConnection,
   command: ArchiveImportCommand,
   title: string,
+  { revision, pinned, createdAtMillis, updatedAtMillis }: ArchivePublication,
 ): void {
-  const { actorId, boardId, updatedAtMillis } = command;
+  const { actorId, boardId } = command;
   connection
-    .prepare('INSERT INTO boards (board_id, title, revision) VALUES (?, ?, 0)')
-    .run(boardId, title);
+    .prepare('INSERT INTO boards (board_id, title, revision) VALUES (?, ?, ?)')
+    .run(boardId, title, revision);
   connection
     .prepare('INSERT INTO board_members (board_id, actor_id, can_edit) VALUES (?, ?, 1)')
     .run(boardId, actorId);
   connection
     .prepare(`
       INSERT INTO catalog_entries (board_id, updated_at_millis, pinned, entry_version)
-      VALUES (?, ?, 0, 0)
+      VALUES (?, ?, ?, 0)
     `)
-    .run(boardId, updatedAtMillis);
+    .run(boardId, updatedAtMillis ?? command.updatedAtMillis, Number(pinned));
+
+  if (createdAtMillis !== undefined) {
+    connection
+      .prepare('INSERT INTO board_archive_metadata (board_id, created_at_millis) VALUES (?, ?)')
+      .run(boardId, createdAtMillis);
+  }
 }
 
 function writeScene(
   connection: SqliteConnection,
   boardId: string,
-  objects: ArchivePublication['objects'],
+  objects: readonly ArchiveHistoryObject[],
 ): void {
   const insertObject = connection.prepare(`
     INSERT INTO board_objects (
       board_id, object_id, kind, label, layer_index, x, y, width, height, rotation,
       geometry_version, locked, parent_id, group_id, appearance_json, detail_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const insertPayload = connection.prepare(`
     INSERT INTO object_payloads (board_id, object_id, payload_version, body_kind, body_json)
-    VALUES (?, ?, 0, ?, ?)
+    VALUES (?, ?, ?, ?, ?)
   `);
 
-  for (const [layerIndex, object] of objects.entries()) {
+  for (const object of objects) {
     insertObject.run(
       boardId,
       object.objectId,
       object.kind,
       object.label,
-      layerIndex,
+      object.layerIndex,
       object.x,
       object.y,
       object.width,
       object.height,
       object.rotation,
+      object.geometryVersion,
       Number(object.locked),
       object.parentId ?? null,
       object.groupId ?? null,
-      object.appearance ? JSON.stringify(object.appearance) : null,
-      object.detail ? JSON.stringify(object.detail) : null,
+      object.appearanceJson ?? null,
+      object.detailJson ?? null,
     );
 
     if (object.payload) {
       insertPayload.run(
         boardId,
         object.objectId,
-        object.payload.bodyKind,
-        JSON.stringify(object.payload.data),
+        object.payload.version,
+        object.payload.kind,
+        object.payload.json,
       );
     }
   }
@@ -177,9 +193,15 @@ export function writePublication(
   publication: ArchivePublication,
 ): void {
   const { boardId } = command;
-  writeBoard(connection, command, archive.title);
+  writeBoard(connection, command, archive.title, publication);
   writeScene(connection, boardId, publication.objects);
   writeAssets(connection, boardId, archive, publication.assetIds);
+  if (publication.history.length) {
+    writeArchiveHistory(connection, boardId, publication.history);
+  }
+  if (publication.metadata) {
+    writeRestoredMetadata(connection, boardId, publication.metadata);
+  }
   retainSource(connection, boardId, archive);
 }
 

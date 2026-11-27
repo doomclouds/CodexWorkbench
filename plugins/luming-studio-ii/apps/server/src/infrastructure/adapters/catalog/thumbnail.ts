@@ -5,13 +5,16 @@ import type {
   CatalogThumbnailRead,
 } from '../../../modules/catalog/ports/index.js';
 import type { SqliteConnection, SqliteRow } from '../../platform/index.js';
+import { sanitizeThumbnailHtml } from './thumbnail-html.js';
 
 const maximumObjects = 160;
+const maximumDetailedObjects = 32;
 const maximumDescriptorBytes = 8192;
-const maximumMediaSourceBytes = 48 * 1024;
-const maximumEmbeddedImageBytes = 24 * 1024;
+const maximumPayloadBytes = 96 * 1024;
+const maximumEmbeddedImageBytes = 48 * 1024;
 const assetIdentifier = /^[A-Za-z0-9_-]{1,128}$/u;
 const drawableMediaTypes = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
+const embeddedImage = /^data:image\/(?:png|jpeg|webp|gif);base64,([a-z\d+/]+={0,2})$/iu;
 const activeCondition = 'l.trashed_at_millis IS NULL';
 const trashCondition = 'l.trashed_at_millis IS NOT NULL AND l.owner_actor_id = m.actor_id';
 
@@ -95,7 +98,7 @@ function readRows(connection: SqliteConnection, boardId: string, total: number) 
         UNION ALL
         SELECT slot + 1 FROM slots WHERE slot + 1 < ?2
       ), ordered AS (
-      SELECT *, ROW_NUMBER() OVER (ORDER BY layer_index, object_id) - 1 AS slot
+      SELECT object_id, ROW_NUMBER() OVER (ORDER BY layer_index, object_id) - 1 AS slot
       FROM board_objects WHERE board_id = ?1
     ), sampled AS (
         SELECT ordered.* FROM ordered JOIN slots
@@ -104,13 +107,11 @@ function readRows(connection: SqliteConnection, boardId: string, total: number) 
     SELECT o.object_id, o.kind, SUBSTR(o.label, 1, 120) AS label,
       o.x, o.y, o.width, o.height, o.rotation,
       CASE WHEN length(CAST(o.appearance_json AS BLOB)) <= ?4 THEN o.appearance_json END AS appearance,
-      CASE WHEN length(CAST(o.detail_json AS BLOB)) <= ?4 THEN o.detail_json END AS detail,
-      CASE WHEN length(CAST(p.body_json AS BLOB)) <= ?5 THEN json_extract(p.body_json, '$.src') END AS image_source
-    FROM sampled AS o LEFT JOIN object_payloads AS p
-      ON p.board_id = ?1 AND p.object_id = o.object_id AND o.kind = 'image' AND p.body_kind = 'image'
-    ORDER BY o.slot
+      CASE WHEN length(CAST(o.detail_json AS BLOB)) <= ?4 THEN o.detail_json END AS detail
+    FROM sampled AS s JOIN board_objects AS o ON o.board_id = ?1 AND o.object_id = s.object_id
+    ORDER BY s.slot
   `)
-    .all(boardId, count, total, maximumDescriptorBytes, maximumMediaSourceBytes);
+    .all(boardId, count, total, maximumDescriptorBytes);
 }
 
 function readImages(connection: SqliteConnection, boardId: string) {
@@ -119,7 +120,18 @@ function readImages(connection: SqliteConnection, boardId: string) {
   let remaining = maximumEmbeddedImageBytes;
 
   return (source: unknown): string | undefined => {
-    if (typeof source !== 'string' || remaining === 0 || !source.startsWith(prefix)) {
+    if (typeof source !== 'string' || remaining === 0) {
+      return undefined;
+    }
+
+    if (!source.startsWith(prefix)) {
+      const data = embeddedImage.exec(source)?.[1];
+      if (data && Buffer.byteLength(data, 'base64') <= remaining) {
+        remaining -= Buffer.byteLength(data, 'base64');
+
+        return source;
+      }
+
       return undefined;
     }
 
@@ -152,7 +164,7 @@ function readImages(connection: SqliteConnection, boardId: string) {
   };
 }
 
-function readObject(row: SqliteRow, image: string | undefined): CatalogThumbnailObject {
+function readObject(row: SqliteRow): CatalogThumbnailObject {
   return {
     id: label(row.object_id, 'object identifier'),
     kind: label(row.kind, 'object kind'),
@@ -164,8 +176,63 @@ function readObject(row: SqliteRow, image: string | undefined): CatalogThumbnail
     rotation: coordinate(row.rotation),
     appearance: optionalText(row.appearance),
     detail: optionalText(row.detail),
-    image,
   };
+}
+
+const payloadKinds = new Map([
+  ['html', 'embed'],
+  ['document', 'document'],
+  ['todo', 'todo'],
+  ['sticker', 'sticker'],
+  ['image', 'image'],
+  ['note', 'text'],
+  ['text', 'text'],
+]);
+
+function readDetailedObjects(
+  connection: SqliteConnection,
+  boardId: string,
+  objects: readonly CatalogThumbnailObject[],
+) {
+  const findImage = readImages(connection, boardId);
+  const statement = connection.prepare(`
+    SELECT body_json, length(CAST(body_json AS BLOB)) AS byte_length
+    FROM object_payloads
+    WHERE board_id = ? AND object_id = ? AND body_kind = ?
+      AND length(CAST(body_json AS BLOB)) <= ?
+  `);
+  let remaining = maximumPayloadBytes;
+
+  return objects.map((object, index) => {
+    const bodyKind = payloadKinds.get(object.kind);
+    if (!bodyKind || remaining === 0) {
+      return object;
+    }
+
+    const row = statement.get(boardId, object.id, bodyKind, remaining);
+    if (!row || typeof row.body_json !== 'string') {
+      return object;
+    }
+
+    remaining -= coordinate(row.byte_length);
+    const value: unknown = JSON.parse(row.body_json);
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return object;
+    }
+
+    const data = value as Readonly<Record<string, unknown>>;
+    const { html, src } = data;
+
+    return {
+      ...object,
+      content: object.kind === 'html' ? undefined : data,
+      html:
+        object.kind === 'html' && typeof html === 'string'
+          ? sanitizeThumbnailHtml(html, index)
+          : undefined,
+      image: object.kind === 'image' ? findImage(src) : undefined,
+    };
+  });
 }
 
 export function readCatalogThumbnail(
@@ -190,13 +257,17 @@ export function readCatalogThumbnail(
     return { kind: 'unavailable' };
   }
 
-  const findImage = readImages(connection, boardId);
-  const objects = readRows(connection, boardId, bounds.total).map((row) =>
-    readObject(row, findImage(row.image_source)),
-  );
+  const objects = readRows(connection, boardId, bounds.total).map(readObject);
 
   return {
     kind: 'scene',
-    scene: { ...bounds, revision, objects },
+    scene: {
+      ...bounds,
+      revision,
+      objects:
+        bounds.total <= maximumDetailedObjects
+          ? readDetailedObjects(connection, boardId, objects)
+          : objects,
+    },
   };
 }

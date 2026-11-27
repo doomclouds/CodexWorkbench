@@ -164,6 +164,7 @@ export function readFeedbackMessage(value: WireMessage): FeedbackMessage {
   const {
     messageId,
     authorActorId,
+    authorName,
     authoredByViewer,
     text,
     createdAtMillis,
@@ -179,6 +180,7 @@ export function readFeedbackMessage(value: WireMessage): FeedbackMessage {
   return {
     id: messageId,
     authorId: authorActorId,
+    authorName,
     authoredByViewer,
     text,
     createdAt: dateMillis(createdAtMillis),

@@ -130,6 +130,40 @@ function isTargetId(value: unknown): value is string {
   return Boolean(value.trim()) && !invalidTargetCharacter.test(value);
 }
 
+export function validateHtmlAnnotationLocations(
+  value: unknown,
+  expected: HtmlFrameIdentity,
+  sequence: number,
+  requestedIds: ReadonlySet<string>,
+): ReadonlyMap<string, HtmlFramePoint | null> | null {
+  const input = readFrameMessage(value, expected, 'studio-html-annotation-locations');
+  const points = input?.points;
+  if (input?.sequence !== sequence || !Array.isArray(points) || points.length > requestedIds.size) {
+    return null;
+  }
+
+  const locations = new Map<string, HtmlFramePoint | null>();
+  for (const raw of points) {
+    if (!raw || typeof raw !== 'object') {
+      return null;
+    }
+
+    const { id, point } = raw as Record<string, unknown>;
+    if (typeof id !== 'string' || !requestedIds.has(id) || locations.has(id)) {
+      return null;
+    }
+
+    const position = readPoint(point, 0, 1);
+    if (point !== null && !position) {
+      return null;
+    }
+
+    locations.set(id, position);
+  }
+
+  return locations;
+}
+
 export function validateHtmlSelectionMessage(
   value: unknown,
   expected: HtmlFrameIdentity,

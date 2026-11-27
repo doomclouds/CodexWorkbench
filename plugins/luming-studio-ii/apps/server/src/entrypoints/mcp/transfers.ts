@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer';
 import { invalidArgument, tooLarge } from './errors.js';
-import { bridgeChunkBytes, bridgeMaximumBytes, type BridgeInput } from './schema.js';
+import { bridgeChunkBytes, bridgeMaximumResponseBytes, type BridgeInput } from './schema.js';
 
 export interface TransferFile {
   append(bytes: Uint8Array): Promise<void>;
@@ -32,7 +32,7 @@ interface Transfer {
 }
 
 const maxTransfers = 8;
-const maxBudget = bridgeMaximumBytes * 2;
+const maxBudget = bridgeMaximumResponseBytes * 2;
 
 export function decodeChunk(data: string): Uint8Array {
   const bytes = Buffer.from(data, 'base64');
@@ -54,7 +54,7 @@ async function declaredLength(response: Response, body: ReadableStream<Uint8Arra
     await body.cancel();
     throw invalidArgument('本机服务返回的文件长度无效。');
   }
-  if (size > bridgeMaximumBytes) {
+  if (size > bridgeMaximumResponseBytes) {
     await body.cancel();
     throw tooLarge('本机服务响应超过面板传输限制。');
   }
@@ -239,7 +239,7 @@ export function createTransfers(allocateId: () => string, createFile: () => Prom
         }
 
         const next = size + value.byteLength;
-        if (next > bridgeMaximumBytes) {
+        if (next > bridgeMaximumResponseBytes) {
           throw tooLarge('本机服务响应超过面板传输限制。');
         }
         if (declared !== undefined && next > declared) {
@@ -249,7 +249,7 @@ export function createTransfers(allocateId: () => string, createFile: () => Prom
         if (transfer) {
           await use(transfer, (file) => file.append(value));
         } else if (next > bridgeChunkBytes) {
-          transfer = reserve(sessionId, 'download', declared || bridgeMaximumBytes);
+          transfer = reserve(sessionId, 'download', declared || bridgeMaximumResponseBytes);
           const prefix = inline.subarray(0, size);
           await use(transfer, async (file) => {
             await file.append(prefix);

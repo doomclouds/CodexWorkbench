@@ -91,7 +91,9 @@ export function locateAnchor(
 ): FeedbackPoint {
   const { target, frozenPoint } = anchor;
   if (target.kind === 'content') {
-    return anchor.targetMissing ? frozenPoint : (contentPoint ?? frozenPoint);
+    return !anchor.targetMissing && validObject(objects.get(target.objectId))
+      ? (contentPoint ?? frozenPoint)
+      : frozenPoint;
   }
 
   if (target.kind === 'object') {

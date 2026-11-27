@@ -5,7 +5,11 @@ import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { ArchiveReadError, archiveTooLarge, invalidArchive } from './archive-read-error.js';
-import { MAX_ARCHIVE_STATE_BYTES, readCurrentArchiveState } from './archive-state.js';
+import {
+  MAX_ARCHIVE_STATE_BYTES,
+  readCurrentArchiveState,
+  type ArchiveRestoration,
+} from './archive-state.js';
 import { archiveRecord } from './archive-values.js';
 import {
   extractZipAfterManifest,
@@ -33,6 +37,7 @@ export interface StagedCurrentArchive {
   readonly sourceBoardId: string;
   readonly title: string;
   readonly objects: readonly unknown[];
+  readonly restoration?: ArchiveRestoration;
   readonly assets: ReadonlyMap<string, StagedArchiveAsset>;
   readonly archivePath: string;
   readonly signature: string;
@@ -202,6 +207,7 @@ export async function stageCurrentArchive(
       sourceBoardId,
       title: state.title,
       objects: state.objects,
+      restoration: state.restoration,
       assets,
       archivePath,
       signature,
