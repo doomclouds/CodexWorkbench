@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
+import { embedOverviewPreview } from '../../../src/ui/domain/objects/embed/overview-preview.js';
 import {
   validateHtmlScrollMessage,
   validateHtmlSelectionMessage,
@@ -21,6 +22,54 @@ afterEach(() => {
   windows.forEach((dom) => dom.window.close());
   windows.length = 0;
   vi.unstubAllGlobals();
+});
+
+describe('overview HTML image', () => {
+  function overview(source: string) {
+    const dom = new JSDOM();
+    windows.push(dom);
+    vi.stubGlobal('document', dom.window.document);
+    vi.stubGlobal('DOMParser', dom.window.DOMParser);
+    vi.stubGlobal('XMLSerializer', dom.window.XMLSerializer);
+
+    return embedOverviewPreview(source, { width: 420, height: 200 });
+  }
+
+  it('retains the supported markup, styles and native viewport dimensions', () => {
+    const source =
+      '<!doctype html><meta charset="utf-8"><style>body{color:#369}</style><strong>x</strong>';
+    const image = overview(source);
+    expect(image).toMatch(/^data:image\/svg\+xml;charset=utf-8,/u);
+    const markup = decodeURIComponent(image!.split(',')[1]!);
+    expect(markup).toContain('<foreignObject width="418" height="198">');
+    expect(markup).toContain('<strong>x</strong>');
+    expect(markup).toContain('body{color:#369}');
+    expect(markup).not.toContain('<meta');
+  });
+
+  it('preserves HTML head and body placement for structural selectors', () => {
+    const source =
+      '<style>body > :first-child{background:red}</style><main>x</main><style>p{color:blue}</style>';
+    const image = overview(source);
+    const markup = decodeURIComponent(image!.split(',')[1]!);
+    expect(markup).toContain('body &gt; :first-child{background:red}</style></head><body><main>');
+    expect(markup).toContain('<main>x</main><style>p{color:blue}</style></body>');
+  });
+
+  it.each([
+    '<script>init()</script>',
+    '<button>Interact</button>',
+    '<details><summary>打开</summary><p>展开内容</p></details>',
+    '<img src="local/path.png">',
+    '<img srcset="data:image/png;base64,AA== 1x">',
+    '<style>body{background:url(https://example.invalid/image)}</style>',
+    '<style>@import "theme.css";</style>',
+    '<body style="background:#369"><strong>x</strong></body>',
+    '<svg><circle r="4"></circle></svg>',
+    '<style>strong{font-size:5vw}</style>',
+  ])('keeps the isolated native document for %s', (source) => {
+    expect(overview(source)).toBeUndefined();
+  });
 });
 
 function parser() {

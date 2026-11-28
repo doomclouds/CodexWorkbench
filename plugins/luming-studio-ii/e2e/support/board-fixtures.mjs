@@ -158,7 +158,12 @@ const boardPresets = new Map([
 async function boardArchive(preset) {
   const { title, objects: descriptors } = boardPresets.get(preset) ?? preset;
   const artifactId = "basic-whiteboard-e2e";
-  const { objects, entries, index: assets } = await materializeBoardAssets(descriptors, artifactId);
+  const assets = await materializeBoardAssets(descriptors, artifactId);
+
+  return encodeFixtureBoardArchive({ title, artifactId, ...assets });
+}
+
+export function encodeFixtureBoardArchive({ title, artifactId, objects, entries, index: assets }) {
   const date = "2026-01-01T00:00:00.000Z";
   const artifact = {
     id: artifactId,
@@ -212,11 +217,14 @@ async function boardArchive(preset) {
   const state = "artifact-deltas.ndjson";
   const manifest = { format: "luming-studio-archive", version: 4, artifactId, state };
 
-  return zipSync({
-    "manifest.json": strToU8(JSON.stringify(manifest)),
-    [state]: strToU8(records.join("\n") + "\n"),
-    ...entries,
-  });
+  return zipSync(
+    {
+      "manifest.json": strToU8(JSON.stringify(manifest)),
+      [state]: strToU8(records.join("\n") + "\n"),
+      ...entries,
+    },
+    { mtime: new Date(2026, 0, 1) },
+  );
 }
 
 function initialEndpoint(value, port) {
@@ -388,6 +396,18 @@ function initialBoardFixtures(runtime) {
         objects: elements.map(initialObject),
       };
     },
+    async readPosition({ id }, objectId) {
+      const search = new URLSearchParams({ artifactId: id, check: "scene" });
+      const response = await runtime.request(`/api/sync?${search}`);
+      assert.equal(response.status, 200, "Expected the isolated Studio scene.");
+      const { artifactId, revision, scene } = await response.json();
+      assert.equal(artifactId, id);
+      const position = scene.units.find((unit) => (unit.element ?? unit.geometry).id === objectId);
+      assert.ok(position, `Missing saved object ${objectId}.`);
+      const { x, y, version } = position.element ?? position.geometry;
+
+      return { x, y, revision, version };
+    },
   };
 }
 
@@ -401,8 +421,11 @@ function iiBoardFixtures(runtime) {
   const { getBoardScene, getObjectPayloads } = WhiteboardService.method;
   const { post, call, outcome } = createIiFixtureProtocol(runtime);
   const content = createIiContentReader();
-  async function readPayloads(boardId, objects) {
-    const requested = objects.filter(({ payloadVersion }) => payloadVersion !== undefined);
+  async function readPayloads(boardId, objects, payloadIds) {
+    const requested = objects.filter(
+      ({ objectId, payloadVersion }) =>
+        payloadVersion !== undefined && (!payloadIds || payloadIds.has(objectId)),
+    );
     const payloads = new Map();
     if (!requested.length) {
       return payloads;
@@ -429,12 +452,18 @@ function iiBoardFixtures(runtime) {
     return payloads;
   }
 
-  async function readSnapshot(boardId) {
+  async function readScene(boardId) {
+    const { scene } = await call(getBoardScene, { boardId });
+    assert.equal(scene?.boardId, boardId, "Expected the saved whiteboard scene.");
+    assert.ok(Number.isSafeInteger(Number(scene.boardRevision)), "Expected a safe board revision.");
+
+    return scene;
+  }
+
+  async function readSnapshot(boardId, payloadIds) {
     for (let attempt = 0; attempt < 3; attempt++) {
-      const { scene } = await call(getBoardScene, { boardId });
-      assert.equal(scene?.boardId, boardId, "Expected the saved whiteboard scene.");
-      assert.notEqual(scene.boardRevision, undefined, "Expected the saved whiteboard revision.");
-      const payloads = await readPayloads(boardId, scene.objects);
+      const scene = await readScene(boardId);
+      const payloads = await readPayloads(boardId, scene.objects, payloadIds);
       if (payloads) {
         return { scene, payloads };
       }
@@ -455,40 +484,54 @@ function iiBoardFixtures(runtime) {
       const { boardId, title } = outcome(result, "imported");
       return { id: boardId, title };
     },
-    async readBoard({ id: boardId }) {
-      const { scene, payloads } = await readSnapshot(boardId);
-      const revision = Number(scene.boardRevision);
-      assert.ok(
-        Number.isSafeInteger(revision),
-        "Expected a safe revision for the synthetic board.",
-      );
+    async readBoard({ id: boardId }, payloadIds) {
+      const { scene, payloads } = await readSnapshot(boardId, payloadIds);
 
       return {
         title: scene.title,
-        revision,
+        revision: Number(scene.boardRevision),
         access: { canEdit: scene.access?.canEdit, trashed: scene.access?.trashed },
         objects: scene.objects.map((object) =>
           iiObject(object, payloads.get(object.objectId), content),
         ),
       };
     },
+    async readPosition({ id: boardId }, objectId) {
+      const scene = await readScene(boardId);
+      const object = scene.objects.find((item) => item.objectId === objectId);
+      assert.ok(object, `Missing saved object ${objectId}.`);
+      const { x, y } = object.geometry;
+
+      return {
+        x,
+        y,
+        revision: Number(scene.boardRevision),
+        geometryVersion: Number(object.geometryVersion),
+      };
+    },
   };
 }
 
 export function createBoardFixtures(edition, runtime) {
-  const { importBoard, readBoard } =
+  const { importBoard, readBoard, readPosition } =
     edition === "initial" ? initialBoardFixtures(runtime) : iiBoardFixtures(runtime);
+
+  async function seedArchive(archive) {
+    const board = await importBoard(archive);
+    const url = new URL(runtime.url);
+    url.searchParams.set(edition === "initial" ? "artifactId" : "board", board.id);
+
+    return { ...board, url: url.href };
+  }
 
   return {
     async seedBasicBoard(preset = "basic") {
-      const board = await importBoard(await boardArchive(preset));
-      const url = new URL(runtime.url);
-      url.searchParams.set(edition === "initial" ? "artifactId" : "board", board.id);
-
-      return { ...board, url: url.href };
+      return seedArchive(await boardArchive(preset));
     },
-    readBoard(board) {
-      return readBoard(typeof board === "string" ? { id: board } : board);
+    seedArchive,
+    readBoard(board, payloadIds) {
+      return readBoard(typeof board === "string" ? { id: board } : board, payloadIds);
     },
+    readPosition,
   };
 }

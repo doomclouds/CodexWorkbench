@@ -3,12 +3,14 @@ import { expect, it } from 'vitest';
 import type {
   CanvasGeometry,
   CanvasObjectChange,
+  CanvasRect,
 } from '../../../src/ui/domain/canvas/contracts.js';
 import {
   getMoveSnapBounds,
   getTransformBox,
+  prepareSnapCandidates,
   previewTransform,
-  snapMove,
+  snapMove as snapPreparedMove,
 } from '../../../src/ui/domain/canvas/gestures/index.js';
 import type { TransformGesture } from '../../../src/ui/domain/canvas/gestures/index.js';
 
@@ -459,6 +461,22 @@ it('rotates a member with an existing rotation around the shared centre', () => 
 });
 
 const moving = { x: 100, y: 100, width: 40, height: 20 };
+
+function snapMove(bounds: CanvasRect, targets: readonly CanvasRect[], zoom: number) {
+  return snapPreparedMove(bounds, prepareSnapCandidates(targets), zoom);
+}
+
+it('keeps scene order when distinct anchors tie and when anchors share a coordinate', () => {
+  const first = { x: 124, y: 330, width: 40, height: 20 };
+  const opposite = { x: 56, y: 400, width: 40, height: 20 };
+  const duplicate = { ...first, y: 500 };
+  const candidates = prepareSnapCandidates([first, opposite, duplicate]);
+
+  expect(snapPreparedMove(moving, candidates, 1)).toEqual({
+    offset: { x: 4, y: 0 },
+    guides: [{ axis: 'x', at: 124, from: 100, to: 350 }],
+  });
+});
 
 it('snaps the nearest edge or centre independently in both axes and spans the snapped bounds', () => {
   const right = { x: 144, y: 300, width: 20, height: 20 };

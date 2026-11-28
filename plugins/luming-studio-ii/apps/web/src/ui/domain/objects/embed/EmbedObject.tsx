@@ -1,4 +1,12 @@
-import { useEffect, useEffectEvent, useId, useLayoutEffect, useRef, useState } from 'react';
+import {
+  useEffect,
+  useEffectEvent,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { Disclosure, OperationNotice } from '../../../base/index.js';
 import type { EmbedJson as Json, EmbedObjectProps, EmbedObjectValue } from './contracts.js';
 import {
@@ -9,6 +17,7 @@ import {
 } from './frame-session.js';
 import type { FrameSession, SaveView } from './frame-session.js';
 import { EmbedSourceEditor } from './EmbedSourceEditor.js';
+import { embedOverviewPreview } from './overview-preview.js';
 import './EmbedObject.css';
 
 function useFrameSaveView(element: EmbedObjectValue, writable: boolean) {
@@ -73,10 +82,14 @@ function EmbedHtmlBody(props: EmbedObjectProps) {
   const committedProps = useRef(props);
   const scrollPosition = useRef<{ regionId: string; x: number; y: number } | null>(null);
   const [editingRegion, setEditingRegion] = useState<string>();
+  const [scrolledRegion, setScrolledRegion] = useState<string>();
   const writable = Boolean(onSaveState);
   const { source, activeSave, setSaveView } = useFrameSaveView(element, writable);
   const saved = committedState ?? element;
   const shouldRetain = activeSave !== null || editingRegion === element.id;
+  const receivesInput = annotation || interactive;
+  const needsFrame = receivesInput || shouldRetain || props.editRequest !== undefined;
+  const { image, failImage } = useOverviewImage(props, needsFrame, scrolledRegion === element.id);
   const observeRetention = useEffectEvent((retain: boolean) => props.onRetentionChange?.(retain));
 
   function handleSourceEditing(editing: boolean) {
@@ -116,6 +129,7 @@ function EmbedHtmlBody(props: EmbedObjectProps) {
       readProps: () => committedProps.current,
       setSaveView,
       scrollPosition,
+      onScrollActivity: (scrolled) => setScrolledRegion(scrolled ? source.regionId : undefined),
     });
     session.current = frameSession;
 
@@ -123,7 +137,7 @@ function EmbedHtmlBody(props: EmbedObjectProps) {
       session.current = null;
       frameSession.close();
     };
-  }, [source, setSaveView]);
+  }, [source, setSaveView, image]);
 
   useLayoutEffect(() => {
     if (!writable) {
@@ -152,7 +166,6 @@ function EmbedHtmlBody(props: EmbedObjectProps) {
 
   const displayRaster = zoom >= 0.5;
   const rasterZoom = displayRaster ? zoom : 1;
-  const receivesInput = annotation || interactive;
 
   return (
     <div
@@ -160,23 +173,33 @@ function EmbedHtmlBody(props: EmbedObjectProps) {
       data-kind={props.kind}
       data-annotating={annotation || undefined}
     >
-      <iframe
-        ref={frame}
-        title={element.title || defaultTitle[props.kind]}
-        sandbox="allow-scripts"
-        referrerPolicy="no-referrer"
-        allow="camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'"
-        tabIndex={receivesInput ? 0 : -1}
-        onLoad={() => session.current?.postMode()}
-        style={{
-          width: String(rasterZoom * 100) + '%',
-          height: String(rasterZoom * 100) + '%',
-          zoom: rasterZoom,
-          transform: displayRaster ? 'scale(' + 1 / zoom + ')' : undefined,
-          transformOrigin: '0 0',
-          pointerEvents: receivesInput ? 'auto' : 'none',
-        }}
-      />
+      {image ? (
+        <img
+          className="studio-ui-embed__preview"
+          src={image}
+          alt={element.title || defaultTitle[props.kind]}
+          draggable={false}
+          onError={failImage}
+        />
+      ) : (
+        <iframe
+          ref={frame}
+          title={element.title || defaultTitle[props.kind]}
+          sandbox="allow-scripts"
+          referrerPolicy="no-referrer"
+          allow="camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'"
+          tabIndex={receivesInput ? 0 : -1}
+          onLoad={() => session.current?.postMode()}
+          style={{
+            width: String(rasterZoom * 100) + '%',
+            height: String(rasterZoom * 100) + '%',
+            zoom: rasterZoom,
+            transform: displayRaster ? 'scale(' + 1 / zoom + ')' : undefined,
+            transformOrigin: '0 0',
+            pointerEvents: receivesInput ? 'auto' : 'none',
+          }}
+        />
+      )}
       {activeSave && activeSave.error !== null && (
         <EmbedSaveNotice
           message={activeSave.error}
@@ -199,6 +222,23 @@ function EmbedHtmlBody(props: EmbedObjectProps) {
       />
     </div>
   );
+}
+
+function useOverviewImage(props: EmbedObjectProps, needsFrame: boolean, scrolled: boolean) {
+  const { width, height } = props.overviewSize ?? {};
+  const source = props.value.html;
+  const eligible = (props.zoom ?? 1) < 0.25 && !needsFrame && !scrolled;
+  const [failedImage, setFailedImage] = useState<string>();
+  const preview = useMemo(() => {
+    if (!eligible || width === undefined || height === undefined) {
+      return undefined;
+    }
+
+    return embedOverviewPreview(source, { width, height });
+  }, [eligible, height, source, width]);
+  const image = preview === failedImage ? undefined : preview;
+
+  return { image, failImage: () => setFailedImage(preview) };
 }
 
 const defaultTitle = {

@@ -36,6 +36,8 @@ export type WhiteboardSnapshot =
   | { readonly kind: 'loading' }
   | { readonly kind: 'failed'; readonly message: string };
 
+type PrepareMoveReceipt = (receipt: WhiteboardMoveReceipt) => (() => void) | undefined;
+
 interface WhiteboardSession {
   readonly subscribe: (listener: () => void) => () => void;
   readonly getSnapshot: () => WhiteboardSnapshot;
@@ -46,14 +48,27 @@ interface WhiteboardSession {
   readonly acceptEdit: (receipt: AppliedBoardEdit) => void;
   readonly acceptRoomContent: (change: WhiteboardContentChange) => void;
   readonly acceptConflict: (receipt: ConflictingEdit) => void;
-  readonly submitMove: (command: WhiteboardMoveCommand) => Promise<WhiteboardMoveReceipt>;
-  readonly readReceipt: (commandId: string) => Promise<WhiteboardMoveReceipt | undefined>;
+  readonly submitMove: (
+    command: WhiteboardMoveCommand,
+    prepare?: PrepareMoveReceipt,
+  ) => Promise<WhiteboardMoveReceipt>;
+  readonly readReceipt: (
+    commandId: string,
+    prepare?: PrepareMoveReceipt,
+  ) => Promise<WhiteboardMoveReceipt | undefined>;
 }
 
-type WhiteboardWriteService = Pick<WhiteboardService, 'moveObjects' | 'getReceipt'>;
+type OptionalWhiteboardService = Pick<
+  WhiteboardService,
+  'moveObjects' | 'getReceipt' | 'getPayloadPage'
+>;
 type WhiteboardSessionService = Pick<WhiteboardService, 'getScene' | 'getPayloads'> &
-  Partial<WhiteboardWriteService>;
+  Partial<OptionalWhiteboardService>;
 type ConflictingEdit = Extract<BoardEditReceipt, { kind: 'conflict' }>;
+
+const maxUnpublishedPayloadBatches = 4;
+const payloadPublicationWindowMs = 40;
+const maxBoundedPageIds = 192;
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -66,6 +81,7 @@ export function createWhiteboardSession(
   const listeners = new Set<() => void>();
   let snapshot: WhiteboardSnapshot = { kind: 'loading' };
   let objects = new Map<string, WhiteboardObject>();
+  const positions = new Map<string, number>();
   let cache: PayloadCache = new Map();
   let visible: readonly string[] = [];
   let controller: AbortController | undefined;
@@ -98,21 +114,63 @@ export function createWhiteboardSession(
     }
   }
 
-  async function loadPayloads(requests: readonly PayloadRequest[], signal: AbortSignal) {
-    try {
-      const results = await service.getPayloads(
-        boardId,
-        requests.map(({ id }) => id),
-        signal,
-      );
+  function nextPayloadRequests() {
+    const bounded = snapshot.kind === 'ready' && snapshot.scene.boundedPayloadRead;
+    return missingPayloads(
+      visible,
+      objects,
+      cache,
+      bounded && service.getPayloadPage ? maxBoundedPageIds : undefined,
+    );
+  }
 
-      if (signal.aborted || snapshot.kind !== 'ready') {
-        return;
+  async function fetchPayloads(ids: readonly string[], signal: AbortSignal) {
+    if (snapshot.kind === 'ready' && snapshot.scene.boundedPayloadRead && service.getPayloadPage) {
+      return service.getPayloadPage(boardId, ids, signal);
+    }
+
+    return { results: await service.getPayloads(boardId, ids, signal), processed: ids.length };
+  }
+
+  async function loadPayloads(initial: readonly PayloadRequest[], signal: AbortSignal) {
+    let unpublished = 0;
+    let publishedFirstBatch = false;
+    let publicationTimer: ReturnType<typeof setTimeout> | undefined;
+
+    function flushPayloads() {
+      clearTimeout(publicationTimer);
+      publicationTimer = undefined;
+      if (unpublished && !signal.aborted && snapshot.kind === 'ready') {
+        publish({ ...snapshot, payloads: visiblePayloads(cache, objects) });
+        publishedFirstBatch = true;
       }
+      unpublished = 0;
+    }
 
-      cache = mergePayloadCache(cache, visible, objects, requests, results);
-      publish({ ...snapshot, payloads: visiblePayloads(cache, objects) });
+    try {
+      let requests = initial;
+      while (requests.length && !signal.aborted) {
+        const { results, processed } = await fetchPayloads(
+          requests.map(({ id }) => id),
+          signal,
+        );
+
+        if (signal.aborted || snapshot.kind !== 'ready') {
+          return;
+        }
+
+        cache = mergePayloadCache(cache, visible, objects, requests.slice(0, processed), results);
+        unpublished += 1;
+        if (!publishedFirstBatch || unpublished === maxUnpublishedPayloadBatches) {
+          flushPayloads();
+        } else {
+          publicationTimer ??= setTimeout(flushPayloads, payloadPublicationWindowMs);
+        }
+
+        requests = nextPayloadRequests();
+      }
     } finally {
+      flushPayloads();
       if (readingPayloads === signal) {
         readingPayloads = undefined;
       }
@@ -128,7 +186,7 @@ export function createWhiteboardSession(
       return;
     }
 
-    const requests = missingPayloads(visible, objects, cache);
+    const requests = nextPayloadRequests();
     if (requests.length === 0) {
       return;
     }
@@ -140,7 +198,12 @@ export function createWhiteboardSession(
   }
 
   function acceptScene(scene: WhiteboardScene, payloads?: readonly WhiteboardPayloadResult[]) {
-    objects = new Map(scene.objects.map((object) => [object.id, object]));
+    objects = new Map();
+    positions.clear();
+    for (const [position, object] of scene.objects.entries()) {
+      objects.set(object.id, object);
+      positions.set(object.id, position);
+    }
     if (payloads?.length) {
       const requests = payloads.flatMap((result) => {
         if (result.kind !== 'loaded') {
@@ -253,10 +316,24 @@ export function createWhiteboardSession(
     return signal;
   }
 
-  function receiveReceipt(receipt: WhiteboardMoveReceipt, commandId: string) {
+  function receiveReceipt(
+    receipt: WhiteboardMoveReceipt,
+    commandId: string,
+    prepare?: PrepareMoveReceipt,
+  ) {
     if (receipt.boardId !== boardId || receipt.commandId !== commandId) {
       throw new Error('保存回执和当前命令不匹配。');
     }
+
+    const publishFeedback = prepare?.(receipt);
+    try {
+      applyMoveReceipt(receipt);
+    } finally {
+      publishFeedback?.();
+    }
+  }
+
+  function applyMoveReceipt(receipt: WhiteboardMoveReceipt) {
     if (snapshot.kind !== 'ready') {
       return;
     }
@@ -271,9 +348,35 @@ export function createWhiteboardSession(
       return;
     }
 
-    const scene = mergeConfirmedScene(snapshot.scene, receipt);
+    const scene = mergeConfirmedScene(snapshot.scene, receipt, positions);
     if (scene !== snapshot.scene) {
-      acceptScene(scene);
+      acceptMovedObjects(scene, receipt);
+    }
+  }
+
+  function acceptMovedObjects(scene: WhiteboardScene, receipt: WhiteboardMoveReceipt) {
+    if (receipt.kind !== 'applied' || snapshot.kind !== 'ready') {
+      return;
+    }
+
+    let payloadChanged = false;
+    for (const { id } of receipt.objects) {
+      const position = positions.get(id);
+      const current = position === undefined ? undefined : scene.objects[position];
+      if (!current) {
+        continue;
+      }
+
+      const previous = objects.get(id);
+      objects.set(id, current);
+      payloadChanged ||= previous?.payloadVersion !== current.payloadVersion;
+    }
+
+    const payloads = payloadChanged ? visiblePayloads(cache, objects) : snapshot.payloads;
+    const retryPayloads = snapshot.payloadError !== undefined;
+    publish({ kind: 'ready', scene, payloads });
+    if (payloadChanged || retryPayloads) {
+      requestVisible();
     }
   }
 
@@ -361,7 +464,7 @@ export function createWhiteboardSession(
         requestVisible();
       }
     },
-    async submitMove(command) {
+    async submitMove(command, prepare) {
       const signal = requireSignal();
       if (command.boardId !== boardId) {
         throw new Error('移动命令和当前白板不匹配。');
@@ -372,16 +475,16 @@ export function createWhiteboardSession(
 
       const receipt = await service.moveObjects(command, signal);
       signal.throwIfAborted();
-      receiveReceipt(receipt, command.commandId);
+      receiveReceipt(receipt, command.commandId, prepare);
 
       return receipt;
     },
-    async readReceipt(commandId) {
+    async readReceipt(commandId, prepare) {
       const signal = requireSignal();
       const receipt = await service.getReceipt?.(boardId, commandId, signal);
       signal.throwIfAborted();
       if (receipt) {
-        receiveReceipt(receipt, commandId);
+        receiveReceipt(receipt, commandId, prepare);
       }
 
       return receipt;

@@ -8,6 +8,7 @@ import {
   sourceRoot,
   testsRoot,
 } from './project-paths.mjs';
+import { bindingOf } from './scope.mjs';
 
 export const objectsRoot = resolve(sourceRoot, 'ui/domain/objects');
 const assemblyEntry = resolve(objectsRoot, 'index');
@@ -70,8 +71,17 @@ const testLibraries = new Set([
   'node:assert',
 ]);
 const embedTestModules = new Set(
-  ['protocol', 'runtime'].map((file) => resolve(objectsRoot, 'embed', file)),
+  ['protocol', 'runtime', 'overview-preview'].map((file) => resolve(objectsRoot, 'embed', file)),
 );
+const embedPreviewModule = resolve(objectsRoot, 'embed', 'overview-preview');
+const previewDomSinks = new Set([
+  'innerHTML',
+  'outerHTML',
+  'srcdoc',
+  'insertAdjacentHTML',
+  'write',
+  'writeln',
+]);
 
 function stem(file) {
   return file.replace(scriptExtension, '');
@@ -203,6 +213,25 @@ function isExtensionTypeImport(node, file, family, targets) {
   return node.importKind === 'type' && usesNamedImports(node, canvasExtensionTypes);
 }
 
+function detachedTemplate(sourceCode, node) {
+  if (node.type !== 'Identifier') {
+    return false;
+  }
+
+  const variable = bindingOf(sourceCode, node);
+  const definition = variable?.defs.length === 1 && variable.defs[0];
+  if (!definition || definition.parent?.kind !== 'const') {
+    return false;
+  }
+
+  const init = definition.node.init;
+  const callee = init?.callee;
+  const directDocumentCall = callee?.object?.name === 'document';
+  const templateArgument = init?.arguments?.[0]?.value === 'template';
+
+  return directDocumentCall && callee.property?.name === 'createElement' && templateArgument;
+}
+
 const contractBoundary = {
   meta: {
     type: 'problem',
@@ -214,6 +243,7 @@ const contractBoundary = {
       suite: 'Exercise the real whiteboard object through its public contract.',
       dynamic: 'Use a literal module specifier for a verifiable object dependency.',
       family: 'Register this whiteboard object or test in the object boundary.',
+      preview: 'Parse overview markup in an inert template and present the result as an image.',
     },
   },
 
@@ -223,6 +253,7 @@ const contractBoundary = {
     const assembly = stem(file) === assemblyEntry;
     const test = objectTestFamily(file);
     const withinSuite = contains(objectTests, file) || contains(objectUnitTests, file);
+    const embedPreview = stem(file) === embedPreviewModule;
     function report(node, messageId) {
       context.report({ node, messageId });
     }
@@ -277,6 +308,22 @@ const contractBoundary = {
     }
 
     return {
+      JSXAttribute(node) {
+        if (family === 'embed' && node.name.name === 'dangerouslySetInnerHTML') {
+          report(node, 'preview');
+        }
+      },
+      MemberExpression(node) {
+        const property = node.computed ? node.property.value : node.property.name;
+        if (!embedPreview || !previewDomSinks.has(property)) {
+          return;
+        }
+
+        const inertTemplate = detachedTemplate(context.sourceCode, node.object);
+        if (!inertTemplate || property !== 'innerHTML') {
+          report(node, 'preview');
+        }
+      },
       Program(node) {
         const unregisteredObject = !family && !assembly && contains(objectsRoot, file);
         const unregisteredTest = withinSuite && !test;

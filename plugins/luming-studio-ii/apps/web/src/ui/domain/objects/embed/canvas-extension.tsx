@@ -124,9 +124,13 @@ function readAnnotationLocations(
 function CanvasEmbedView(props: CanvasObjectViewProps) {
   const {
     object,
+    geometry,
     payload,
     id,
     interactive,
+    selected,
+    focusedReading,
+    expanded,
     readOnly,
     editRequest,
     readHtmlSource,
@@ -155,6 +159,8 @@ function CanvasEmbedView(props: CanvasObjectViewProps) {
 
   const { value, version } = current;
   const kind = object.kind === 'diagram' || object.kind === 'chart' ? object.kind : 'html';
+  const active = selected || focusedReading || expanded;
+  const overviewSize = active || annotationLocations?.nodeIds.length ? undefined : geometry;
 
   async function requestValue(operation: CanvasObjectOperation) {
     const receipt = await request(operation);
@@ -243,6 +249,7 @@ function CanvasEmbedView(props: CanvasObjectViewProps) {
         useCanvasTools
         readHtmlSource={readHtmlSource}
         zoom={zoom}
+        overviewSize={overviewSize}
         preserveScroll
         onNavigation={onNavigation ? handleNavigation : undefined}
         onSelection={onAnnotateContent ? handleContentSelection : undefined}

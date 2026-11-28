@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   Canvas,
+  type CanvasContentTracking,
   type CanvasEditIntent,
   type CanvasObject,
   type CanvasObjectActivation,
@@ -158,6 +159,171 @@ describe('Canvas object extensions', () => {
 
     return { root, onSelectionChange, onEditIntent };
   }
+
+  it('mounts a concealed passive body for selection and always keeps its geometric frame', () => {
+    const observe = vi.fn<(props: CanvasObjectViewProps) => void>();
+    const base = createBadgeExtension(observe);
+    const extension: CanvasObjectExtension = {
+      ...base,
+      kind: 'shape',
+      capabilities: { ...base.capabilities, content: 'passive' },
+      isPassiveContentVisible: () => false,
+    };
+    const options = { objectExtensions: [extension], scene: { ...scene, objects: [underlay] } };
+    const { root } = renderCanvas(options);
+    expect(root.querySelector('[data-canvas-object="underlay"] svg')).not.toBeNull();
+    expect(observe).not.toHaveBeenCalled();
+    renderCanvas({ ...options, selection: [underlay.id] });
+    expect(observe).toHaveBeenCalled();
+  });
+
+  it('scopes opt-in label writers to active objects and handles permission loss', () => {
+    const observe = vi.fn<(props: CanvasObjectViewProps) => void>();
+    const original = createBadgeExtension(observe);
+    const extension: CanvasObjectExtension = {
+      ...original,
+      capabilities: { ...original.capabilities, editOnlyWhenSelected: true },
+    };
+    const onObjectIntent = vi.fn<NonNullable<CanvasProps['onObjectIntent']>>();
+    const props = { onObjectIntent, objectExtensions: [extension] };
+    renderCanvas(props);
+    expect(observe.mock.lastCall?.[0].readOnly).toBe(true);
+    observe.mockClear();
+
+    renderCanvas({ ...props, canEdit: false });
+    expect(observe).not.toHaveBeenCalled();
+    renderCanvas({ ...props, selection: selectedBadge });
+    expect(observe.mock.lastCall?.[0].readOnly).toBe(false);
+    renderCanvas({ ...props, selection: selectedBadge, canEdit: false });
+    expect(observe.mock.lastCall?.[0].readOnly).toBe(true);
+  });
+
+  it('moves the camera without committing unchanged object views', async () => {
+    const observe = vi.fn<(props: CanvasObjectViewProps) => void>();
+    const onViewportChange = vi.fn<(viewport: CanvasViewport) => void>();
+    const { root } = renderCanvas({
+      objectExtensions: [createBadgeExtension(observe)],
+      onViewportChange,
+    });
+    expect(observe).toHaveBeenCalled();
+    observe.mockClear();
+
+    act(() => {
+      root.dispatchEvent(
+        new WheelEvent('wheel', {
+          bubbles: true,
+          cancelable: true,
+          deltaX: 36,
+          deltaY: 18,
+        }),
+      );
+    });
+    await flushFrame();
+
+    const world = root.querySelector<HTMLElement>('.studio-canvas__world');
+    expect(world?.style.transform).toContain('translate(-36px, -18px)');
+    expect(onViewportChange).toHaveBeenLastCalledWith({ x: -36, y: -18, zoom: 1 });
+    expect(observe).not.toHaveBeenCalled();
+  });
+
+  it('updates one object payload without remapping unchanged objects', () => {
+    const inspectNeighbor = vi.fn<() => void>();
+    const neighbor = {
+      ...badge,
+      id: 'neighbor',
+      geometry: { ...badge.geometry, x: 360 },
+      get locked() {
+        inspectNeighbor();
+
+        return false;
+      },
+    };
+    const props = {
+      scene: { ...scene, objects: [badge, neighbor] },
+      selection: [],
+      objectExtensions: [createBadgeExtension()],
+    };
+    const neighborPayload = { version: 2, value: '另外的正文' };
+    const first = new Map([
+      [badge.id, payload],
+      [neighbor.id, neighborPayload],
+    ]);
+    const { root } = renderCanvas({ ...props, payloadById: first });
+    const firstNeighbor = root.querySelector('[data-canvas-object="neighbor"]');
+    expect(firstNeighbor?.textContent).toContain('另外的正文');
+    inspectNeighbor.mockClear();
+
+    const updated = new Map(first);
+    updated.set(badge.id, { version: 8, value: '更新的正文' });
+    renderCanvas({ ...props, payloadById: updated });
+
+    expect(root.querySelector('[data-canvas-object="test-badge"]')?.textContent).toContain(
+      '更新的正文',
+    );
+    expect(root.querySelector('[data-canvas-object="neighbor"]')).toBe(firstNeighbor);
+    expect(firstNeighbor?.textContent).toContain('另外的正文');
+    expect(inspectNeighbor).not.toHaveBeenCalled();
+
+    renderCanvas({ ...props, payloadById: new Map([[neighbor.id, neighborPayload]]) });
+    expect(root.querySelector('[data-canvas-object="test-badge"]')?.textContent).toContain(
+      badge.label,
+    );
+    expect(inspectNeighbor).not.toHaveBeenCalled();
+
+    const switched = renderCanvas({
+      ...props,
+      scene: { ...props.scene, boardId: 'another-board' },
+    });
+    expect(switched.root.querySelector('[data-canvas-object="neighbor"]')?.textContent).toContain(
+      neighbor.label,
+    );
+  });
+
+  it('locates an unselected HTML annotation using the exact continuous camera zoom', async () => {
+    const observe = vi.fn<(props: CanvasObjectViewProps) => void>();
+    const report = vi.fn<CanvasContentTracking['report']>();
+    const onViewportChange = vi.fn<(viewport: CanvasViewport) => void>();
+    const extension = createBadgeExtension(observe);
+    const tracking: CanvasContentTracking = {
+      requests: [
+        {
+          id: 'note',
+          target: { kind: 'html', nodeIds: ['title'], sourceRevision: 1n },
+          u: 0.2,
+          v: 0.5,
+        },
+      ],
+      report,
+    };
+    const { root } = renderCanvas({
+      objectExtensions: [
+        { ...extension, capabilities: { ...extension.capabilities, content: 'embedded' } },
+      ],
+      contentTracking: new Map([[badge.id, tracking]]),
+      onViewportChange,
+    });
+    act(() => {
+      root.dispatchEvent(
+        new WheelEvent('wheel', { bubbles: true, cancelable: true, ctrlKey: true, deltaY: 80 }),
+      );
+    });
+    await flushFrame();
+
+    const viewport = onViewportChange.mock.lastCall?.[0];
+    const current = observe.mock.lastCall?.[0];
+    expect(viewport?.zoom).toBeLessThan(1);
+    expect(current?.selected).toBe(false);
+    expect(current?.interactive).toBe(false);
+    if (!viewport || !current?.contentTracking) {
+      throw new Error('Expected the current viewport and the embedded content tracking port.');
+    }
+
+    const screen = { x: 360 + 24 * viewport.zoom, y: 250 };
+    current.contentTracking.report(new Map([['note', { point: screen }]]));
+    const position = report.mock.lastCall?.[0].get('note')?.point;
+    expect(position?.x).toBeCloseTo(badge.geometry.x + badge.geometry.width / 2 + 24);
+    expect(position?.y).toBeCloseTo(badge.geometry.y + badge.geometry.height / 2);
+  });
 
   it('uses registered bounds and exact hit tests and restricts available geometry operations', () => {
     const objectExtensions = [createBadgeExtension()];

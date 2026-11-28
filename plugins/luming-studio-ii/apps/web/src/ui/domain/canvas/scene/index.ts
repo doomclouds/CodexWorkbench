@@ -11,7 +11,7 @@ import type {
   CanvasRect,
 } from '../contracts.js';
 import { inkBounds } from '../ink/geometry.js';
-import { getObjectBounds, rectsIntersect } from '../viewport/index.js';
+import { getObjectBounds, rectContainsRect, rectsIntersect } from '../viewport/index.js';
 
 interface SceneEntry {
   readonly projected: ProjectedCanvasObject;
@@ -34,6 +34,9 @@ type SceneNode = SceneLeaf | SceneBranch;
 
 export interface SceneIndex {
   readonly objects: readonly CanvasObject[];
+  readonly objectIds: readonly string[];
+  readonly projectedObjects: readonly ProjectedCanvasObject[];
+  fullyWithin(bounds: CanvasRect): boolean;
   get(id: string): CanvasObject | undefined;
   getEntry(id: string): SceneEntry | undefined;
   queryEntries(bounds: CanvasRect): SceneEntry[];
@@ -263,9 +266,13 @@ export function createSceneIndex(
     return { projected, layer, bounds: projectedObjectBounds(projected) };
   });
   const root = entries.length ? buildNode(entries.slice()) : undefined;
+  const validBounds = entries.every(({ bounds }) => rectsIntersect(bounds, bounds));
 
   return {
     objects,
+    objectIds: [...layersById.keys()],
+    projectedObjects: entries.map(({ projected }) => projected),
+    fullyWithin: (bounds) => !root || (validBounds && rectContainsRect(bounds, root.bounds)),
     get: getObject,
     getEntry(id) {
       const layer = layersById.get(id);
@@ -384,7 +391,11 @@ export function queryScene(
   index: SceneIndex,
   bounds: CanvasRect,
   changes: ReadonlyMap<string, CanvasObjectChange>,
-): ProjectedCanvasObject[] {
+): readonly ProjectedCanvasObject[] {
+  if (changes.size === 0 && index.fullyWithin(bounds)) {
+    return index.projectedObjects;
+  }
+
   const affected = affectedEntries(index, changes);
   const matches = index
     .queryEntries(bounds)

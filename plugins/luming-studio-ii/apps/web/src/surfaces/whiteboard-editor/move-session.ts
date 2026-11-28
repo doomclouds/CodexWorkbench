@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type {
   WhiteboardMoveCommand,
   WhiteboardMoveReceipt,
@@ -12,6 +12,8 @@ import type {
 } from '../../ui/domain/canvas/index.js';
 
 type WhiteboardSession = ReturnType<typeof createWhiteboardSession>;
+type MoveArguments = Parameters<WhiteboardSession['submitMove']>;
+type PrepareMoveReceipt = NonNullable<MoveArguments[1]>;
 
 interface PendingMove {
   readonly edits: readonly CanvasMoveIntent[];
@@ -24,8 +26,6 @@ type MoveState =
   | { readonly kind: 'saving' | 'checking'; readonly move: PendingMove }
   | { readonly kind: 'unknown'; readonly move: PendingMove; readonly detail: string }
   | { readonly kind: 'conflict' | 'rejected' | 'unsupported'; readonly detail: string };
-
-type MoveAttempt = { readonly receipt: WhiteboardMoveReceipt } | { readonly detail: string };
 
 const rejectionMessages = new Map([
   ['forbidden', '当前没有编辑权限。'],
@@ -71,37 +71,72 @@ function reportReceipt(receipt: WhiteboardMoveReceipt, edit?: CanvasMoveIntent):
 async function queryReceipt(
   session: WhiteboardSession,
   commandId: string,
+  prepare: PrepareMoveReceipt,
   submitError?: string,
-): Promise<MoveAttempt> {
+): Promise<string | undefined> {
   try {
-    const receipt = await session.readReceipt(commandId);
+    const receipt = await session.readReceipt(commandId, prepare);
     if (receipt) {
-      return { receipt };
+      return undefined;
     }
 
-    return { detail: submitError ? submitError + ' ' + noReceipt : noReceipt };
+    return submitError ? submitError + ' ' + noReceipt : noReceipt;
   } catch (error) {
     const detail = '查询回执失败。' + requestError(error);
 
-    return { detail: submitError ? submitError + ' ' + detail : detail };
+    return submitError ? submitError + ' ' + detail : detail;
   }
 }
 
 async function submitMove(
   session: WhiteboardSession,
   command: WhiteboardMoveCommand,
+  prepare: PrepareMoveReceipt,
   isActive: () => boolean,
-): Promise<MoveAttempt> {
+): Promise<string | undefined> {
   try {
-    return { receipt: await session.submitMove(command) };
+    await session.submitMove(command, prepare);
+    return undefined;
   } catch (error) {
     const detail = requestError(error);
     if (isActive()) {
-      return queryReceipt(session, command.commandId, detail);
+      return queryReceipt(session, command.commandId, prepare, detail);
     }
 
-    return { detail };
+    return detail;
   }
+}
+
+function createMoveFeedback() {
+  let state: MoveState = { kind: 'idle' };
+  const listeners = new Set<() => void>();
+
+  function notify() {
+    for (const listener of listeners) {
+      listener();
+    }
+  }
+
+  function stage(next: MoveState) {
+    state = next;
+
+    return notify;
+  }
+
+  return {
+    read: () => state,
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    stage,
+    update(next: MoveState) {
+      stage(next)();
+    },
+  };
 }
 
 export function useMoveSession(
@@ -111,7 +146,8 @@ export function useMoveSession(
   createCommandId: () => string,
   onReceipt?: (receipt: WhiteboardMoveReceipt) => void,
 ) {
-  const [state, setState] = useState<MoveState>({ kind: 'idle' });
+  const [feedback] = useState(createMoveFeedback);
+  const state = useSyncExternalStore(feedback.subscribe, feedback.read, feedback.read);
   const pending = useRef<PendingMove | undefined>(undefined);
   const running = useRef(false);
 
@@ -123,23 +159,31 @@ export function useMoveSession(
     [],
   );
 
-  function complete(move: PendingMove, result: MoveAttempt) {
+  function completeUnknown(move: PendingMove, detail: string) {
     if (pending.current !== move) {
       return;
     }
 
     running.current = false;
-    if ('detail' in result) {
-      setState({ kind: 'unknown', move, detail: result.detail });
+    feedback.update({ kind: 'unknown', move, detail });
+  }
+
+  function prepareReceipt(move: PendingMove, receipt: WhiteboardMoveReceipt) {
+    if (pending.current !== move) {
       return;
     }
 
+    running.current = false;
     pending.current = undefined;
-    setState(reportReceipt(result.receipt, move.edits[0]));
-    onReceipt?.(result.receipt);
-    if (result.receipt.kind === 'conflict') {
-      session.reload();
-    }
+    const publish = feedback.stage(reportReceipt(receipt, move.edits[0]));
+
+    return () => {
+      publish();
+      onReceipt?.(receipt);
+      if (receipt.kind === 'conflict') {
+        session.reload();
+      }
+    };
   }
 
   function run(move: PendingMove, kind: 'saving' | 'checking') {
@@ -148,16 +192,21 @@ export function useMoveSession(
     }
 
     running.current = true;
-    setState({ kind, move });
+    feedback.update({ kind, move });
+    const prepare = (receipt: WhiteboardMoveReceipt) => prepareReceipt(move, receipt);
 
     const request =
       kind === 'saving'
-        ? submitMove(session, move.command, () => pending.current === move)
-        : queryReceipt(session, move.command.commandId);
+        ? submitMove(session, move.command, prepare, () => pending.current === move)
+        : queryReceipt(session, move.command.commandId, prepare);
 
     request
-      .then((result) => complete(move, result))
-      .catch((error: unknown) => complete(move, { detail: requestError(error) }));
+      .then((detail) => {
+        if (detail !== undefined) {
+          completeUnknown(move, detail);
+        }
+      })
+      .catch((error: unknown) => completeUnknown(move, requestError(error)));
   }
 
   function handleEdit(intent: CanvasEditIntent) {
@@ -166,7 +215,7 @@ export function useMoveSession(
     }
 
     if (intent.kind !== 'move') {
-      setState({ kind: 'unsupported', detail: '当前只支持保存对象位置。' });
+      feedback.update({ kind: 'unsupported', detail: '当前只支持保存对象位置。' });
       return;
     }
 
@@ -174,7 +223,7 @@ export function useMoveSession(
     try {
       commandId = createCommandId();
     } catch (error) {
-      setState({ kind: 'rejected', detail: requestError(error) });
+      feedback.update({ kind: 'rejected', detail: requestError(error) });
       return;
     }
 

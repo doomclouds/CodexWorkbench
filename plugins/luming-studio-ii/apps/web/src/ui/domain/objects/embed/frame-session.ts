@@ -92,6 +92,7 @@ interface EmbedFrameOptions {
   readProps: () => EmbedObjectProps;
   setSaveView: (view: SaveView | null) => void;
   scrollPosition: FrameScroll;
+  onScrollActivity: (scrolled: boolean) => void;
 }
 
 export function attachEmbedFrame({
@@ -101,6 +102,7 @@ export function attachEmbedFrame({
   readProps,
   setSaveView,
   scrollPosition,
+  onScrollActivity,
 }: EmbedFrameOptions): FrameSession {
   const { regionId, sourceRevision, html } = source;
   const identity = { channel: createFrameChannel(), regionId, sourceRevision };
@@ -125,6 +127,16 @@ export function attachEmbedFrame({
 
   if (scrollPosition.current?.regionId !== regionId) {
     scrollPosition.current = null;
+  }
+
+  function rememberScroll({ x, y }: EmbedPoint) {
+    const position = scrollPosition.current;
+    const previous = Boolean(position && (position.x > 0 || position.y > 0));
+    const scrolled = x > 0 || y > 0;
+    scrollPosition.current = { regionId, x, y };
+    if (previous !== scrolled) {
+      onScrollActivity(scrolled);
+    }
   }
 
   const postState = (type: string, value: Record<string, unknown>) =>
@@ -423,7 +435,7 @@ export function attachEmbedFrame({
 
     const scroll = validateHtmlScrollMessage(data, identity);
     if (scroll && current.preserveScroll && ready) {
-      scrollPosition.current = { regionId, x: scroll.x, y: scroll.y };
+      rememberScroll(scroll);
       current.onReadingScroll?.({ x: scroll.x, y: scroll.y });
       return;
     }
@@ -466,7 +478,7 @@ export function attachEmbedFrame({
     postSavedState,
     postAnnotationLocations,
     restoreScroll(position) {
-      scrollPosition.current = { regionId, ...position };
+      rememberScroll(position);
       if (ready) {
         postState('studio-html-scroll-restore', { sourceRevision, ...position });
       }

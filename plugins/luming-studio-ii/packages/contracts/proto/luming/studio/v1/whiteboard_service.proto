@@ -105,16 +105,19 @@ message GetBoardSceneRequest {
 
 message GetBoardSceneResponse {
   BoardScene scene = 1;
+  bool bounded_payload_read = 2;
 }
 
 message GetObjectPayloadsRequest {
   string board_id = 1;
   repeated string object_ids = 2;
+  optional uint32 max_payload_json_bytes = 3;
 }
 
 message GetObjectPayloadsResponse {
   string board_id = 1;
   repeated ObjectPayloadResult results = 2;
+  repeated string deferred_object_ids = 3;
 }
 
 message ObjectPayloadResult {

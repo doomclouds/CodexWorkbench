@@ -61,6 +61,10 @@ function updateRecords(actions: HTMLElement[], records: Map<HTMLElement, ActionT
 }
 
 function isRendered(action: HTMLElement) {
+  if (typeof action.checkVisibility === 'function') {
+    return action.checkVisibility({ visibilityProperty: true, checkVisibilityCSS: true });
+  }
+
   const view = action.ownerDocument.defaultView;
   if (!view) {
     return false;

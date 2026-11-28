@@ -192,6 +192,33 @@ describe('Canvas', () => {
     expect(onEditIntent).not.toHaveBeenCalled();
   });
 
+  it('keeps the nearby render window across modest zoom changes while reporting exact visibility', async () => {
+    const edge = {
+      ...scene.objects[0]!,
+      id: 'edge',
+      geometry: { x: 665, y: 90, width: 45, height: 25, rotation: 0 },
+    };
+    const board = { ...scene, objects: [...scene.objects, edge] };
+    const visible = vi.fn<(ids: readonly string[]) => void>();
+    const view = (zoom: number) =>
+      renderCanvas({
+        scene: board,
+        onVisibleObjectsChange: visible,
+        viewportRequest: { requestId: String(zoom), viewport: { x: 0, y: 0, zoom } },
+      });
+    view(1);
+    await flushFrame();
+    const element = fixture.host.querySelector('[data-canvas-object="edge"]');
+    expect(element).toBeInstanceOf(HTMLElement);
+    view(1.6);
+    await flushFrame();
+    expect(fixture.host.querySelector('[data-canvas-object="edge"]')).toBe(element);
+    expect(visible.mock.lastCall?.[0]).not.toContain('edge');
+    view(4);
+    await flushFrame();
+    expect(fixture.host.querySelector('[data-canvas-object="edge"]')).toBeNull();
+  });
+
   it('paints a peer resize on a read-only canvas until the committed version supersedes it', () => {
     const gesture = {
       kind: 'resize',

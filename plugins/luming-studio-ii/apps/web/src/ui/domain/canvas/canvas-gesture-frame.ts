@@ -8,6 +8,7 @@ import {
   resolveCanvasConnection,
 } from './canvas-creation.js';
 import type { CanvasProjection, InkGesture } from './canvas-creation.js';
+import { snapObjectMove } from './canvas-move-snapping.js';
 import { rotateConnection, translateConnection } from './connectors/geometry.js';
 import type {
   CanvasConnection,
@@ -20,16 +21,11 @@ import type {
   CanvasTool,
   CanvasViewport,
 } from './contracts.js';
-import { getMoveSnapBounds, previewTransform, snapMove } from './gestures/index.js';
+import { previewTransform } from './gestures/index.js';
 import type { TransformGesture, TransformModifiers } from './gestures/index.js';
 import { scaleInk, snapInkPoint } from './ink/geometry.js';
-import { projectObject, queryScene } from './scene/index.js';
-import {
-  getObjectBounds,
-  getViewportBounds,
-  panViewport,
-  screenToBoard,
-} from './viewport/index.js';
+import { projectObject } from './scene/index.js';
+import { panViewport, screenToBoard } from './viewport/index.js';
 import type { CanvasViewportSize } from './viewport/index.js';
 
 interface PlacementGesture {
@@ -86,7 +82,6 @@ interface FrameProjection extends CanvasProjection {
 const dragThreshold = 4;
 const moveThreshold = 5;
 const placementThreshold = 5;
-const snappingOverscan = 12;
 
 function offset(start: CanvasPoint, end: CanvasPoint) {
   return { x: end.x - start.x, y: end.y - start.y };
@@ -166,10 +161,7 @@ function transformFrame(
   modifiers: TransformModifiers,
   view: FrameProjection,
 ): CanvasFrame {
-  const bounds = getMoveSnapBounds(action.transform, point);
-  const visible = getViewportBounds(viewport, view.size, snappingOverscan);
-  const references = bounds ? alignmentReferences(action.transform, visible, view) : [];
-  const snap = bounds && snapMove(bounds, references, viewport.zoom);
+  const snap = snapObjectMove(action.transform, point, viewport, view);
   const aim = snap ? { x: point.x + snap.offset.x, y: point.y + snap.offset.y } : point;
   const intent = previewTransform(action.transform, aim, modifiers);
   if (!intent) {
@@ -192,20 +184,6 @@ function transformFrame(
   }
 
   return { viewport, guides: snap?.guides, preview: { ...intent, changes } };
-}
-
-function alignmentReferences(
-  transform: TransformGesture,
-  bounds: ReturnType<typeof getViewportBounds>,
-  { index, pending }: FrameProjection,
-) {
-  const ids = new Set(transform.targets.map(({ id }) => id));
-
-  return queryScene(index, bounds, pending)
-    .filter(
-      ({ object }) => !ids.has(object.id) && object.kind !== 'ink' && object.kind !== 'connector',
-    )
-    .map(({ geometry }) => getObjectBounds(geometry));
 }
 
 function connectionFrame(

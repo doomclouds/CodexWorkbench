@@ -224,6 +224,12 @@ it('preserves numbered lists, heading depth and valid legacy string table cells 
   expect(fixture.host.querySelector('[contenteditable]')).toBeNull();
 });
 
+it('does not force a scroll layout when mounting a new document at its initial position', () => {
+  const scroll = vi.spyOn(HTMLElement.prototype, 'scrollTo');
+  render();
+  expect(scroll).not.toHaveBeenCalled();
+});
+
 it('retains the inline and expanded scroll position across opening and returning', async () => {
   render();
   const inline = readRegion(fixture.host);

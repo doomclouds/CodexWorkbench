@@ -528,6 +528,10 @@ function CanvasTextBody({
     { editing, saving, failure },
   );
 
+  if (captionState === 'concealed') {
+    return null;
+  }
+
   return (
     <div
       className="studio-ui-canvas-text-body"
@@ -568,6 +572,7 @@ function CanvasTextBody({
 
 const labelCapabilities: CanvasObjectExtension['capabilities'] = {
   content: 'passive',
+  editOnlyWhenSelected: true,
   move: true,
   resize: true,
   rotate: true,
@@ -612,6 +617,10 @@ export const noteExtension: CanvasObjectExtension = {
 
 export const shapeExtension: CanvasObjectExtension = {
   kind: 'shape',
+  isPassiveContentVisible: (view) =>
+    canvasLabelState(view, readTextSource(view.payload, view.object.label)?.body.fontSize, {
+      editing: false,
+    }) !== 'concealed',
   capabilities: richLabelCapabilities,
   placement: {
     kind: 'shape',

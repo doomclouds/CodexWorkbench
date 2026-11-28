@@ -50,6 +50,271 @@ function nextSnapshot(session: WhiteboardSession): Promise<WhiteboardSnapshot> {
   });
 }
 
+function documentPayloads(ids: readonly string[]) {
+  return ids.map((id) => ({
+    kind: 'loaded' as const,
+    payload: { id, version: 0n, body: { kind: 'document' as const, value: { blocks: [] } } },
+  }));
+}
+
+test('uses the bounded payload page advertised by the scene and follows a deferred suffix', async () => {
+  const original = documentObject('正文', 0n, 0n);
+  const documents = Array.from({ length: 200 }, (_, index) => ({
+    ...original,
+    id: String(index),
+  }));
+  const batchSizes: number[] = [];
+  const session = createWhiteboardSession(
+    {
+      async getScene() {
+        return { ...boardScene(0n, original), objects: documents, boundedPayloadRead: true };
+      },
+      async getPayloads() {
+        throw new Error('The scene supports bounded pages.');
+      },
+      async getPayloadPage(_board: string, ids: readonly string[]) {
+        batchSizes.push(ids.length);
+        const processed = Math.min(ids.length, 100);
+
+        return { results: documentPayloads(ids.slice(0, processed)), processed };
+      },
+    },
+    boardId,
+  );
+  const opened = nextSnapshot(session);
+  const close = session.open();
+  try {
+    await opened;
+    const first = nextSnapshot(session);
+    session.observeVisible(documents.map(({ id }) => id));
+    const shown = await first;
+    expect(shown.kind === 'ready' && shown.payloads.size).toBe(100);
+    const final = await nextSnapshot(session);
+    expect(final.kind === 'ready' && final.payloads.size).toBe(200);
+    expect(batchSizes).toEqual([192, 100]);
+  } finally {
+    close();
+  }
+});
+
+test('loads at most 48 payloads per request and combines rapid follow-up results', async () => {
+  const original = documentObject('正文', 0n, 0n);
+  const documents = Array.from({ length: 105 }, (_, index) => ({
+    ...original,
+    id: String(index),
+  }));
+  const batchSizes: number[] = [];
+  const shownSizes: number[] = [];
+  const session = createWhiteboardSession(
+    {
+      async getScene() {
+        return { ...boardScene(0n, original), objects: documents };
+      },
+      async getPayloads(_board, ids) {
+        batchSizes.push(ids.length);
+
+        return documentPayloads(ids);
+      },
+    },
+    boardId,
+  );
+  const opened = nextSnapshot(session);
+  const close = session.open();
+  try {
+    await opened;
+    const loaded = new Promise<void>((resolve) => {
+      const unsubscribe = session.subscribe(() => {
+        const state = session.getSnapshot();
+        if (state.kind === 'ready') {
+          shownSizes.push(state.payloads.size);
+          if (state.payloads.size === documents.length) {
+            unsubscribe();
+            resolve();
+          }
+        }
+      });
+    });
+    session.observeVisible(documents.map(({ id }) => id));
+    await loaded;
+    expect(batchSizes).toEqual([48, 48, 9]);
+    expect(shownSizes).toEqual([48, 105]);
+  } finally {
+    close();
+  }
+});
+
+test('keeps completed payloads visible during a slow request and retries only missing objects', async () => {
+  const original = documentObject('正文', 0n, 0n);
+  const documents = Array.from({ length: 105 }, (_, index) => ({
+    ...original,
+    id: String(index),
+  }));
+  const batchSizes: number[] = [];
+  let rejectSlowRequest: ((error: Error) => void) | undefined;
+  const slowRequest = new Promise<ReturnType<typeof documentPayloads>>((_resolve, reject) => {
+    rejectSlowRequest = reject;
+  });
+  const session = createWhiteboardSession(
+    {
+      async getScene() {
+        return { ...boardScene(0n, original), objects: documents };
+      },
+      async getPayloads(_board, ids) {
+        batchSizes.push(ids.length);
+
+        return batchSizes.length === 3 ? slowRequest : documentPayloads(ids);
+      },
+    },
+    boardId,
+  );
+  const opened = nextSnapshot(session);
+  const close = session.open();
+  try {
+    await opened;
+    const first = nextSnapshot(session);
+    session.observeVisible(documents.map(({ id }) => id));
+    const visible = await first;
+    expect(visible.kind === 'ready' && visible.payloads.size).toBe(48);
+    const intermediate = await nextSnapshot(session);
+    expect(intermediate.kind === 'ready' && intermediate.payloads.size).toBe(96);
+    const rejected = nextSnapshot(session);
+    if (!rejectSlowRequest) {
+      throw new Error('The delayed payload request was not initialized.');
+    }
+
+    rejectSlowRequest(new Error('正文连接已中断'));
+    const error = await rejected;
+    expect(error).toMatchObject({ kind: 'ready', payloadError: '正文连接已中断' });
+    expect(error.kind === 'ready' && error.payloads.size).toBe(96);
+    session.retryPayloads();
+    const finished = await nextSnapshot(session);
+    expect(finished.kind === 'ready' && finished.payloads.size).toBe(105);
+    expect(batchSizes).toEqual([48, 48, 9, 9]);
+  } finally {
+    close();
+  }
+});
+
+test('merges a move receipt into scene order without replacing unchanged geometry or payloads', async () => {
+  const original = documentObject('正文', 0n, 0n);
+  const neighbor = { ...original, id: 'neighbor' };
+  const moved = { ...original, geometryVersion: 1n, geometry: { ...original.geometry, x: 48 } };
+  const payload: WhiteboardPayload = {
+    id: objectId,
+    version: 0n,
+    body: { kind: 'document', value: { blocks: [] } },
+  };
+  const session = createWhiteboardSession(
+    {
+      async getScene() {
+        return { ...boardScene(0n, original), objects: [neighbor, original] };
+      },
+      async getPayloads() {
+        return [{ kind: 'loaded', payload }];
+      },
+      async moveObjects({ commandId }) {
+        return { kind: 'applied', boardId, commandId, revision: 1n, objects: [moved] };
+      },
+    },
+    boardId,
+  );
+  const opened = nextSnapshot(session);
+  const close = session.open();
+  try {
+    await opened;
+    const loaded = nextSnapshot(session);
+    session.observeVisible([objectId]);
+    const before = await loaded;
+    await session.submitMove({
+      boardId,
+      commandId: 'move-geometry',
+      targets: [{ id: objectId, expectedGeometryVersion: 0n }],
+      delta: { x: 48, y: 0 },
+    });
+    const after = session.getSnapshot();
+    expect(after).toMatchObject({ scene: { revision: 1n, objects: [neighbor, moved] } });
+    if (before.kind !== 'ready' || after.kind !== 'ready') {
+      throw new Error('The board did not provide both move snapshots.');
+    }
+
+    expect(after.payloads).toBe(before.payloads);
+    expect(after.scene.objects[0]).toBe(neighbor);
+  } finally {
+    close();
+  }
+});
+
+test.each(['submit', 'lookup'] as const)(
+  'stages a matching move status before publishing its scene through %s',
+  async (route) => {
+    const original = documentObject('正文', 0n, 0n);
+    const moved = { ...original, geometryVersion: 1n, geometry: { ...original.geometry, x: 30 } };
+    const receipt = {
+      boardId,
+      commandId: 'same-move',
+      kind: 'applied' as const,
+      revision: 1n,
+      objects: [moved],
+    };
+    const session = createWhiteboardSession(
+      {
+        async getScene() {
+          return boardScene(0n, original);
+        },
+        async getPayloads() {
+          return [];
+        },
+        async moveObjects() {
+          return receipt;
+        },
+        async getReceipt() {
+          return receipt;
+        },
+      },
+      boardId,
+    );
+    const opened = nextSnapshot(session);
+    const close = session.open();
+    try {
+      await opened;
+      const events: string[] = [];
+      const stop = session.subscribe(() => events.push('scene-published'));
+      try {
+        function stage() {
+          events.push('feedback-staged');
+
+          return () => {
+            events.push('feedback-published');
+          };
+        }
+
+        await expect(session.readReceipt('another-move', stage)).rejects.toThrow('不匹配');
+        expect(events).toEqual([]);
+        if (route === 'submit') {
+          await session.submitMove(
+            {
+              boardId,
+              commandId: receipt.commandId,
+              targets: [{ id: objectId, expectedGeometryVersion: 0n }],
+              delta: { x: 30, y: 0 },
+            },
+            stage,
+          );
+        } else {
+          await session.readReceipt(receipt.commandId, stage);
+        }
+
+        expect(events).toEqual(['feedback-staged', 'scene-published', 'feedback-published']);
+        expect(session.getSnapshot()).toMatchObject({ scene: { revision: 1n, objects: [moved] } });
+      } finally {
+        stop();
+      }
+    } finally {
+      close();
+    }
+  },
+);
+
 test('projects the palette changes and distinguishes a cleared palette from an absent receipt field', async () => {
   const object = documentObject('正文', 0n, 0n);
   const original = '#3864A2';

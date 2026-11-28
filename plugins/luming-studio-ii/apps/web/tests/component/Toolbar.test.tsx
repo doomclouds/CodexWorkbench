@@ -51,6 +51,35 @@ describe('Toolbar', () => {
     expect(document.activeElement).toBe(action(label));
   }
 
+  it('uses native visibility checks to choose the tab stop when available', () => {
+    const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'checkVisibility');
+    const visible = vi.fn(function visibleAction(this: HTMLElement) {
+      return this.textContent !== '收起';
+    });
+    Object.defineProperty(HTMLElement.prototype, 'checkVisibility', {
+      configurable: true,
+      value: visible,
+    });
+
+    try {
+      fixture.render(
+        <Toolbar label="工具">
+          <button>收起</button>
+          <button>展开</button>
+        </Toolbar>,
+      );
+      expect(action('收起').tabIndex).toBe(-1);
+      expect(action('展开').tabIndex).toBe(0);
+      expect(visible).toHaveBeenCalled();
+    } finally {
+      if (original) {
+        Object.defineProperty(HTMLElement.prototype, 'checkVisibility', original);
+      } else {
+        Reflect.deleteProperty(HTMLElement.prototype, 'checkVisibility');
+      }
+    }
+  });
+
   it('names a toolbar and gives only the first available action a Tab stop on open', () => {
     expectTypeOf<ToolbarProps>().not.toHaveProperty('ref');
     fixture.render(

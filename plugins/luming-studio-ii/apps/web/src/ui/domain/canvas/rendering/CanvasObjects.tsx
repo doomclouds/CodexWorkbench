@@ -1,4 +1,4 @@
-import { memo, useMemo, useRef } from 'react';
+import { memo, useCallback, useMemo, useRef, useSyncExternalStore } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 
 import { builtInFrame, CanvasObjectContent } from '../adapters/index.js';
@@ -16,6 +16,7 @@ import type {
 } from '../contracts.js';
 import type { ProjectedCanvasObject } from '../scene/index.js';
 import { CanvasRegisteredBody } from './CanvasRegisteredBody.js';
+import type { CanvasObjectStore } from './object-store.js';
 import { useContentTracking } from './native-content-locations.js';
 import './CanvasObjects.css';
 
@@ -27,13 +28,16 @@ interface CanvasDraftView {
 
 interface CanvasObjectsProps {
   objects: readonly ProjectedCanvasObject[];
+  movePreview: CanvasObjectStore<ProjectedCanvasObject>;
   registry: CanvasObjectRegistry;
   selection: readonly string[];
   canEdit: boolean;
   contentById?: ReadonlyMap<string, ReactNode>;
-  payloadById?: ReadonlyMap<string, CanvasObjectPayload>;
+  payloads: CanvasObjectStore<CanvasObjectPayload>;
   drafts?: readonly CanvasDraftView[];
   zoom?: number;
+  activeZoom: CanvasObjectStore<number>;
+  activeZoomIds: ReadonlySet<string>;
   activeEmbedId?: string;
   editRequest?: { readonly id: string; readonly sequence: number };
   formatObjectRequest?: CanvasProps['formatObjectRequest'];
@@ -73,6 +77,7 @@ interface CanvasRenderedObjectProps {
   frame?: ReturnType<typeof builtInFrame>;
   selected?: boolean;
   singleSelected?: boolean;
+  keepPassiveContent?: boolean;
   embedActive?: boolean;
   canEdit?: boolean;
   canEditContent?: boolean;
@@ -199,6 +204,45 @@ function managesAnnotationEditing(extension: CanvasObjectExtension | undefined, 
   return enabled && extension?.capabilities.managesAnnotationEditing === true;
 }
 
+function hasEditCaption(
+  kind: CanvasObjectDraft['kind'],
+  extension: CanvasObjectExtension | undefined,
+  payload: CanvasObjectPayload | undefined,
+  selected: boolean,
+) {
+  const caption = extension?.capabilities.content === 'embedded' || (kind === 'video' && selected);
+
+  return caption && usesOwnedFrame(kind, extension?.View, payload);
+}
+
+function editAccess(
+  extension: CanvasObjectExtension | undefined,
+  active: boolean,
+  expanded: boolean,
+  allowAnnotation: boolean,
+  access: Pick<CanvasObjectsProps, 'canEdit' | 'canEditExpandedObject'>,
+) {
+  const editable = access.canEdit || Boolean(expanded && access.canEditExpandedObject);
+  const annotation = managesAnnotationEditing(extension, allowAnnotation);
+  const scoped = extension?.capabilities.editOnlyWhenSelected;
+  const canEdit = editable && (!scoped || active);
+
+  return { editable, canEditContent: Boolean(extension?.View && (canEdit || annotation)) };
+}
+
+function passiveBody(
+  extension: CanvasObjectExtension | undefined,
+  active: boolean,
+  view: Pick<CanvasObjectViewProps, 'object' | 'geometry' | 'payload' | 'zoom'>,
+  body: ReactNode,
+) {
+  if (active || extension?.capabilities.content !== 'passive') {
+    return body;
+  }
+
+  return extension.isPassiveContentVisible?.(view) === false ? false : body;
+}
+
 const CanvasObjectView = memo(
   ({
     object,
@@ -211,6 +255,7 @@ const CanvasObjectView = memo(
     frame,
     selected = false,
     singleSelected,
+    keepPassiveContent,
     embedActive = false,
     canEdit = false,
     canEditContent,
@@ -250,6 +295,14 @@ const CanvasObjectView = memo(
       focusedReading,
     });
     const bodySelected = [singleSelected, focusedReading, expanded, revealing].some(Boolean);
+    const activeContent = [
+      keepPassiveContent,
+      bodySelected,
+      editRequest !== undefined,
+      formatRequest,
+      contentTracking,
+      content != null,
+    ].some(Boolean);
     const nativeActive = !View || nativeBodyActive(object.kind, geometry, zoom, bodySelected);
     const { interactive, blockedEmbed, inert } = bodyInteraction(
       mode,
@@ -315,7 +368,7 @@ const CanvasObjectView = memo(
           object={object}
           geometry={geometry}
           zoom={zoom}
-          content={body}
+          content={passiveBody(extension, activeContent, { object, geometry, payload, zoom }, body)}
           connectorRoute={connectorRoute}
           interactive={interactive}
           inert={inert}
@@ -327,6 +380,47 @@ const CanvasObjectView = memo(
           Frame={frame?.Frame}
         />
       </div>
+    );
+  },
+);
+
+function useObjectSnapshot<Value>(store: CanvasObjectStore<Value>, id: string) {
+  const subscribe = useCallback((notify: () => void) => store.subscribe(id, notify), [id, store]);
+  const read = useCallback(() => store.read(id), [id, store]);
+
+  return useSyncExternalStore(subscribe, read, read);
+}
+
+const SubscribedCanvasObject = memo(
+  ({
+    id,
+    movePreview,
+    payloads,
+    activeZoom,
+    ...props
+  }: CanvasRenderedObjectProps & {
+    id: string;
+    movePreview: CanvasObjectsProps['movePreview'];
+    payloads: CanvasObjectsProps['payloads'];
+    activeZoom: CanvasObjectsProps['activeZoom'];
+  }) => {
+    const preview = useObjectSnapshot(movePreview, id);
+    const payload = useObjectSnapshot(payloads, id);
+    const exactZoom = useObjectSnapshot(activeZoom, id);
+    const { object, extension, selected } = props;
+    const caption = hasEditCaption(object.kind, extension, payload, selected === true);
+
+    return (
+      <CanvasObjectView
+        {...props}
+        id={id}
+        payload={payload}
+        zoom={objectZoom(props.frame, extension, exactZoom ?? props.zoom)}
+        canEdit={props.canEdit && caption}
+        object={preview?.object ?? props.object}
+        geometry={preview?.geometry ?? props.geometry}
+        connectorRoute={preview ? preview.connectorRoute : props.connectorRoute}
+      />
     );
   },
 );
@@ -351,124 +445,140 @@ function allowedFormatRequest(
   return request;
 }
 
-export function CanvasObjects({
-  objects,
-  registry,
-  selection,
-  canEdit,
-  contentById,
-  payloadById,
-  drafts,
-  zoom = 1,
-  activeEmbedId,
-  editRequest,
-  formatObjectRequest,
-  viewing,
-  focusObjectId,
-  expandedObjectId,
-  canEditExpandedObject,
-  readHtmlSource,
-  downloadFile,
-  readDocumentAsset,
-  uploadDocumentImage,
-  onOpenNativeSource,
-  nativeSourceLabel,
-  nativeSourceRequest,
-  annotationActive,
-  onAnnotateContent,
-  hasContentEditPermission,
-  contentTracking = emptyContentTracking,
-  isLocked,
-  canWriteObject = () => true,
-  onObjectIntent,
-  onOpenPresentation,
-  onClosePresentation,
-  onObjectNavigation,
-  onObjectRetentionChange,
-  onObjectEditingChange,
-}: CanvasObjectsProps) {
-  const selectedIds = useMemo(() => new Set(selection), [selection]);
-  const annotateEmbeds = Boolean(annotationActive && onAnnotateContent);
-  const documentTools = { readDocumentAsset, uploadDocumentImage };
-  const allowManagedAnnotation = Boolean(annotationActive && hasContentEditPermission);
-  const single = selection.length === 1;
-  const formatRequest =
-    selection.length === 1 && selectedIds.has(formatObjectRequest?.id ?? '')
-      ? formatObjectRequest
-      : undefined;
-  const projected = objects.map(({ object, geometry, connectorRoute }) => {
-    const { id, kind, locked } = object;
-    const extension = registry.get(kind);
-    const frame = builtInFrame(kind);
-    const expanded = id === expandedObjectId;
-    const focused = id === focusObjectId;
-    const selected = selectedIds.has(id);
-    const editable = canEdit || Boolean(expanded && canEditExpandedObject);
-    const annotationAuthority = managesAnnotationEditing(extension, allowManagedAnnotation);
-    const nativeSource =
-      nativeSourceRequest?.source.elementId === id ? nativeSourceRequest : undefined;
+export const CanvasObjects = memo(
+  ({
+    objects,
+    movePreview,
+    registry,
+    selection,
+    canEdit,
+    contentById,
+    payloads,
+    drafts,
+    zoom = 1,
+    activeZoom,
+    activeZoomIds,
+    activeEmbedId,
+    editRequest,
+    formatObjectRequest,
+    viewing,
+    focusObjectId,
+    expandedObjectId,
+    canEditExpandedObject,
+    readHtmlSource,
+    downloadFile,
+    readDocumentAsset,
+    uploadDocumentImage,
+    onOpenNativeSource,
+    nativeSourceLabel,
+    nativeSourceRequest,
+    annotationActive,
+    onAnnotateContent,
+    hasContentEditPermission,
+    contentTracking = emptyContentTracking,
+    isLocked,
+    canWriteObject = () => true,
+    onObjectIntent,
+    onOpenPresentation,
+    onClosePresentation,
+    onObjectNavigation,
+    onObjectRetentionChange,
+    onObjectEditingChange,
+  }: CanvasObjectsProps) => {
+    const selectedIds = useMemo(() => new Set(selection), [selection]);
+    const annotateEmbeds = Boolean(annotationActive && onAnnotateContent);
+    const documentTools = { readDocumentAsset, uploadDocumentImage };
+    const editPermissions = { canEdit, canEditExpandedObject };
+    const allowManagedAnnotation = Boolean(annotationActive && hasContentEditPermission);
+    const single = selection.length === 1;
+    const formatRequest =
+      selection.length === 1 && selectedIds.has(formatObjectRequest?.id ?? '')
+        ? formatObjectRequest
+        : undefined;
+    const projected = objects.map(({ object, geometry, connectorRoute }) => {
+      const { id, kind, locked } = object;
+      const extension = registry.get(kind);
+      const frame = builtInFrame(kind);
+      const expanded = id === expandedObjectId;
+      const focused = id === focusObjectId;
+      const selected = selectedIds.has(id);
+      const singleSelected = single && selected;
+      const activeLabel = [selected, expanded, focused, activeZoomIds.has(id)].some(Boolean);
+      const { editable, canEditContent } = editAccess(
+        extension,
+        activeLabel,
+        expanded,
+        allowManagedAnnotation,
+        editPermissions,
+      );
+      const nativeSource =
+        nativeSourceRequest?.source.elementId === id ? nativeSourceRequest : undefined;
+
+      return (
+        <SubscribedCanvasObject
+          key={id}
+          object={object}
+          id={id}
+          movePreview={movePreview}
+          content={contentById?.get(id)}
+          payloads={payloads}
+          activeZoom={activeZoom}
+          geometry={geometry}
+          connectorRoute={connectorRoute}
+          extension={extension}
+          frame={frame}
+          selected={selected}
+          singleSelected={singleSelected}
+          keepPassiveContent={extension?.isPassiveContentVisible ? activeLabel : undefined}
+          embedActive={viewing || id === activeEmbedId || annotateEmbeds}
+          focusedReading={focused}
+          expanded={expanded}
+          canEdit={editable}
+          canEditContent={canEditContent}
+          locked={locked || isLocked?.(id)}
+          editRequest={editRequest?.id === id ? editRequest.sequence : undefined}
+          formatRequest={allowedFormatRequest(formatRequest, id, extension)}
+          readHtmlSource={readHtmlSource}
+          downloadFile={downloadFile}
+          {...(kind === 'document' ? documentTools : undefined)}
+          onOpenNativeSource={onOpenNativeSource}
+          nativeSourceLabel={nativeSourceLabel}
+          nativeSourceRequest={nativeSource}
+          annotationActive={annotationActive}
+          onAnnotateContent={viewing && !focused ? undefined : onAnnotateContent}
+          contentTracking={contentTracking.get(id)}
+          onObjectIntent={canWriteObject(kind) ? onObjectIntent : undefined}
+          onOpenPresentation={onOpenPresentation}
+          onClosePresentation={expanded || focused ? onClosePresentation : undefined}
+          onObjectNavigation={onObjectNavigation}
+          onObjectRetentionChange={onObjectRetentionChange}
+          onObjectEditingChange={onObjectEditingChange}
+          zoom={zoom}
+        />
+      );
+    });
+    const previews = drafts?.map(({ key, object, connectorRoute }) => {
+      const extension = registry.get(object.kind);
+      const frame = builtInFrame(object.kind);
+
+      return (
+        <CanvasObjectView
+          key={key}
+          object={object}
+          geometry={connectorRoute?.geometry ?? object.geometry}
+          connectorRoute={connectorRoute}
+          extension={extension}
+          frame={frame}
+          zoom={objectZoom(frame, extension, zoom)}
+        />
+      );
+    });
 
     return (
-      <CanvasObjectView
-        key={id}
-        object={object}
-        id={id}
-        content={contentById?.get(id)}
-        payload={payloadById?.get(id)}
-        geometry={geometry}
-        connectorRoute={connectorRoute}
-        extension={extension}
-        frame={frame}
-        selected={selected}
-        singleSelected={single && selected}
-        embedActive={viewing || id === activeEmbedId || annotateEmbeds}
-        focusedReading={focused}
-        expanded={expanded}
-        canEdit={editable}
-        canEditContent={[editable, annotationAuthority].some(Boolean)}
-        locked={locked || isLocked?.(id)}
-        editRequest={editRequest?.id === id ? editRequest.sequence : undefined}
-        formatRequest={allowedFormatRequest(formatRequest, id, extension)}
-        readHtmlSource={readHtmlSource}
-        downloadFile={downloadFile}
-        {...(kind === 'document' ? documentTools : undefined)}
-        onOpenNativeSource={onOpenNativeSource}
-        nativeSourceLabel={nativeSourceLabel}
-        nativeSourceRequest={nativeSource}
-        annotationActive={annotationActive}
-        onAnnotateContent={viewing && !focused ? undefined : onAnnotateContent}
-        contentTracking={contentTracking.get(id)}
-        onObjectIntent={canWriteObject(kind) ? onObjectIntent : undefined}
-        onOpenPresentation={onOpenPresentation}
-        onClosePresentation={expanded || focused ? onClosePresentation : undefined}
-        onObjectNavigation={onObjectNavigation}
-        onObjectRetentionChange={onObjectRetentionChange}
-        onObjectEditingChange={onObjectEditingChange}
-        zoom={objectZoom(frame, extension, zoom)}
-      />
+      <>
+        {projected}
+        {previews}
+      </>
     );
-  });
-  const previews = drafts?.map(({ key, object, connectorRoute }) => {
-    const extension = registry.get(object.kind);
-    const frame = builtInFrame(object.kind);
-
-    return (
-      <CanvasObjectView
-        key={key}
-        object={object}
-        geometry={connectorRoute?.geometry ?? object.geometry}
-        connectorRoute={connectorRoute}
-        extension={extension}
-        frame={frame}
-        zoom={objectZoom(frame, extension, zoom)}
-      />
-    );
-  });
-
-  return (
-    <>
-      {projected}
-      {previews}
-    </>
-  );
-}
+  },
+);

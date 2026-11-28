@@ -22,6 +22,29 @@ function move(...ids: string[]): MoveCommand {
 }
 
 describe('Whiteboard queries', () => {
+  it('budgets current payload bytes before decoding an oversized batch and always advances one object', () => {
+    class SizedRepository extends TestWhiteboardRepository {
+      payloadByteSize(_boardId: string, ids: readonly string[]) {
+        return ids.reduce((size, id) => size + (id === 'large' ? 500n : 20n), 0n);
+      }
+    }
+    const repository = new SizedRepository([]);
+    const application = createWhiteboardApplication(repository);
+    const ids = ['small', 'large', 'tail'];
+    expect(application.getObjectPayloadPage(viewer, boardId, ids, 100).deferredObjectIds).toEqual([
+      'large',
+      'tail',
+    ]);
+    expect(
+      application.getObjectPayloadPage(viewer, boardId, ids.slice(1), 100).deferredObjectIds,
+    ).toEqual(['tail']);
+    expect(repository.payloadQueries).toEqual([['small'], ['large']]);
+    expect(() => application.getObjectPayloadPage({ id: 'guest' }, boardId, ids, 100)).toThrow(
+      WhiteboardAccessError,
+    );
+    expect(repository.payloadQueries).toHaveLength(2);
+  });
+
   it('loads only scene metadata and reads distinct requested payload IDs separately', () => {
     const note = object('note', { kind: 'document', payloadVersion: 50n });
     const document: PayloadRecord = {

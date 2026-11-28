@@ -20,6 +20,7 @@ export function missingPayloads(
   visible: readonly string[],
   objects: ReadonlyMap<string, WhiteboardObject>,
   cache: PayloadCache,
+  limit = batchLimit,
 ): readonly PayloadRequest[] {
   const requests: PayloadRequest[] = [];
   for (const id of visible) {
@@ -31,7 +32,7 @@ export function missingPayloads(
     }
 
     requests.push({ id, version });
-    if (requests.length === batchLimit) {
+    if (requests.length === limit) {
       break;
     }
   }

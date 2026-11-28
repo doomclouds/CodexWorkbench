@@ -16,6 +16,7 @@ type CanvasRoot = RefObject<HTMLDivElement | null>;
 
 export interface CanvasFrame {
   viewport: CanvasViewport;
+  continuousZoom?: boolean;
   preview?: Extract<CanvasEditIntent, { changes: readonly unknown[] }>;
   draft?: CanvasCreateIntent | CanvasDuplicateIntent;
   placementHover?: { requestId: string; point: CanvasPoint };
@@ -36,11 +37,22 @@ export interface CanvasFrameController {
   draw: (resolve: () => CanvasFrame) => void;
 }
 
-export function useCanvasFrame(root: CanvasRoot, initialViewport?: CanvasViewport) {
+function sameBareViewport(previous: CanvasFrame, next: CanvasFrame) {
+  const bare = Object.keys(previous).length === 1 && Object.keys(next).length === 1;
+
+  return bare && previous.viewport === next.viewport;
+}
+
+export function useCanvasFrame(
+  root: CanvasRoot,
+  initialViewport: CanvasViewport | undefined,
+  present: (viewport: CanvasViewport) => void,
+) {
   const [frame, setFrame] = useState<CanvasFrame>(() => ({
     viewport: normalizeViewport(initialViewport),
   }));
   const current = useRef(frame);
+  const committed = useRef(frame);
   const scheduled = useRef<ScheduledFrame | null>(null);
   const drawing = useRef<(() => CanvasFrame) | undefined>(undefined);
 
@@ -60,10 +72,15 @@ export function useCanvasFrame(root: CanvasRoot, initialViewport?: CanvasViewpor
     drawing.current = undefined;
     if (resolve) {
       current.current = resolve();
+      if (sameBareViewport(committed.current, current.current)) {
+        return;
+      }
     }
 
+    present(current.current.viewport);
+    committed.current = current.current;
     setFrame(current.current);
-  }, []);
+  }, [present]);
 
   const schedule = useCallback(() => {
     const view = root.current?.ownerDocument.defaultView;

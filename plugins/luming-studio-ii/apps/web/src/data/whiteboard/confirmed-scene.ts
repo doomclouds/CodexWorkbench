@@ -11,11 +11,7 @@ function latestPayload(current?: bigint, next?: bigint): bigint | undefined {
   return next > current ? next : current;
 }
 
-function mergeObject(object: WhiteboardObject, update?: WhiteboardObject): WhiteboardObject {
-  if (!update) {
-    return object;
-  }
-
+function mergeObject(object: WhiteboardObject, update: WhiteboardObject): WhiteboardObject {
   const payloadVersion = latestPayload(object.payloadVersion, update.payloadVersion);
   if (update.geometryVersion <= object.geometryVersion) {
     return object.payloadVersion === payloadVersion ? object : { ...object, payloadVersion };
@@ -33,13 +29,26 @@ function mergeObject(object: WhiteboardObject, update?: WhiteboardObject): White
 export function mergeConfirmedScene(
   scene: WhiteboardScene,
   receipt: WhiteboardMoveReceipt,
+  positions: ReadonlyMap<string, number>,
 ): WhiteboardScene {
   if (receipt.kind !== 'applied' || receipt.revision < scene.revision) {
     return scene;
   }
 
-  const updates = new Map(receipt.objects.map((object) => [object.id, object]));
-  const objects = scene.objects.map((object) => mergeObject(object, updates.get(object.id)));
+  let objects: WhiteboardObject[] | undefined;
+  for (const update of receipt.objects) {
+    const position = positions.get(update.id);
+    const previous = position === undefined ? undefined : scene.objects[position];
+    if (position === undefined || !previous) {
+      continue;
+    }
 
-  return { ...scene, revision: receipt.revision, objects };
+    const current = mergeObject(previous, update);
+    if (current !== previous) {
+      objects ??= scene.objects.slice();
+      objects[position] = current;
+    }
+  }
+
+  return { ...scene, revision: receipt.revision, objects: objects ?? scene.objects };
 }

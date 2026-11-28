@@ -23,7 +23,7 @@ async function downloadBytes(download, format) {
   return Buffer.concat(chunks);
 }
 
-async function inspectImage(page, bytes, mimeType, colors) {
+export async function inspectImage(page, bytes, mimeType, colors) {
   return page.evaluate(
     async ({ data, mimeType, colors }) => {
       const image = new Image();

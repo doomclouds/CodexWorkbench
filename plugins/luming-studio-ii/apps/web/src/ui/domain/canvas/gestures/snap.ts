@@ -15,6 +15,17 @@ interface AlignmentSnap {
   readonly target: CanvasRect;
 }
 
+interface SnapAnchor {
+  readonly at: number;
+  readonly target: CanvasRect;
+  readonly order: number;
+}
+
+export interface SnapCandidates {
+  readonly x: readonly SnapAnchor[];
+  readonly y: readonly SnapAnchor[];
+}
+
 const screenTolerance = 6;
 
 function anchors(bounds: CanvasRect, axis: SnapAxis) {
@@ -24,33 +35,52 @@ function anchors(bounds: CanvasRect, axis: SnapAxis) {
   return [start, start + length / 2, start + length];
 }
 
-function closestOffset(at: number, points: readonly number[], threshold: number) {
-  let nearest: number | undefined;
-  for (const point of points) {
-    const offset = at - point;
-    const distance = Math.abs(offset);
-    if (distance <= threshold && distance < Math.abs(nearest ?? Infinity)) {
-      nearest = offset;
+function sortedAnchors(targets: readonly CanvasRect[], axis: SnapAxis) {
+  const ordered = targets.flatMap((target, index) =>
+    anchors(target, axis).map((at, offset) => ({ at, target, order: index * 3 + offset })),
+  );
+
+  return ordered
+    .filter(({ at }) => Number.isFinite(at))
+    .sort((left, right) => left.at - right.at || left.order - right.order)
+    .filter(({ at }, index, sorted) => at !== sorted[index - 1]?.at);
+}
+
+export function prepareSnapCandidates(targets: readonly CanvasRect[]): SnapCandidates {
+  return { x: sortedAnchors(targets, 'x'), y: sortedAnchors(targets, 'y') };
+}
+
+function lowerBound(candidates: readonly SnapAnchor[], point: number) {
+  let low = 0;
+  let high = candidates.length;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if ((candidates[middle]?.at ?? Infinity) < point) {
+      low = middle + 1;
+    } else {
+      high = middle;
     }
   }
 
-  return nearest;
+  return low;
 }
 
 function nearestSnap(
   moving: CanvasRect,
-  candidates: readonly CanvasRect[],
+  candidates: readonly SnapAnchor[],
   axis: SnapAxis,
   threshold: number,
 ) {
-  const movingAnchors = anchors(moving, axis);
-  let nearest: AlignmentSnap | undefined;
-
-  for (const target of candidates) {
-    for (const at of anchors(target, axis)) {
-      const offset = closestOffset(at, movingAnchors, threshold);
-      if (offset !== undefined && Math.abs(offset) < Math.abs(nearest?.offset ?? Infinity)) {
-        nearest = { at, offset, target };
+  let nearest: (AlignmentSnap & { order: number }) | undefined;
+  for (const point of anchors(moving, axis)) {
+    const right = lowerBound(candidates, point);
+    for (const candidate of candidates.slice(Math.max(0, right - 1), right + 1)) {
+      const offset = candidate.at - point;
+      const distance = Math.abs(offset);
+      const best = Math.abs(nearest?.offset ?? Infinity);
+      const first = distance === best && candidate.order < (nearest?.order ?? Infinity);
+      if (distance <= threshold && (distance < best || first)) {
+        nearest = { ...candidate, offset };
       }
     }
   }
@@ -73,7 +103,7 @@ function alignmentGuide(axis: SnapAxis, moving: CanvasRect, snap: AlignmentSnap)
 
 export function snapMove(
   bounds: CanvasRect,
-  candidates: readonly CanvasRect[],
+  candidates: SnapCandidates,
   zoom: number,
 ): { offset: CanvasPoint; guides: readonly AlignmentGuide[] } {
   if (!Number.isFinite(zoom) || zoom <= 0) {
@@ -81,8 +111,8 @@ export function snapMove(
   }
 
   const threshold = screenTolerance / zoom;
-  const horizontal = nearestSnap(bounds, candidates, 'x', threshold);
-  const vertical = nearestSnap(bounds, candidates, 'y', threshold);
+  const horizontal = nearestSnap(bounds, candidates.x, 'x', threshold);
+  const vertical = nearestSnap(bounds, candidates.y, 'y', threshold);
   const offset = { x: horizontal?.offset ?? 0, y: vertical?.offset ?? 0 };
   const snapped = { ...bounds, x: bounds.x + offset.x, y: bounds.y + offset.y };
   const guides: AlignmentGuide[] = [];

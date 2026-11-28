@@ -5,7 +5,9 @@ import { ESLint } from 'eslint';
 
 const eslint = new ESLint({ cwd: fileURLToPath(new URL('../../', import.meta.url)) });
 const boundary = 'canvas/contract-boundary';
+const gestureFrameBoundary = 'canvas/gesture-frame-boundary';
 const formatBoundary = 'canvas/object-format-boundary';
+const cameraOwner = 'canvas/camera-transform-owner';
 const canvas = 'src/ui/domain/canvas/';
 const surface = 'src/surfaces/board/editor.ts';
 const component = 'tests/component/Canvas.test.tsx';
@@ -24,6 +26,34 @@ const readonlyExports = [
 ];
 
 const rejected = [
+  [
+    'a gesture frame querying the whole visible scene',
+    canvas + 'canvas-gesture-frame.ts',
+    "import { queryScene as queryBounds } from './scene/index.js';",
+    gestureFrameBoundary,
+    'sceneQuery',
+  ],
+  [
+    'a gesture frame obtaining a namespace for whole-scene queries',
+    canvas + 'canvas-gesture-frame.ts',
+    "import * as scene from './scene/index.js';",
+    gestureFrameBoundary,
+    'sceneQuery',
+  ],
+  [
+    'a canvas input handler bypassing the camera for world transform',
+    canvas + 'canvas-input.ts',
+    'world.style.transform = matrix;',
+    cameraOwner,
+    'owner',
+  ],
+  [
+    'a renderer bypassing the camera for the grid position',
+    canvas + 'rendering/CanvasObjects.tsx',
+    "grid['style']['backgroundPosition'] = offset;",
+    cameraOwner,
+    'owner',
+  ],
   [
     'the Canvas contracts load React through an inline type import',
     canvas + 'contracts.ts',
@@ -314,6 +344,13 @@ for (const [name, filePath, source, rule = boundary, messageId] of rejected) {
 }
 
 const accepted = [
+  [
+    canvas + 'canvas-gesture-frame.ts',
+    "import { projectObject } from './scene/index.js';\nimport { snapObjectMove } from './canvas-move-snapping.js';",
+  ],
+  [canvas + 'canvas-move-snapping.ts', "import { queryScene } from './scene/index.js';"],
+  [canvas + 'canvas-camera.ts', 'world.style.transform = matrix;'],
+  [canvas + 'canvas-camera.ts', 'grid.style.backgroundPosition = offset;'],
   [canvas + 'connectors/geometry.ts', `import { routeConnector } from '${connectorRoute}';`],
   [canvas + 'connectors/path.ts', `import type { ConnectorRouteInput } from '${connectorRoute}';`],
   [

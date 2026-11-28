@@ -44,6 +44,26 @@ async function replaceText(value: string) {
 }
 
 describe('registered canvas text objects', () => {
+  it('mounts shape caption content when legible and keeps an active editor through zoom changes', async () => {
+    const props = textViewProps();
+    const object = { ...props.object, kind: 'shape' as const };
+    const renderCaption = (zoom: number, editRequest?: number) =>
+      act(async () =>
+        root.render(
+          <CanvasText {...props} object={object} zoom={zoom} editRequest={editRequest} />,
+        ),
+      );
+    await renderCaption(0.125);
+    expect(host.querySelector('.studio-ui-text-object')).toBeNull();
+    await renderCaption(1);
+    expect(host.textContent).toBe('已保存内容');
+    await renderCaption(1, 1);
+    const active = editor();
+    await renderCaption(0.125, 1);
+    expect(editor()).toBe(active);
+    expect(active.textContent).toContain('已保存内容');
+  });
+
   it('registers a common content view with the supported frame capabilities', () => {
     const labels = [
       textExtension,

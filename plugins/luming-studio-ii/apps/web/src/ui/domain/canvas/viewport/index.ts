@@ -181,6 +181,17 @@ export function rectsIntersect(a: CanvasRect, b: CanvasRect): boolean {
   return overlapsX && a.y <= b.y + b.height && a.y + a.height >= b.y;
 }
 
+export function rectContainsRect(outer: CanvasRect, inner: CanvasRect): boolean {
+  if (!isValidRect(outer) || !isValidRect(inner)) {
+    return false;
+  }
+
+  const containsX = outer.x <= inner.x && outer.x + outer.width >= inner.x + inner.width;
+  const containsY = outer.y <= inner.y && outer.y + outer.height >= inner.y + inner.height;
+
+  return containsX && containsY;
+}
+
 export function mergeRects(rects: readonly CanvasRect[]): CanvasRect | undefined {
   let left = Infinity;
   let top = Infinity;

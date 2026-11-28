@@ -116,11 +116,15 @@ function visibleRect(bounds: DOMRect, canvas: DOMRect, clip = canvas): CanvasRec
     : undefined;
 }
 
-function titleRect(title: Element, canvas: DOMRect) {
+function titleRect(title: Element, canvas: DOMRect, row?: CanvasRect) {
   const bounds = title.getBoundingClientRect();
   const grip = title.querySelector('[data-canvas-drag-surface="title"]');
   const gripRect = grip ? visibleRect(grip.getBoundingClientRect(), canvas) : undefined;
-  if (!title.textContent?.trim() || !visibleRect(bounds, canvas)) {
+  const outer = visibleRect(bounds, canvas);
+  if (!outer || (row && !rectsIntersect(row, outer))) {
+    return gripRect;
+  }
+  if (!title.textContent?.trim()) {
     return gripRect;
   }
 
@@ -129,6 +133,32 @@ function titleRect(title: Element, canvas: DOMRect) {
 
   const text = visibleRect(range.getBoundingClientRect?.() ?? bounds, canvas, bounds);
   return gripRect && text ? mergeRects([gripRect, text]) : (gripRect ?? text);
+}
+
+function positionAgainstTitles(
+  anchor: CanvasRect,
+  target: CanvasRect,
+  size: CanvasViewportSize,
+  viewport: CanvasViewportSize,
+  canvas: DOMRect,
+  controls: readonly CanvasRect[],
+  titles: readonly Element[],
+) {
+  const y = target.y - gap - size.height;
+  const row = { x: 0, y: y - gap, width: viewport.width, height: size.height + 2 * gap };
+  const obstacles = (band?: CanvasRect) => [
+    ...controls,
+    ...titles.flatMap((title) => titleRect(title, canvas, band) ?? []),
+  ];
+
+  if (y >= margin && y + size.height <= viewport.height - margin) {
+    const top = placeToolbar(target, size, viewport, [anchor, ...obstacles(row)]);
+    if (top?.y === y && top.width === Math.min(size.width, viewport.width - 2 * margin)) {
+      return top;
+    }
+  }
+
+  return chooseToolbar(target, size, viewport, anchor, obstacles());
 }
 
 interface SelectionToolbarProps {
@@ -175,22 +205,33 @@ export function SelectionToolbar({
       const controlBounds = absolute(fixed);
       const handleBounds = absolute(handles);
       const selectedTitles: CanvasRect[] = [];
-      const nearbyTitles: CanvasRect[] = [];
+      const nearbyTitles: Element[] = [];
       for (const title of titles) {
-        const rect = titleRect(title, canvasBounds);
-        if (!rect) {
-          continue;
-        }
-
         const id = title.closest('[data-canvas-object]')?.getAttribute('data-canvas-object');
-        const bucket = id && selected.has(id) ? selectedTitles : nearbyTitles;
-        bucket.push(rect);
+        if (id && selected.has(id)) {
+          const rect = titleRect(title, canvasBounds);
+          if (rect) {
+            selectedTitles.push(rect);
+          }
+        } else {
+          nearbyTitles.push(title);
+        }
       }
 
       const target = mergeRects([anchor, ...handleBounds, ...selectedTitles]) ?? anchor;
-      const obstacles = [...controlBounds, ...handleBounds, ...selectedTitles, ...nearbyTitles];
+      const controls = [...controlBounds, ...handleBounds, ...selectedTitles];
       const visible = rectsIntersect(target, { x: 0, y: 0, ...viewportSize });
-      const position = visible && chooseToolbar(target, size, viewportSize, anchor, obstacles);
+      const position =
+        visible &&
+        positionAgainstTitles(
+          anchor,
+          target,
+          size,
+          viewportSize,
+          canvasBounds,
+          controls,
+          nearbyTitles,
+        );
       node.style.visibility = position ? 'visible' : 'hidden';
       if (position) {
         node.toggleAttribute('data-canvas-toolbar-compact', position.width < size.width);

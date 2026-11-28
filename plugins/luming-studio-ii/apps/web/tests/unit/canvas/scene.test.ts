@@ -16,6 +16,7 @@ import {
   projectObject,
   queryScene,
 } from '../../../src/ui/domain/canvas/scene/index.js';
+import { projectMoveWithinWindow } from '../../../src/ui/domain/canvas/scene/move-preview.js';
 
 const visibleBounds = { x: 0, y: 0, width: 30, height: 30 };
 
@@ -54,6 +55,49 @@ function connector(start: CanvasObject, end: CanvasObject): CanvasObject {
 }
 
 describe('Canvas scene', () => {
+  it('projects only moved objects and attached routes while the rendered and visible membership is stable', () => {
+    const source = shape('moved', 0, 5);
+    const anchor = shape('anchor', 20, 5);
+    const edge = connector(source, anchor);
+    const index = createSceneIndex([source, anchor, edge]);
+    const moved = move(source, 4);
+    const pending = new Map<string, CanvasObjectChange>();
+    const preview = new Map([[source.id, moved]]);
+    const bounds = { window: visibleBounds, visible: visibleBounds };
+    const projected = projectMoveWithinWindow(index, pending, preview, [moved], bounds);
+
+    expect(projected && [...projected.keys()]).toEqual([source.id, edge.id]);
+    expect(projected?.get(edge.id)).toEqual(projectObject(index, preview, edge.id));
+    expect(projected?.get(source.id)?.geometry.x).toBe(4);
+  });
+
+  it('falls back to scene projection when a move passes the visible boundary inside overscan', () => {
+    const source = shape('moved', 8, 5);
+    const index = createSceneIndex([source]);
+    const moved = move(source, 32);
+    const pending = new Map<string, CanvasObjectChange>();
+    const preview = new Map([[source.id, moved]]);
+    const bounds = { window: { ...visibleBounds, width: 80 }, visible: visibleBounds };
+
+    expect(projectMoveWithinWindow(index, pending, preview, [moved], bounds)).toBeUndefined();
+  });
+
+  it('reuses the layer-ordered projection while the entire unchanged scene stays in view', () => {
+    const behind = shape('behind', 15);
+    const front = shape('front', 5);
+    const index = createSceneIndex([behind, front]);
+    const unchanged = new Map<string, CanvasObjectChange>();
+    const first = queryScene(index, visibleBounds, unchanged);
+    const shifted = queryScene(index, { ...visibleBounds, x: 1 }, unchanged);
+    const cropped = queryScene(index, { ...visibleBounds, width: 10 }, unchanged);
+    const moving = queryScene(index, visibleBounds, new Map([[front.id, move(front, 70)]]));
+
+    expect(shifted).toBe(first);
+    expect(first.map(({ object }) => object.id)).toEqual(['behind', 'front']);
+    expect(cropped.map(({ object }) => object.id)).toEqual(['front']);
+    expect(moving.map(({ object }) => object.id)).toEqual(['behind']);
+  });
+
   it('retains version-matched edits and lets a later valid intention replace an earlier one', () => {
     const editable = shape('editable', 0);
     const locked = { ...shape('locked', 0), locked: true };

@@ -612,6 +612,7 @@ function mount() {
   vi.stubGlobal('window', dom.window);
   vi.stubGlobal('document', dom.window.document);
   vi.stubGlobal('DOMParser', dom.window.DOMParser);
+  vi.stubGlobal('XMLSerializer', dom.window.XMLSerializer);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   const root = createRoot(dom.window.document.getElementById('root')!);
   cleanups.push(async () => {
@@ -1079,6 +1080,33 @@ it('removes annotation mode buttons and converts iframe client points through it
   );
   expect(annotate.mock.calls[0]?.[0]).not.toHaveProperty('point');
   expect(frame.getAttribute('sandbox')).toBe('allow-scripts');
+});
+
+it('keeps a scrolled static frame in overview until it returns to the beginning', async () => {
+  const { dom, root, send, messages } = mount();
+  const props = canvasEmbedProps();
+  const render = (selected: boolean, zoom: number) =>
+    root.render(<CanvasEmbed {...props} selected={selected} interactive={selected} zoom={zoom} />);
+  const page = dom.window.document;
+  await act(async () => render(false, 0.14));
+  expect(page.querySelector('iframe')).toBeNull();
+  expect(page.querySelector('.studio-ui-embed__preview')).not.toBeNull();
+  await act(async () => render(true, 1));
+  const frame = page.querySelector('iframe')!;
+  const { identity } = await messages(frame);
+  const scroll = { type: 'studio-html-scroll', ...identity, x: 0, y: 230, maxX: 0, maxY: 400 };
+
+  await act(async () => {
+    send(frame, { type: 'studio-html-ready', ...identity });
+    send(frame, scroll);
+  });
+  await act(async () => render(false, 0.14));
+  expect(page.querySelector('iframe')).toBe(frame);
+  expect(page.querySelector('.studio-ui-embed__preview')).toBeNull();
+
+  await act(async () => send(frame, { ...scroll, y: 0 }));
+  expect(page.querySelector('iframe')).toBeNull();
+  expect(page.querySelector('.studio-ui-embed__preview')).not.toBeNull();
 });
 
 it('preserves authenticated iframe scroll across HTML source replacements after the next ready', async () => {

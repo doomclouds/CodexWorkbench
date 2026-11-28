@@ -77,7 +77,10 @@ export function useObjectNavigation(
     if (factor !== 1) {
       onViewportNavigation?.('zoom');
     }
-    frame.update({ viewport: zoomViewport(frame.read().viewport, anchor, factor) });
+    frame.update({
+      viewport: zoomViewport(frame.read().viewport, anchor, factor),
+      continuousZoom: true,
+    });
   }
 
   function navigate(id: string, event: CanvasObjectNavigation) {

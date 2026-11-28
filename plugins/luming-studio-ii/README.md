@@ -212,3 +212,7 @@ pnpm --filter @codexworkbench/luming-studio-ii test:e2e workbench --with-initial
 工作台按浏览与导航、展示与偏好、新建白板、作品管理、复制分享链接和文件导入六个业务区验收。各版本断言自己的工作台名称、操作和保存结果。导入回执丢失的用例验证各版本的恢复路径，并检查同一归档只导入一份。
 
 指定分组的截图、失败 trace 和 Playwright JSON 写入 `artifacts/luming-studio-ii/v1.0.0/e2e/<分组>/run/`。离线对照报告保存在对应分组的 `report.html`。
+
+## 性能基准
+
+用同源合成白板测开板、拖动、平移、缩放、保存及保留历史的服务写入。默认运行 Studio II，可传入冻结的初代插件包作同机对照。命令、计时边界和离线 HTML 报告位置见[白板性能基准](benchmarks/README.md)。

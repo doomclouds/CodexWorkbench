@@ -26,6 +26,13 @@
   background: #f5f5f5;
 }
 
+.studio-ui-embed__preview {
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+  pointer-events: none;
+}
+
 .studio-ui-embed__label {
   display: grid;
   box-sizing: border-box;

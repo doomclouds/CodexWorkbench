@@ -147,7 +147,9 @@ export default defineConfig([
     rules: {
       'base/contract-boundary': 'error',
       'canvas/contract-boundary': 'error',
+      'canvas/gesture-frame-boundary': 'error',
       'canvas/object-format-boundary': 'error',
+      'canvas/camera-transform-owner': 'error',
       'frontend/contract-boundary': 'error',
       'objects/contract-boundary': 'error',
       'no-restricted-globals': ['error', { globals: ['require'], checkGlobalObject: true }],

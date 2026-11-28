@@ -178,7 +178,13 @@ const whiteboardScopedFixtures = [
   ["whiteboard-basics/persistence", ["controlNextCanvasSave", "enableCanvasClipboard"]],
   [
     "whiteboard-editing/html",
-    ["embedFrame", "chooseHtmlFile", "controlNextHtmlSave", "workbenchLinkProbe"],
+    [
+      "embedFrame",
+      "chooseHtmlFile",
+      "controlNextHtmlSave",
+      "inspectEmbedPaint",
+      "workbenchLinkProbe",
+    ],
   ],
   [
     "whiteboard-editing/document",

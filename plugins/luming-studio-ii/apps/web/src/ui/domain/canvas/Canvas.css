@@ -37,6 +37,10 @@
   transform-origin: 0 0;
 }
 
+.studio-canvas__world:not([data-canvas-focus]) {
+  will-change: transform;
+}
+
 .studio-canvas[data-tool='pan'] {
   cursor: grab;
 }

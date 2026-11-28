@@ -20,12 +20,29 @@ export function createWhiteboardRoutes(application: WhiteboardApplication): read
   return [
     createExportRoute(application),
     unaryRoute(getBoardScene, (actor, request) => ({
+      boundedPayloadRead: true,
       scene: toBoardScene(
         application.getBoardScene(actor, requireId(request.boardId), canReadTrashedBoard(actor)),
       ),
     })),
     unaryRoute(getObjectPayloads, (actor, request) => {
       const boardId = requireId(request.boardId);
+      if (request.maxPayloadJsonBytes !== undefined) {
+        const page = application.getObjectPayloadPage(
+          actor,
+          boardId,
+          request.objectIds,
+          request.maxPayloadJsonBytes,
+          canReadTrashedBoard(actor),
+        );
+
+        return {
+          boardId,
+          results: page.results.map(toPayloadResult),
+          deferredObjectIds: [...page.deferredObjectIds],
+        };
+      }
+
       const results = application.getObjectPayloads(
         actor,
         boardId,

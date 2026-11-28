@@ -9,6 +9,8 @@ import {
   useState,
 } from 'react';
 import type { FocusEvent } from 'react';
+import { builtInFrame } from './adapters/index.js';
+import { useActiveObjectZoom, useCanvasCamera, useCanvasDetailZoom } from './canvas-camera.js';
 import { useCanvasDrafts } from './canvas-drafts.js';
 import { canvasNativeId } from './canvas-events.js';
 import { useCanvasFrame, useCanvasSize } from './canvas-frame.js';
@@ -16,16 +18,21 @@ import { useCanvasGesturePreview } from './canvas-gesture-preview.js';
 import { useCanvasInput } from './canvas-input.js';
 import { selectionControls, useCanvasModel } from './canvas-model.js';
 import { createCanvasObjectRegistry } from './canvas-registry.js';
+import { useCanvasRenderActions } from './canvas-render-actions.js';
 import type {
   CanvasFitScope,
   CanvasObjectActivation,
+  CanvasObjectRegistry,
   CanvasProps,
   CanvasViewportRequest,
   CanvasViewportSize,
 } from './contracts.js';
 import { CanvasOverlays } from './overlays/index.js';
 import { CanvasObjects } from './rendering/index.js';
+import { createCanvasObjectStore } from './rendering/object-store.js';
 import { isObjectLocked, projectedObjectBounds, projectObject } from './scene/index.js';
+import type { ProjectedCanvasObject } from './scene/index.js';
+import type { SceneIndex } from './scene/index.js';
 import { expandSelectionIds } from './selection/index.js';
 import {
   fitViewport,
@@ -38,12 +45,6 @@ import './Canvas.css';
 
 const fitPadding = 72;
 const presentationPadding = 48;
-
-function gridSpacing(zoom: number) {
-  const spacing = 24 * zoom;
-
-  return spacing >= 8 ? spacing : spacing * 2 ** Math.ceil(Math.log2(8 / spacing));
-}
 
 function sameIds(previous: readonly string[] | undefined, next: readonly string[]) {
   if (!previous || previous.length !== next.length) {
@@ -65,6 +66,23 @@ function availableFormatRequest(props: CanvasProps, input: ReturnType<typeof use
   const blocked = props.presentation || props.annotationActive || input.pointerActive;
 
   return props.canEdit && selecting && !blocked ? props.formatObjectRequest : undefined;
+}
+
+function activeSelectionViews(
+  index: SceneIndex,
+  registry: CanvasObjectRegistry,
+  selection: readonly string[],
+  input: ReturnType<typeof useCanvasInput>,
+) {
+  const active = input.toolKind === 'select' && !input.pointerActive;
+  const id = active && selection.length === 1 ? selection[0] : undefined;
+  const kind = id ? index.get(id)?.kind : undefined;
+  const extension = kind && registry.get(kind);
+  const activeEmbedId = extension?.capabilities.content === 'embedded' ? id : undefined;
+  const hasZoomFrame = kind && builtInFrame(kind)?.usesZoom;
+  const activeSelectedZoomId = extension?.View || hasZoomFrame ? id : undefined;
+
+  return { activeEmbedId, activeSelectedZoomId };
 }
 
 function CanvasSession(props: CanvasProps) {
@@ -109,11 +127,14 @@ function CanvasSession(props: CanvasProps) {
     () => createCanvasObjectRegistry(props.objectExtensions),
     [props.objectExtensions],
   );
-  const controller = useCanvasFrame(root, initialViewport);
+  const { grid, world, present } = useCanvasCamera();
+  const controller = useCanvasFrame(root, initialViewport, present);
   const focusedId = presentation?.focusObjectId;
-  const { frame, update } = controller;
+  const { frame, read, update } = controller;
+  const detailZoom = useCanvasDetailZoom(root, frame.viewport.zoom, frame.continuousZoom);
+  useLayoutEffect(() => present(read().viewport), [focusedId, present, read]);
   useCanvasGesturePreview(frame.preview, props.onGesturePreviewChange, canEdit);
-  const { index, pending, selected, painted, visibleIds } = useCanvasModel(
+  const { index, pending, selected, painted, visibleIds, projectedMove } = useCanvasModel(
     props,
     frame,
     size,
@@ -121,6 +142,10 @@ function CanvasSession(props: CanvasProps) {
     retainedIds,
     registry,
   );
+  const [movePreview] = useState(() => createCanvasObjectStore<ProjectedCanvasObject>());
+  const [payloads] = useState(() => createCanvasObjectStore(props.payloadById));
+  useLayoutEffect(() => movePreview.update(projectedMove), [movePreview, projectedMove]);
+  useLayoutEffect(() => payloads.update(props.payloadById), [payloads, props.payloadById]);
   const presentationIds = useMemo(() => {
     if (focusedId) {
       return new Set([focusedId]);
@@ -177,6 +202,7 @@ function CanvasSession(props: CanvasProps) {
     fitScene: resolveSceneFit,
     props: { ...props, onObjectActivate: activateObject },
   });
+  const actions = useCanvasRenderActions(props, input.handleObjectNavigation);
   const localDraft = input.draftForFrame(frame);
   const drafts = useCanvasDrafts(props.pendingEdits, localDraft, { index, pending });
   const selecting = input.toolKind === 'select';
@@ -188,10 +214,12 @@ function CanvasSession(props: CanvasProps) {
     canEdit,
     props.pendingResizeObjectId,
   );
-  const activeEmbedId =
-    selecting && !input.pointerActive && props.selection.length === 1
-      ? props.selection[0]
-      : undefined;
+  const { activeEmbedId, activeSelectedZoomId } = activeSelectionViews(
+    index,
+    registry,
+    props.selection,
+    input,
+  );
   const previousVisible = useRef<readonly string[] | undefined>(undefined);
   const appliedViewportRequest = useRef<string | undefined>(undefined);
   const openingFitApplied = useRef(false);
@@ -340,12 +368,33 @@ function CanvasSession(props: CanvasProps) {
     }
   }
 
-  const { x, y, zoom } = frame.viewport;
-  const transform = `translate(${x}px, ${y}px) scale(${zoom})`;
-  const spacing = gridSpacing(zoom);
-  const paintedInMode = presentationIds
-    ? painted.filter(({ object }) => presentationIds.has(object.id))
-    : painted;
+  const paintedInMode = useMemo(
+    () =>
+      presentationIds ? painted.filter(({ object }) => presentationIds.has(object.id)) : painted,
+    [painted, presentationIds],
+  );
+  const isLocked = useCallback((id: string) => isObjectLocked(index, id), [index]);
+  const activeZoomIds = useMemo(() => {
+    const ids = new Set(retainedIds);
+    for (const id of [
+      retainedId,
+      activeSelectedZoomId,
+      focusedId,
+      presentation?.expandedObjectId,
+    ]) {
+      if (id) {
+        ids.add(id);
+      }
+    }
+
+    return ids;
+  }, [retainedIds, retainedId, activeSelectedZoomId, focusedId, presentation?.expandedObjectId]);
+  const activeZoom = useActiveObjectZoom(
+    props.scene.objects,
+    activeZoomIds,
+    frame.viewport.zoom,
+    props.contentTracking,
+  );
 
   return (
     <div
@@ -373,27 +422,30 @@ function CanvasSession(props: CanvasProps) {
       onBlur={handleBlur}
     >
       <div
+        ref={grid}
         className="studio-canvas__background"
         style={{
           backgroundImage: props.showGrid === false || focusedId ? 'none' : undefined,
-          backgroundPosition: `${x}px ${y}px`,
-          backgroundSize: `${spacing}px ${spacing}px`,
         }}
         aria-hidden="true"
       />
       <div
+        ref={world}
         className="studio-canvas__world"
-        style={{ transform: focusedId ? undefined : transform }}
+        data-canvas-focus={focusedId}
         inert={input.toolKind !== 'select'}
       >
         <CanvasObjects
           objects={paintedInMode}
+          movePreview={movePreview}
           contentById={props.contentById}
           drafts={drafts}
-          zoom={zoom}
+          zoom={detailZoom}
+          activeZoom={activeZoom}
+          activeZoomIds={activeZoomIds}
           activeEmbedId={activeEmbedId}
           registry={registry}
-          payloadById={props.payloadById}
+          payloads={payloads}
           selection={props.selection}
           viewing={Boolean(presentation)}
           focusObjectId={focusedId}
@@ -406,21 +458,21 @@ function CanvasSession(props: CanvasProps) {
           downloadFile={props.downloadFile}
           readDocumentAsset={props.readDocumentAsset}
           uploadDocumentImage={props.uploadDocumentImage}
-          onOpenNativeSource={props.onOpenNativeSource}
+          onOpenNativeSource={actions.onOpenNativeSource}
           nativeSourceLabel={props.nativeSourceLabel}
           nativeSourceRequest={props.nativeSourceRequest}
           annotationActive={props.annotationActive}
           hasContentEditPermission={props.hasContentEditPermission}
-          onAnnotateContent={props.onAnnotateContent}
+          onAnnotateContent={actions.onAnnotateContent}
           contentTracking={props.contentTracking}
-          isLocked={(id) => isObjectLocked(index, id)}
-          canWriteObject={props.canWriteObject}
-          onObjectIntent={props.onObjectIntent}
-          onOpenPresentation={props.onOpenPresentation}
-          onClosePresentation={props.onClosePresentation}
-          onObjectNavigation={input.handleObjectNavigation}
+          isLocked={isLocked}
+          canWriteObject={actions.canWriteObject}
+          onObjectIntent={actions.onObjectIntent}
+          onOpenPresentation={actions.onOpenPresentation}
+          onClosePresentation={actions.onClosePresentation}
+          onObjectNavigation={actions.onObjectNavigation}
           onObjectRetentionChange={handleRetention}
-          onObjectEditingChange={props.onObjectEditingChange}
+          onObjectEditingChange={actions.onObjectEditingChange}
         />
       </div>
       <CanvasOverlays

@@ -8,7 +8,7 @@ import type {
 } from '../contracts.js';
 import { getObjectBounds, mergeRects } from '../viewport/index.js';
 
-export { snapMove } from './snap.js';
+export { prepareSnapCandidates, snapMove } from './snap.js';
 export type { AlignmentGuide } from './snap.js';
 
 export type ResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';

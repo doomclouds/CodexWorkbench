@@ -2,6 +2,7 @@ import { basename, dirname, relative, resolve, sep } from 'node:path';
 import { isErasedModuleReference } from '../../../../../tooling/studio-lint/module-reference.mjs';
 import manifest from '../package.json' with { type: 'json' };
 import { allowsConnectorRoute, connectorRoute } from './connector-route-boundary.mjs';
+import gestureFrameBoundary from './gesture-frame-boundary.mjs';
 import {
   aliasTargets,
   baseRoot,
@@ -21,6 +22,7 @@ import {
 const canvasRoot = resolve(sourceRoot, 'ui/domain/canvas');
 const canvasEntry = resolve(canvasRoot, 'index');
 const canvasComponent = resolve(canvasRoot, 'Canvas');
+const cameraModule = resolve(canvasRoot, 'canvas-camera');
 const canvasContracts = resolve(canvasRoot, 'contracts');
 const editorRoot = resolve(sourceRoot, 'surfaces/whiteboard-editor');
 const baseEntry = resolve(baseRoot, 'index');
@@ -642,11 +644,41 @@ const objectFormatBoundary = {
   },
 };
 
+const cameraTransformOwner = {
+  meta: {
+    type: 'problem',
+    schema: [],
+    messages: { owner: 'Apply camera frame styles through the canvas camera owner.' },
+  },
+
+  create(context) {
+    const file = context.physicalFilename;
+    if (!contains(canvasRoot, file) || stem(file) === cameraModule) {
+      return {};
+    }
+
+    const properties = new Set(['transform', 'backgroundPosition', 'backgroundSize']);
+
+    return {
+      'AssignmentExpression[left.type="MemberExpression"][left.object.type="MemberExpression"]'(
+        node,
+      ) {
+        const { object, property } = node.left;
+        if (nameOf(object.property) === 'style' && properties.has(nameOf(property))) {
+          context.report({ node, messageId: 'owner' });
+        }
+      },
+    };
+  },
+};
+
 export default {
   meta: { name: 'luming-canvas' },
   rules: {
     'contract-boundary': contractBoundary,
+    'gesture-frame-boundary': gestureFrameBoundary,
     'no-test-replacement': noTestReplacement,
     'object-format-boundary': objectFormatBoundary,
+    'camera-transform-owner': cameraTransformOwner,
   },
 };

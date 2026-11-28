@@ -76,6 +76,7 @@ export interface EmbedObjectProps {
   readonly useCanvasTools?: boolean;
   readonly readHtmlSource?: (file: File) => Promise<string>;
   readonly zoom?: number;
+  readonly overviewSize?: EmbedOverviewSize;
   readonly preserveScroll?: boolean;
   readonly initialScroll?: EmbedPoint;
   readonly panMode?: boolean;
@@ -107,3 +108,5 @@ export interface EmbedRuntimeOptions {
   writable?: boolean;
   readonly panMode?: boolean;
 }
+
+import type { EmbedOverviewSize } from './overview-preview.js';

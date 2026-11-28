@@ -195,7 +195,7 @@ function readPayloadByteSize(
   }
 
   const query = connection.prepare(`
-    SELECT coalesce(sum(length(cast(body_json AS BLOB))), 0) AS total_bytes
+    SELECT coalesce(sum(octet_length(body_json)), 0) AS total_bytes
     FROM object_payloads
     WHERE board_id = ? AND object_id IN (SELECT value FROM json_each(?))
   `);

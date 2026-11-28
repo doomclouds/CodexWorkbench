@@ -115,6 +115,7 @@ export function useDocumentViewport(
   const body = useRef<HTMLDivElement>(null);
   const scroll = useRef<ScrollRegionHandle>(null);
   const position = useRef({ inline: emptyPosition, expanded: emptyPosition });
+  const previousMode = useRef(mode);
   const selection = useRef<DocumentNoteSource | undefined>(undefined);
   const [selectionVersion, setSelectionVersion] = useState<number>();
   const [find, setFind] = useState('');
@@ -139,6 +140,11 @@ export function useDocumentViewport(
   }, [selectedSource, sourceSequence]);
 
   useLayoutEffect(() => {
+    if (previousMode.current === mode) {
+      return;
+    }
+
+    previousMode.current = mode;
     const saved = position.current[expanded ? 'expanded' : 'inline'];
     scroll.current?.scrollTo(saved);
   }, [expanded, mode]);

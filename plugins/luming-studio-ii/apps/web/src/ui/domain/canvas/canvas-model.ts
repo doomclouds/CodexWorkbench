@@ -7,6 +7,7 @@ import type {
   CanvasObjectKind,
   CanvasObjectRegistry,
   CanvasProps,
+  CanvasViewport,
 } from './contracts.js';
 import { getTransformBox } from './gestures/index.js';
 import {
@@ -18,11 +19,14 @@ import {
   queryScene,
 } from './scene/index.js';
 import type { ProjectedCanvasObject, SceneIndex } from './scene/index.js';
-import { getViewportBounds, rectsIntersect } from './viewport/index.js';
+import { projectMoveWithinWindow } from './scene/move-preview.js';
+import { getViewportBounds, rectContainsRect, rectsIntersect } from './viewport/index.js';
 import type { CanvasViewportSize } from './viewport/index.js';
 
 const viewOverscan = 128;
+const windowBucket = 64;
 const visitedOffscreenBodyLimit = 256;
+const noObjectChanges: ReadonlyMap<string, CanvasObjectChange> = new Map();
 const visitedBodyKinds = new Set<CanvasObjectKind>([
   'html',
   'diagram',
@@ -154,7 +158,11 @@ function useVisitedBodies(
     [index, registry, payloadById],
   );
   const retained = useMemo(() => [...seen].filter(cached), [seen, cached]);
-  const entering = windowed.filter(({ object }) => !seen.has(object.id) && cached(object.id));
+  const entering = useMemo(
+    () => windowed.filter(({ object }) => !seen.has(object.id) && cached(object.id)),
+    [windowed, seen, cached],
+  );
+
   if (retained.length !== seen.size || entering.length) {
     const next = new Set([...retained, ...entering.map(({ object }) => object.id)]);
     setSeen(next);
@@ -163,6 +171,47 @@ function useVisitedBodies(
   }
 
   return seen;
+}
+
+function useWindowBounds(viewport: CanvasViewport, size: CanvasViewportSize) {
+  const bounds = getViewportBounds(viewport, size, viewOverscan);
+  const step = windowBucket / 2 ** Math.floor(Math.log2(viewport.zoom));
+  const x = Math.floor(bounds.x / step) * step;
+  const y = Math.floor(bounds.y / step) * step;
+  const right = Math.ceil((bounds.x + bounds.width) / step) * step;
+  const bottom = Math.ceil((bounds.y + bounds.height) / step) * step;
+
+  const candidate = useMemo(
+    () => ({ x, y, width: right - x, height: bottom - y }),
+    [x, y, right, bottom],
+  );
+  const [mounted, setMounted] = useState(candidate);
+  const bounded = mounted.width <= candidate.width * 2 && mounted.height <= candidate.height * 2;
+  if (bounded && rectContainsRect(mounted, getViewportBounds(viewport, size, windowBucket / 2))) {
+    return mounted;
+  }
+
+  if (mounted !== candidate) {
+    setMounted(candidate);
+  }
+
+  return candidate;
+}
+
+function useStableWindow(candidate: readonly ProjectedCanvasObject[]) {
+  const [current, setCurrent] = useState({ candidate, objects: candidate });
+  if (current.candidate === candidate) {
+    return current.objects;
+  }
+
+  const same =
+    current.objects.length === candidate.length &&
+    current.objects.every((object, index) => object === candidate[index]);
+  const objects = same ? current.objects : candidate;
+
+  setCurrent({ candidate, objects });
+
+  return objects;
 }
 
 export function useCanvasModel(
@@ -184,30 +233,45 @@ export function useCanvasModel(
     [index, pending, preview],
   );
   const viewport = frame.viewport;
-  const windowed = useMemo(() => {
-    const bounds = getViewportBounds(viewport, size, viewOverscan);
+  const bounds = useWindowBounds(viewport, size);
+  const visibleBounds = useMemo(() => getViewportBounds(viewport, size), [viewport, size]);
+  const moveFrame = !preview || preview.kind === 'move';
+  const pendingMovesOnly = !pendingEdits?.some(({ kind }) => kind !== 'move');
+  const canProjectMove = moveFrame && pendingMovesOnly && !remoteGesturePreviews?.length;
+  const projectedMove = useMemo(() => {
+    if (!canProjectMove || changes.size === 0) {
+      return undefined;
+    }
 
-    return queryScene(index, bounds, changes);
-  }, [index, viewport, size, changes]);
+    return projectMoveWithinWindow(index, noObjectChanges, changes, [...changes.values()], {
+      window: bounds,
+      visible: visibleBounds,
+    });
+  }, [canProjectMove, changes, index, bounds, visibleBounds]);
+  const windowChanges = projectedMove || changes.size === 0 ? noObjectChanges : changes;
+  const windowed = useMemo(
+    () => queryScene(index, bounds, windowChanges),
+    [index, bounds, windowChanges],
+  );
   const displayChanges = useMemo(
-    () => applyGesturePreviews(index, changes, remoteGesturePreviews),
-    [index, changes, remoteGesturePreviews],
+    () => applyGesturePreviews(index, windowChanges, remoteGesturePreviews),
+    [index, windowChanges, remoteGesturePreviews],
   );
-  const displayWindow = useMemo(
-    () =>
-      displayChanges === changes
-        ? windowed
-        : queryScene(index, getViewportBounds(viewport, size, viewOverscan), displayChanges),
-    [index, viewport, size, changes, displayChanges, windowed],
+  const displayCandidates = useMemo(
+    () => (displayChanges === windowChanges ? windowed : queryScene(index, bounds, displayChanges)),
+    [index, bounds, windowChanges, displayChanges, windowed],
   );
+  const displayWindow = useStableWindow(displayCandidates);
   const visitedBodies = useVisitedBodies(windowed, index, registry, payloadById);
   const visibleIds = useMemo(() => {
-    const bounds = getViewportBounds(viewport, size);
+    if (windowChanges.size === 0 && index.fullyWithin(visibleBounds)) {
+      return index.objectIds;
+    }
 
     return windowed
-      .filter((entry) => rectsIntersect(projectedObjectBounds(entry), bounds))
+      .filter((entry) => rectsIntersect(projectedObjectBounds(entry), visibleBounds))
       .map(({ object }) => object.id);
-  }, [windowed, viewport, size]);
+  }, [index, visibleBounds, windowChanges, windowed]);
   const selected = useMemo(
     () =>
       selection.flatMap((id) => {
@@ -254,5 +318,5 @@ export function useCanvasModel(
     );
   }, [displayWindow, retainedId, retainedIds, visitedBodies, index, displayChanges]);
 
-  return { index, pending, selected, painted, visibleIds };
+  return { index, pending, selected, painted, visibleIds, projectedMove };
 }

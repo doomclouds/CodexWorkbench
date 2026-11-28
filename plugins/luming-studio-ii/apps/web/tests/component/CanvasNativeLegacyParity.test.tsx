@@ -58,8 +58,13 @@ function element(root: HTMLElement, selector: string) {
   return match;
 }
 
-function wheel(target: HTMLElement) {
-  const event = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 12 });
+function wheel(target: HTMLElement, options: WheelEventInit = {}) {
+  const event = new WheelEvent('wheel', {
+    bubbles: true,
+    cancelable: true,
+    deltaY: 12,
+    ...options,
+  });
   act(() => {
     target.dispatchEvent(event);
   });
@@ -151,6 +156,22 @@ describe('Canvas legacy native content parity', () => {
     });
     await flushFrame();
     expect(fixture.host.querySelector('video')).toBe(video);
+    expect(video.controls).toBe(false);
+    expect(wheel(video)).toBe(true);
+  });
+
+  it('updates unselected video controls immediately when a wheel zoom crosses the pixel threshold', async () => {
+    render({ initialViewport: { x: 0, y: 0, zoom: 0.4 } });
+    const video = fixture.host.querySelector('video');
+    if (!video) {
+      throw new Error('Expected the video extension to render its player.');
+    }
+
+    expect(video.controls).toBe(true);
+    const root = element(fixture.host, '[data-canvas-root]');
+    expect(wheel(root, { ctrlKey: true, deltaY: 20 })).toBe(true);
+    await flushFrame();
+
     expect(video.controls).toBe(false);
     expect(wheel(video)).toBe(true);
   });

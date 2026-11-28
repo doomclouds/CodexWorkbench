@@ -31,6 +31,7 @@ export interface WhiteboardReader {
   listObjects(boardId: string, limit?: number): readonly BoardObject[];
   getObjects(boardId: string, objectIds: readonly string[]): readonly BoardObject[];
   getPayloads(boardId: string, objectIds: readonly string[]): readonly PayloadRecord[];
+  payloadByteSize?(boardId: string, objectIds: readonly string[], revision?: bigint): bigint;
   getExportAsset?(
     boardId: string,
     assetId: string,
@@ -61,7 +62,6 @@ export interface BoardEditReader extends WhiteboardReader {
     assetId: string,
     maximumBytes: number,
   ): BackupAssetRead | undefined;
-  payloadByteSize?(boardId: string, objectIds: readonly string[], revision?: bigint): bigint;
   getEditReceipt(
     boardId: string,
     actorId: string,

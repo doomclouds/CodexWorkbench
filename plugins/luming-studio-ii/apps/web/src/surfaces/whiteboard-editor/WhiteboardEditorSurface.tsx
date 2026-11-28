@@ -11,6 +11,7 @@ import { documentExtension } from '../../ui/domain/objects/document/index.js';
 import { LinkDialog } from '../../ui/domain/objects/media/index.js';
 import { textExtension, TextSaveNoticePublisher } from '../../ui/domain/objects/text/index.js';
 import type { BoardTool } from './BoardChrome.js';
+import { useSourceLabel } from './use-source-label.js';
 import { BoardDraftRecovery } from './BoardDraftRecovery.js';
 import { BoardHtmlCreation, useBoardHtmlCreation } from './BoardHtmlCreation.js';
 import { BoardViewportTools } from './BoardViewportTools.js';
@@ -409,11 +410,7 @@ function BoardWorkspace({
     canvasArea,
   });
 
-  function nativeSourceLabel(source: CanvasNativeSource) {
-    if (!source.artifactId || source.artifactId === board.boardId) {
-      return projection.objectsById.get(source.elementId)?.label;
-    }
-  }
+  const nativeSourceLabel = useSourceLabel(board.boardId, projection.objectsById);
 
   function openNativeSource(source: CanvasNativeSource) {
     if (source.artifactId && source.artifactId !== board.boardId) {

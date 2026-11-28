@@ -139,6 +139,26 @@ const rejected = [
   ['network from an object', source + 'todo/model.ts', 'window.fetch(path);', browser],
   ['network from the embed adapter', source + 'embed/host.ts', 'window.fetch(path);', browser],
   [
+    'injecting HTML into the object tree',
+    source + 'embed/EmbedObject.tsx',
+    '<div dangerouslySetInnerHTML={{ __html: source }} />;',
+  ],
+  [
+    'writing overview HTML into the document',
+    source + 'embed/overview-preview.ts',
+    'document.body.innerHTML = source;',
+  ],
+  [
+    'disguising the live document as the preview template',
+    source + 'embed/overview-preview.ts',
+    'const template = document.body;\ntemplate.innerHTML = source;',
+  ],
+  [
+    'creating a live preview document',
+    source + 'embed/overview-preview.ts',
+    'frame.srcdoc = source;',
+  ],
+  [
     'storage from the embed adapter',
     source + 'embed/host.ts',
     'window.localStorage.getItem(key);',
@@ -196,6 +216,10 @@ const accepted = [
   [source + 'document/editor.tsx', "import { BlockNoteEditor } from '@blocknote/core';"],
   [source + 'todo/TodoObject.tsx', "import { Button } from '../../../base/index.js';"],
   [source + 'embed/host.ts', 'window.parent.postMessage(message, targetOrigin);'],
+  [
+    source + 'embed/overview-preview.ts',
+    "const template = document.createElement('template');\ntemplate.innerHTML = source;",
+  ],
   [
     testDocument,
     "import { DocumentObject } from '../../../src/ui/domain/objects/document/index.js';",

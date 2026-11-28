@@ -251,6 +251,34 @@ describe('Canvas selection chrome', () => {
     expect(toolbar?.style.maxInlineSize).toBe('258px');
   });
 
+  it('places a full toolbar above the selection without measuring text ranges in distant rows', () => {
+    titleBounds = new DOMRect(100, 360, 90, 33);
+    const ranges = vi.spyOn(document, 'createRange');
+    try {
+      renderCanvas({
+        scene: {
+          ...scene,
+          objects: [
+            ...scene.objects,
+            {
+              id: 'far-section',
+              kind: 'section',
+              label: '远处标题',
+              geometry: { x: 100, y: 395, width: 90, height: 80, rotation: 0 },
+              version: 1,
+            },
+          ],
+        },
+        selectionActions: <button>观看选区</button>,
+      });
+      const toolbar = fixture.host.querySelector<HTMLElement>('[data-canvas-selection-actions]');
+      expect(toolbar?.style.top).toBe('70px');
+      expect(ranges).not.toHaveBeenCalled();
+    } finally {
+      ranges.mockRestore();
+    }
+  });
+
   it('keeps neighboring section titles and the selected object handles clear', () => {
     handleBounds = new DOMRect(80, 100, 10, 26);
     titleBounds = new DOMRect(100, 42, 90, 33);

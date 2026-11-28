@@ -3,6 +3,7 @@ import {
   controlNextHtmlSave,
   embedFrame,
   expect,
+  inspectEmbedPaint,
   observe,
   readCanvas,
   screenshot,
@@ -560,5 +561,220 @@ test("[EDIT-HTML-08] 备注光标穿过嵌入内容，退出后恢复内部互�
     shadowCursor: isCurrent,
     openedDraft: true,
     frameInteractionRestored: true,
+  });
+});
+
+const overviewTitle = "跨视口渲染与交互";
+const previewTitle = "可缩放的双色图解";
+const previewId = "colored-overview-embed";
+const colors = {
+  first: [229, 28, 132],
+  second: [3, 171, 208],
+  revised: [40, 170, 73],
+};
+const coloredOverview = `<!doctype html>
+<meta charset="utf-8">
+<style>
+  body { margin: 0; font: 16px sans-serif; }
+  .segment { display: inline-block; width: 213px; height: 113px; }
+  .first { background: #e51c84; }
+  .second { background: #03abd0; }
+</style>
+<main style="padding:20px">
+  <h1>发行阶段</h1>
+  <div class="segment first"></div>
+  <div class="segment second"></div>
+</main>`;
+const recoloredOverview = coloredOverview.replace("#03abd0", "#28aa49");
+
+function overviewObjects(objects) {
+  const markers = [-4100, 4000].map((x) => ({
+    id: `overview-edge-${x}`,
+    kind: "shape",
+    x,
+    y: 90,
+    width: 100,
+    height: 110,
+  }));
+
+  return [...markers, ...objects];
+}
+
+async function setOverviewZoom(page, label) {
+  const zoom = button(page, "缩放菜单");
+  await zoom.click();
+  const menu = page.getByRole("menu", { name: "缩放与视图", exact: true });
+  await menu.getByRole("menuitem", { name: label, exact: true }).click();
+}
+
+async function openOverview(page, studio) {
+  await page.keyboard.press("Escape");
+  await setOverviewZoom(page, "适应白板");
+  await expect.poll(async () => (await readCanvas(page, studio)).zoom).toBeLessThan(0.2);
+}
+
+async function panAndZoomOverview(page, studio, duringPan) {
+  const before = await readCanvas(page, studio);
+  const x = before.bounds.x + before.bounds.width / 2;
+  const y = before.bounds.y + before.bounds.height * 0.72;
+  await page.mouse.move(x, y);
+  await page.mouse.down({ button: "middle" });
+  try {
+    await page.mouse.move(x + 108, y - 27, { steps: 8 });
+    await expect
+      .poll(async () => (await readCanvas(page, studio)).pan.x)
+      .toBeGreaterThan(before.pan.x + 80);
+    await duringPan?.();
+  } finally {
+    await page.mouse.up({ button: "middle" });
+  }
+
+  await page.keyboard.down("Control");
+  try {
+    for (const delta of [-100, -40]) {
+      await page.mouse.wheel(0, delta);
+    }
+  } finally {
+    await page.keyboard.up("Control");
+  }
+
+  await expect.poll(async () => (await readCanvas(page, studio)).zoom).toBeGreaterThan(before.zoom);
+  expect((await readCanvas(page, studio)).zoom).toBeLessThan(0.25);
+}
+
+async function expectPaintedSegments(page, studio, revised = false) {
+  const desired = revised ? "revised" : "second";
+  const undesired = revised ? "second" : "revised";
+  await expect
+    .poll(async () => {
+      const { counts } = await inspectEmbedPaint(page, studio, previewId, colors);
+
+      return counts.first > 30 && counts[desired] > 30 && counts[undesired] < 10;
+    })
+    .toBe(true);
+}
+
+async function annotateOverview(page, studio) {
+  const notes = button(page, "备注");
+  await notes.click();
+  await expect(notes).toHaveAttribute("aria-pressed", "true");
+  const { objects } = await readCanvas(page, studio);
+  const { box } = objects.find(({ id }) => id === previewId);
+  await page.mouse.click(box.x + box.width * 0.54, box.y + box.height * 0.49);
+  const draft = page.getByRole("textbox", { name: "批注内容", exact: true });
+  await expect(draft).toBeVisible();
+  if (studio.edition === "ii") {
+    await expect(page.getByRole("dialog", { name: "新建备注", exact: true })).toContainText(
+      previewTitle,
+    );
+  }
+
+  return { draft, notes };
+}
+
+test("[EDIT-HTML-09] 概览平移与缩放保留 HTML 彩块、备注及修订后的预览", async ({
+  page,
+  studio,
+}, testInfo) => {
+  const colored = embeddedObject({
+    id: previewId,
+    label: previewTitle,
+    html: coloredOverview,
+    x: -270,
+  });
+  const board = await openOriginal(page, studio, overviewTitle, overviewObjects([colored]));
+  await openOverview(page, studio);
+  await expectPaintedSegments(page, studio);
+  await screenshot(page, testInfo, "html-color-overview");
+  await panAndZoomOverview(page, studio, async () => {
+    const { counts } = await inspectEmbedPaint(page, studio, previewId, colors);
+    expect(counts.first).toBeGreaterThan(30);
+    expect(counts.second).toBeGreaterThan(30);
+    await screenshot(page, testInfo, "html-color-during-pan");
+  });
+  await expectPaintedSegments(page, studio);
+  await screenshot(page, testInfo, "html-color-after-pan-and-zoom");
+
+  const { draft, notes } = await annotateOverview(page, studio);
+  await screenshot(page, testInfo, "html-overview-note-target");
+  await draft.press("Escape");
+  await expect(draft).toHaveCount(0);
+  await notes.click();
+  await expect(notes).toHaveAttribute("aria-pressed", "false");
+
+  await openOverview(page, studio);
+  await setOverviewZoom(page, "100%");
+  const source = await editSource(page, studio, previewId);
+  await expect(sourceField(source)).toHaveValue(coloredOverview);
+  await sourceField(source).fill(recoloredOverview);
+  await button(source, "保存源码").click();
+  await expect(source).toBeHidden();
+  await expect
+    .poll(() => savedEmbed(studio, board, { id: previewId }))
+    .toMatchObject({
+      html: recoloredOverview,
+    });
+  await page.reload();
+  await openOverview(page, studio);
+  await expectPaintedSegments(page, studio, true);
+  await screenshot(page, testInfo, "html-revised-overview-after-reload");
+  await observe(testInfo, "html-overview-paint", {
+    overviewPainted: true,
+    cameraMotionPainted: true,
+    noteDraftOpened: true,
+    revisedPaintedAfterReload: true,
+  });
+});
+
+test("[EDIT-HTML-10] 从整板概览返回后嵌入仍可点击和内部滚动，重开保留状态", async ({
+  page,
+  studio,
+}, testInfo) => {
+  const board = await openOriginal(
+    page,
+    studio,
+    "概览返回后的嵌入状态",
+    overviewObjects([embeddedObject({ x: -275 })]),
+  );
+  await setOverviewZoom(page, "100%");
+  await selectOriginal(page, studio);
+  const frame = embedFrame(page, originalTitle);
+  await button(frame, "增加次数").click();
+  await expect
+    .poll(() => savedEmbed(studio, board, { id: originalId }))
+    .toMatchObject({
+      state: { clicks: 1 },
+    });
+
+  await openOverview(page, studio);
+  await panAndZoomOverview(page, studio);
+  await openOverview(page, studio);
+  await setOverviewZoom(page, "100%");
+  await selectOriginal(page, studio);
+  await expect(frame.getByText("次数：1", { exact: true })).toBeVisible();
+  await button(frame, "增加次数").click();
+  const beforeScroll = await readCanvas(page, studio);
+  await frame.getByRole("region", { name: "内部滚动内容", exact: true }).hover();
+  await page.mouse.wheel(0, 700);
+  await expect(frame.getByText("已内部滚动", { exact: true })).toBeVisible();
+  expect(await readCanvas(page, studio)).toMatchObject({
+    pan: beforeScroll.pan,
+    zoom: beforeScroll.zoom,
+  });
+  await expect
+    .poll(() => savedEmbed(studio, board, { id: originalId }))
+    .toMatchObject({
+      state: { clicks: 2 },
+    });
+  await screenshot(page, testInfo, "html-interactive-after-camera-return");
+  await page.reload();
+  await openOverview(page, studio);
+  await setOverviewZoom(page, "100%");
+  await selectOriginal(page, studio);
+  await expect(frame.getByText("次数：2", { exact: true })).toBeVisible();
+  await observe(testInfo, "html-overview-interaction", {
+    interactiveAfterNavigation: true,
+    independentScroll: true,
+    savedStateAfterReload: true,
   });
 });

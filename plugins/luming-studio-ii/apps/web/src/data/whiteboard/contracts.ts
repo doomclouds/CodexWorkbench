@@ -73,6 +73,7 @@ export interface WhiteboardScene {
   readonly trashed?: boolean;
   readonly customColors?: readonly string[];
   readonly objects: readonly WhiteboardObject[];
+  readonly boundedPayloadRead?: boolean;
 }
 
 export type WhiteboardContentKind =
@@ -157,6 +158,11 @@ export interface WhiteboardService {
     ids: readonly string[],
     signal?: AbortSignal,
   ): Promise<readonly WhiteboardPayloadResult[]>;
+  getPayloadPage?(
+    boardId: string,
+    ids: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<{ results: readonly WhiteboardPayloadResult[]; processed: number }>;
   moveObjects(command: WhiteboardMoveCommand, signal?: AbortSignal): Promise<WhiteboardMoveReceipt>;
   getReceipt(
     boardId: string,

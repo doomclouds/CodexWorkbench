@@ -31,6 +31,37 @@ import { useWhiteboardTestServer } from './whiteboard-test-server.js';
 const server = useWhiteboardTestServer();
 const { getBoardScene, getCommandReceipt, getObjectPayloads } = WhiteboardService.method;
 
+test('advertises budgeted reads and defers the current stored payload that exceeds the budget', async () => {
+  const { boundedPayloadRead } = await callWhiteboard(server.address, editorId, getBoardScene, {
+    boardId: mainBoardId,
+  });
+  expect(boundedPayloadRead).toBe(true);
+  const missing = 'missing-object';
+  const first = await callWhiteboard(server.address, editorId, getObjectPayloads, {
+    boardId: mainBoardId,
+    objectIds: [missing, documentId],
+    maxPayloadJsonBytes: 1,
+  });
+  expect(first.results.map(({ objectId }) => objectId)).toEqual([missing]);
+  expect(first.deferredObjectIds).toEqual([documentId]);
+  const final = await callWhiteboard(server.address, editorId, getObjectPayloads, {
+    boardId: mainBoardId,
+    objectIds: first.deferredObjectIds,
+    maxPayloadJsonBytes: 1,
+  });
+  expect(final.results[0]?.result).toMatchObject({
+    case: 'payload',
+    value: { payloadVersion: documentPayloadVersion },
+  });
+  expect(final.deferredObjectIds).toEqual([]);
+  const denied = await sendWhiteboardRequest(server.address, outsiderId, getObjectPayloads, {
+    boardId: mainBoardId,
+    objectIds: [documentId],
+    maxPayloadJsonBytes: 1,
+  });
+  expect(denied.status).toBe(403);
+});
+
 test('lists the scene in layer order with versions and geometry but no document body', async () => {
   const response = await callWhiteboard(server.address, editorId, getBoardScene, {
     boardId: mainBoardId,

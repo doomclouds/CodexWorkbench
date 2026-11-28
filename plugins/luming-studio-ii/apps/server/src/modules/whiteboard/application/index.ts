@@ -9,7 +9,7 @@ import type {
   MoveCommand,
   PayloadResult,
 } from '../domain/index.js';
-import type { WhiteboardRepository } from '../ports/index.js';
+import type { WhiteboardReader, WhiteboardRepository } from '../ports/index.js';
 import { publishBoardContentChange, type BoardChangePublication } from './board-content-changes.js';
 import {
   payloadResult,
@@ -106,6 +106,13 @@ export interface WhiteboardApplication {
     objectIds: readonly string[],
     allowTrashedOwner?: boolean,
   ): readonly PayloadResult[];
+  getObjectPayloadPage(
+    actor: Actor,
+    boardId: string,
+    objectIds: readonly string[],
+    maximumBytes: number,
+    allowTrashedOwner?: boolean,
+  ): { results: readonly PayloadResult[]; deferredObjectIds: readonly string[] };
   moveObjects(actor: Actor, command: MoveCommand): CommandReceipt;
   getCommandReceipt(actor: Actor, boardId: string, commandId: string): CommandReceipt | undefined;
   exportBoard(actor: Actor, command: ExportBoardCommand): ExportBoardResult;
@@ -119,6 +126,55 @@ interface WhiteboardApplicationOptions {
     actor: Actor,
     command: ExportBoardFileCommand,
   ) => Promise<ExportBoardResult>;
+}
+
+const maxPayloadPageIds = 192;
+const maxPayloadPageBytes = 512 * 1_024;
+const legacyPayloadPageIds = 48;
+
+function readPayloadResults(
+  reader: WhiteboardReader,
+  boardId: string,
+  objectIds: readonly string[],
+): readonly PayloadResult[] {
+  if (!objectIds.length) {
+    return [];
+  }
+
+  const payloads = reader.getPayloads(boardId, [...new Set(objectIds)]);
+  const byId = new Map(payloads.map((payload) => [payload.objectId, payload]));
+
+  return objectIds.map((id) => payloadResult(id, byId.get(id)));
+}
+
+function payloadPageSize(
+  reader: WhiteboardReader,
+  boardId: string,
+  objectIds: readonly string[],
+  maximumBytes: number,
+) {
+  const limit = Math.min(objectIds.length, maxPayloadPageIds);
+  if (!reader.payloadByteSize) {
+    return Math.min(limit, legacyPayloadPageIds);
+  }
+
+  const budget = BigInt(Math.min(maxPayloadPageBytes, maximumBytes));
+  if (limit <= 1 || reader.payloadByteSize(boardId, objectIds.slice(0, limit)) <= budget) {
+    return limit;
+  }
+
+  let first = 1;
+  let end = limit;
+  while (end - first > 1) {
+    const middle = Math.floor((first + end) / 2);
+    if (reader.payloadByteSize(boardId, objectIds.slice(0, middle)) <= budget) {
+      first = middle;
+    } else {
+      end = middle;
+    }
+  }
+
+  return first;
 }
 
 export function createWhiteboardApplication(
@@ -157,14 +213,18 @@ export function createWhiteboardApplication(
     getObjectPayloads(actor, boardId, objectIds, allowTrashedOwner = false) {
       return repository.read((reader) => {
         requireBoardContentAccess(reader, actor, boardId, allowTrashedOwner);
-        if (!objectIds.length) {
-          return [];
-        }
+        return readPayloadResults(reader, boardId, objectIds);
+      });
+    },
+    getObjectPayloadPage(actor, boardId, objectIds, maximumBytes, allowTrashedOwner = false) {
+      return repository.read((reader) => {
+        requireBoardContentAccess(reader, actor, boardId, allowTrashedOwner);
+        const size = payloadPageSize(reader, boardId, objectIds, maximumBytes);
 
-        const payloads = reader.getPayloads(boardId, [...new Set(objectIds)]);
-        const byId = new Map(payloads.map((payload) => [payload.objectId, payload]));
-
-        return objectIds.map((id) => payloadResult(id, byId.get(id)));
+        return {
+          results: readPayloadResults(reader, boardId, objectIds.slice(0, size)),
+          deferredObjectIds: objectIds.slice(size),
+        };
       });
     },
     moveObjects(actor, command) {

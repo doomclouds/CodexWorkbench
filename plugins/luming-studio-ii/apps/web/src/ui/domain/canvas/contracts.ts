@@ -134,6 +134,7 @@ export interface CanvasObjectCapabilities {
   readonly rotate: boolean;
   readonly connect: boolean;
   readonly content: 'passive' | 'native' | 'embedded';
+  readonly editOnlyWhenSelected?: boolean;
   readonly inlineFormats?: readonly CanvasInlineFormat[];
   readonly managesAnnotationEditing?: boolean;
 }
@@ -295,6 +296,9 @@ export interface CanvasObjectExtension {
   readonly capturePointerTargetOnBodyDrag?: boolean;
   readonly bounds?: (context: CanvasObjectGeometryContext) => CanvasRect;
   readonly hitTest?: (context: CanvasObjectHitContext) => boolean;
+  readonly isPassiveContentVisible?: (
+    context: Pick<CanvasObjectViewProps, 'object' | 'geometry' | 'payload' | 'zoom'>,
+  ) => boolean;
   readonly View?: ComponentType<CanvasObjectViewProps>;
 }
 

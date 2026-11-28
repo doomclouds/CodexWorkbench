@@ -137,6 +137,20 @@ function projectObject(object: WhiteboardObject, version: number): CanvasObject 
   }
 }
 
+const projectedObjects = new WeakMap<WhiteboardObject, CanvasObject>();
+
+function objectProjection(object: WhiteboardObject, version: number) {
+  const existing = projectedObjects.get(object);
+  if (existing) {
+    return existing;
+  }
+
+  const projected = projectObject(object, version);
+  projectedObjects.set(object, projected);
+
+  return projected;
+}
+
 export function projectScene(board: WhiteboardScene): SceneProjection | undefined {
   const revision = safeVersion(board.revision);
   if (revision === undefined) {
@@ -151,7 +165,7 @@ export function projectScene(board: WhiteboardScene): SceneProjection | undefine
       return undefined;
     }
 
-    objectsById.set(object.id, projectObject(object, version));
+    objectsById.set(object.id, objectProjection(object, version));
     const connector = object.kind === 'connector' && object.detail?.kind === 'connector';
     if (connector && object.payloadVersion === undefined) {
       connectorLabels.set(object.id, { version: revision, value: { text: object.label } });
@@ -266,6 +280,34 @@ function projectPayloadValue(
   }
 }
 
+const projectedPayloads = new WeakMap<
+  WhiteboardPayload,
+  { readonly width?: number; readonly payload: CanvasObjectPayload }
+>();
+
+function payloadProjection(source: WhiteboardPayload, version: number, width: number) {
+  const { body, id } = source;
+  if (body.kind === 'ink') {
+    return undefined;
+  }
+
+  const tableWidth = body.kind === 'table' ? width : undefined;
+  const cached = projectedPayloads.get(source);
+  if (cached && cached.width === tableWidth) {
+    return cached.payload;
+  }
+
+  const value = projectPayloadValue(body, id, version, tableWidth);
+  if (!value) {
+    return undefined;
+  }
+
+  const payload = { version, value };
+  projectedPayloads.set(source, { width: tableWidth, payload });
+
+  return payload;
+}
+
 function sceneWithInk(scene: CanvasScene, inkById: ReadonlyMap<string, CanvasInk>): CanvasScene {
   if (inkById.size === 0) {
     return scene;
@@ -288,7 +330,8 @@ export function projectPayloads(
   const inkById = new Map<string, CanvasInk>();
   let unsafePayloadVersion = false;
 
-  for (const { id, version: sourceVersion, body } of payloads.values()) {
+  for (const source of payloads.values()) {
+    const { id, version: sourceVersion, body } = source;
     const object = projection.objectsById.get(id);
     if (!object) {
       continue;
@@ -308,9 +351,9 @@ export function projectPayloads(
       continue;
     }
 
-    const value = projectPayloadValue(body, id, version, object.geometry.width);
-    if (value) {
-      payloadById.set(id, { version, value });
+    const payload = payloadProjection(source, version, object.geometry.width);
+    if (payload) {
+      payloadById.set(id, payload);
     }
   }
 

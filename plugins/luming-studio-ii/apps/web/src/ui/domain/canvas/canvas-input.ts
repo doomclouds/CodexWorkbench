@@ -1123,7 +1123,11 @@ export function useCanvasInput({
       if (factor !== 1) {
         props.onViewportNavigation?.('zoom');
       }
-      update({ viewport: zoomViewport(viewport, point, factor), placementHover });
+      update({
+        viewport: zoomViewport(viewport, point, factor),
+        continuousZoom: true,
+        placementHover,
+      });
     } else {
       const delta = wheelDelta(event, size);
       if (delta.x !== 0 || delta.y !== 0) {

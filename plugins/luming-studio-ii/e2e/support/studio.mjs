@@ -15,7 +15,7 @@ export { inspectBoardExport } from "./board-export-fidelity.mjs";
 export { readPeerCursors, readPlacementPreview } from "./canvas-peer-observation.mjs";
 export { controlNextTextSave } from "./canvas-persistence.mjs";
 export { chooseBoardMedia, mediaDisplaySize, mediaPlaying } from "./media.mjs";
-export { chooseHtmlFile, controlNextHtmlSave, embedFrame } from "./embed.mjs";
+export { chooseHtmlFile, controlNextHtmlSave, embedFrame, inspectEmbedPaint } from "./embed.mjs";
 export { chooseDocumentImage, readDocumentDownload } from "./document-download.mjs";
 export { failNextDocumentSave } from "./document-failure.mjs";
 export { controlNextTodoSave } from "./todo-save.mjs";

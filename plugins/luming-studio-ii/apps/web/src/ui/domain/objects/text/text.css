@@ -115,10 +115,6 @@
   pointer-events: auto;
 }
 
-.studio-ui-canvas-text-body[data-canvas-label-state='concealed'] {
-  visibility: hidden;
-}
-
 .studio-ui-canvas-text-placement {
   position: absolute;
   inset-block-start: 50%;
