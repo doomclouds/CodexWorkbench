@@ -1,7 +1,9 @@
 import {
   encodeSafeSvgImage,
+  inspectVideo,
   looksLikeSvgImage,
   maximumBoardImageBytes,
+  planDocumentImageAsset,
   readSafeSvgImage,
   type Actor,
   type BoardEditDecision,
@@ -40,6 +42,32 @@ export function readArchivedSvgImage(content: Uint8Array): Uint8Array | undefine
   const bytes = encodeSafeSvgImage(svg, maximumBoardImageBytes);
 
   return bytes.byteLength <= maximumBoardImageBytes ? bytes : undefined;
+}
+
+export async function prepareBoardAsset(
+  boardId: string,
+  assetId: string,
+  content: Uint8Array,
+  validateUploadedSvg: ValidateUploadedSvg,
+) {
+  let vector: SafeSvgImage | undefined;
+  if (looksLikeSvgImage(content)) {
+    vector = readSafeSvgImage(content);
+    if (!vector || !(await validateUploadedSvg(vector.markup))) {
+      return undefined;
+    }
+  }
+
+  const image = planDocumentImageAsset(boardId, assetId, content, vector);
+  if (image.kind === 'changes') {
+    const [{ mimeType, bytes }] = image.assets;
+
+    return { mimeType, bytes };
+  }
+
+  const mimeType = inspectVideo(content);
+
+  return mimeType ? { mimeType, bytes: content } : undefined;
 }
 
 export function createImageEdit(

@@ -5,6 +5,7 @@ import type {
   WhiteboardScene,
 } from '../../data/whiteboard/index.js';
 import type { WhiteboardHistorySurfaceProps } from './contracts.js';
+import { HistoryAuthorColor } from './HistoryAgentAvatar.js';
 import { RestoreConfirmation } from './RestoreConfirmation.js';
 import { RestoreRecovery } from './RestoreRecovery.js';
 import { useVersionRestore } from './useVersionRestore.js';
@@ -168,5 +169,9 @@ function BoardHistorySession({
 }
 
 export function WhiteboardHistorySurface(props: WhiteboardHistorySurfaceProps) {
-  return <BoardHistorySession key={props.boardId} {...props} />;
+  return (
+    <HistoryAuthorColor value={props.colorForAuthor}>
+      <BoardHistorySession key={props.boardId} {...props} />
+    </HistoryAuthorColor>
+  );
 }

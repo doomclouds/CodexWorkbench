@@ -1,10 +1,16 @@
 import assert from 'node:assert/strict';
+import { fromBinary } from '@bufbuild/protobuf';
 import type { MessageInitShape } from '@bufbuild/protobuf';
+import {
+  BoardArchiveService,
+  ImportBoardArchiveResponseSchema,
+} from '@codexworkbench/luming-studio-ii-contracts/archives/service';
 import {
   BoardCatalogService,
   BoardLifecycleAction,
 } from '@codexworkbench/luming-studio-ii-contracts/catalog/service';
 import {
+  FeedbackAttachmentState,
   FeedbackRejectionReason,
   FeedbackService,
   FeedbackThreadStatus,
@@ -12,7 +18,10 @@ import {
   type FeedbackReceipt,
   type FeedbackContentPointSchema,
 } from '@codexworkbench/luming-studio-ii-contracts/feedback/service';
-import { WhiteboardService } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/service';
+import {
+  BoardExportFormat,
+  WhiteboardService,
+} from '@codexworkbench/luming-studio-ii-contracts/whiteboard/service';
 import { expect, test } from 'vitest';
 import { grantCatalogEditor } from '../support/catalog-lifecycle-database.js';
 import {
@@ -24,6 +33,7 @@ import {
   setFeedbackAnchorRotation,
 } from '../support/feedback-database.js';
 import {
+  actorHeader,
   callWhiteboard as callProtobuf,
   sendWhiteboardRequest as sendProtobuf,
 } from '../support/whiteboard-client.js';
@@ -115,6 +125,210 @@ function assertRejected(receipt: FeedbackReceipt, reason: FeedbackRejectionReaso
   assert.ok(receipt.outcome.case === 'rejected');
   expect(receipt.outcome.value.reason).toBe(reason);
 }
+
+test('freezes multiple selected objects and range bounds with their original versions', async () => {
+  const { scene } = await callProtobuf(server.address, editorId, getBoardScene, {
+    boardId: mainBoardId,
+  });
+  assert.ok(scene?.boardRevision !== undefined);
+  const objects = scene.objects
+    .filter(({ objectId }) => [shapeId, documentId].includes(objectId))
+    .map(({ objectId, geometryVersion, payloadVersion }) => ({
+      objectId,
+      geometryVersion,
+      ...(payloadVersion === undefined ? {} : { payloadVersion }),
+    }));
+  expect(objects).toHaveLength(2);
+  const selection = {
+    point: { x: 10, y: 40 },
+    bounds: { x: -20, y: -20, width: 450, height: 400 },
+    objects,
+    expectedBoardRevision: scene.boardRevision,
+  };
+  const operation: Operation = {
+    case: 'create',
+    value: {
+      text: 'Compare these selected objects.',
+      anchor: { target: { case: 'selection', value: selection } },
+    },
+  };
+  const { threadId } = applied(await apply('range-review', operation));
+  await server.restart();
+  const { thread } = await detail(threadId);
+  expect(thread?.anchor).toMatchObject({
+    sourceBoardRevision: scene.boardRevision,
+    target: { target: { case: 'selection', value: selection } },
+    frozenTargets: objects.map((reference) => ({
+      reference,
+      object: { label: expect.any(String) },
+    })),
+  });
+  const stale: Operation = {
+    case: 'create',
+    value: {
+      text: 'Compare these selected objects.',
+      anchor: {
+        target: {
+          case: 'selection',
+          value: { ...selection, expectedBoardRevision: scene.boardRevision + 1n },
+        },
+      },
+    },
+  };
+  assertRejected(await apply('stale-range-review', stale), FeedbackRejectionReason.TARGET_CHANGED);
+});
+
+test('queues a collaborator request, only lets one owner claim it, and confirms the original draft', async () => {
+  const { receipt: created } = await callProtobuf(
+    server.address,
+    editorId,
+    BoardCatalogService.method.createBoard,
+    {
+      commandId: 'attachment-board',
+      title: 'Attachment workflow',
+    },
+  );
+  assert.ok(created?.outcome.case === 'created');
+  const { boardId } = created.outcome.value;
+  grantCatalogEditor(server.databasePath, boardId, teammateId);
+  const { threadId, threadVersion } = applied(
+    await apply(
+      'attachment-note',
+      boardPoint('Please attach this board comment.'),
+      teammateId,
+      boardId,
+    ),
+  );
+  const request: Operation = {
+    case: 'requestAttachment',
+    value: { threadId, expectedThreadVersion: threadVersion },
+  };
+  applied(await apply('queue-one', request, teammateId, boardId));
+  applied(await apply('queue-two', request, teammateId, boardId));
+  await server.restart();
+  const pending = await callProtobuf(server.address, editorId, listThreads, {
+    boardId,
+    pendingAttachment: true,
+  });
+  expect(pending.threads).toHaveLength(1);
+  const attachment = pending.threads[0]?.attachment;
+  assert.ok(attachment);
+  expect(attachment).toMatchObject({ state: FeedbackAttachmentState.PENDING, threadVersion });
+  const claim: Operation = {
+    case: 'claimAttachment',
+    value: { threadId, requestId: attachment.requestId },
+  };
+  assertRejected(
+    await apply('guest-claim', claim, teammateId, boardId),
+    FeedbackRejectionReason.FORBIDDEN,
+  );
+  applied(await apply('owner-claim', claim, editorId, boardId));
+  assertRejected(
+    await apply('another-owner-view', claim, editorId, boardId),
+    FeedbackRejectionReason.ATTACHMENT_CLAIMED,
+  );
+
+  const confirm: Operation = {
+    case: 'confirmAttachment',
+    value: { threadId, requestId: attachment.requestId, claimId: 'owner-claim' },
+  };
+  assertRejected(
+    await apply('guest-confirm', confirm, teammateId, boardId),
+    FeedbackRejectionReason.FORBIDDEN,
+  );
+  applied(await apply('owner-confirm', confirm, editorId, boardId));
+  const attached = await callProtobuf(server.address, editorId, getThread, { boardId, threadId });
+  expect(attached.thread?.attachment).toMatchObject({
+    requestId: attachment.requestId,
+    state: FeedbackAttachmentState.ATTACHED,
+    threadVersion,
+  });
+  expect(attached.thread?.status).toBe(FeedbackThreadStatus.OPEN);
+});
+
+test('preserves a frozen range through the board archive without carrying a draft delivery', async () => {
+  const { receipt: created } = await callProtobuf(
+    server.address,
+    editorId,
+    BoardCatalogService.method.createBoard,
+    {
+      commandId: 'archive-range-board',
+      title: 'Archive range',
+    },
+  );
+  assert.ok(created?.outcome.case === 'created');
+  const { boardId } = created.outcome.value;
+  const selection = {
+    point: { x: 90, y: 110 },
+    bounds: { x: 0, y: 0, width: 90, height: 110 },
+    objects: [],
+    expectedBoardRevision: 0n,
+  };
+  const { threadId, threadVersion } = applied(
+    await apply(
+      'archive-range-note',
+      {
+        case: 'create',
+        value: {
+          text: 'An empty whiteboard region.',
+          anchor: { target: { case: 'selection', value: selection } },
+        },
+      },
+      editorId,
+      boardId,
+    ),
+  );
+  applied(
+    await apply(
+      'archive-range-queue',
+      {
+        case: 'requestAttachment',
+        value: { threadId, expectedThreadVersion: threadVersion },
+      },
+      editorId,
+      boardId,
+    ),
+  );
+  const backup = await callProtobuf(
+    server.address,
+    editorId,
+    WhiteboardService.method.exportBoard,
+    {
+      boardId,
+      expectedRevision: 0n,
+      scope: { case: 'whole', value: {} },
+      format: BoardExportFormat.ZIP,
+    },
+  );
+  assert.ok(backup.result.case === 'file');
+  const response = await fetch(
+    new URL('/' + BoardArchiveService.typeName + '/ImportBoardArchive', server.address),
+    {
+      method: 'POST',
+      headers: {
+        [actorHeader]: editorId,
+        'content-type': 'application/zip',
+        'x-studio-command-id': 'restore-range-archive',
+      },
+      body: new Uint8Array(backup.result.value.content),
+    },
+  );
+  expect(response.status).toBe(200);
+  const { receipt } = fromBinary(
+    ImportBoardArchiveResponseSchema,
+    new Uint8Array(await response.arrayBuffer()),
+  );
+  assert.ok(receipt?.outcome.case === 'imported');
+  const restored = await callProtobuf(server.address, editorId, getThread, {
+    boardId: receipt.outcome.value.boardId,
+    threadId,
+  });
+  expect(restored.thread?.anchor?.target?.target).toMatchObject({
+    case: 'selection',
+    value: selection,
+  });
+  expect(restored.thread?.attachment).toBeUndefined();
+});
 
 test('filters notes by the authenticated viewer before the first page is taken', async () => {
   const own = applied(await apply('own-earlier-note', boardPoint('My earlier note.')));

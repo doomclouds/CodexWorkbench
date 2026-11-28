@@ -108,6 +108,15 @@
   min-block-size: 0;
 }
 
+.whiteboard-editor__annotation-range {
+  position: absolute;
+  z-index: 35;
+  box-sizing: border-box;
+  border: 1px solid var(--studio-ui-accent, Highlight);
+  background: color-mix(in srgb, var(--studio-ui-accent, Highlight) 12%, transparent);
+  pointer-events: none;
+}
+
 .whiteboard-editor__live-canvas,
 .whiteboard-editor__history-canvas {
   position: relative;

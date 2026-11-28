@@ -108,6 +108,56 @@ const tally = within(0xffffffffn);
 const version = within(9_223_372_036_854_775_807n, 1n);
 const date = within(maximumDate);
 
+function selectionAnchor(value: unknown, name: string): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  const entry = record(parsed(value, name), name);
+  const target = record(entry.target, name);
+  if (target.kind !== 'selection') {
+    throw new ArchiveObjectError('Invalid archived feedback selection kind.');
+  }
+
+  const point = record(target.point, name);
+  numberValue(point.x, 'x');
+  numberValue(point.y, 'y');
+  stringValue(target.expectedBoardRevision, name);
+  unsigned(target.expectedBoardRevision, name);
+  if (target.bounds !== undefined) {
+    const bounds = record(target.bounds, name);
+    for (const field of ['x', 'y', 'width', 'height']) {
+      numberValue(bounds[field], field);
+    }
+  }
+  const saved = sequence(entry.frozenTargets, name);
+  if (saved.length > 120) {
+    throw new ArchiveObjectError('Archived feedback selection exceeds its object limit.');
+  }
+
+  const checked = saved.map((item) => {
+    const { reference: rawReference, object: rawObject } = record(item, name);
+    const reference = record(rawReference, name);
+    const object = record(rawObject, name);
+    requiredId(reference.objectId, name);
+    stringValue(reference.geometryVersion, name);
+    unsigned(reference.geometryVersion, name);
+    if (reference.payloadVersion !== undefined) {
+      stringValue(reference.payloadVersion, name);
+      unsigned(reference.payloadVersion, name);
+    }
+    requiredId(object.kind, name);
+    stringValue(object.label, name);
+    for (const field of ['x', 'y', 'width', 'height', 'rotation']) {
+      numberValue(object[field], field);
+    }
+
+    return { reference, object };
+  });
+
+  return JSON.stringify({ target, frozenTargets: checked });
+}
+
 const threadColumns = {
   thread_id: requiredId,
   status: oneOf(statuses),
@@ -128,6 +178,7 @@ const threadColumns = {
   version,
   updated_at_millis: date,
   reply_count: tally,
+  selection_json: selectionAnchor,
 } satisfies Columns;
 
 const messageColumns = {

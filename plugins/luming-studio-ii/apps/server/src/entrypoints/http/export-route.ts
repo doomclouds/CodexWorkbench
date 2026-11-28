@@ -53,6 +53,40 @@ export function toExportScope(scope: ExportBoardRequest['scope']): ExportBoardFi
   }
 }
 
+export function toExportOptions(
+  request: Pick<ExportBoardRequest, 'scope' | 'format' | 'rectangle' | 'scale'>,
+) {
+  const { scope, format, rectangle, scale } = request;
+  if (rectangle && (format !== BoardExportFormat.PNG || scope.case !== 'whole')) {
+    throw new HttpRequestError(400, 'A crop rectangle requires PNG and the whole board scope');
+  }
+
+  if (rectangle) {
+    const { x, y, width, height } = rectangle;
+    const bounds = [x, y, x + width, y + height];
+    const finiteBounds = bounds.every((value) => Number.isFinite(value));
+    if (!finiteBounds || x + width <= x || y + height <= y) {
+      throw new HttpRequestError(
+        400,
+        'A crop rectangle requires finite bounds and positive dimensions',
+      );
+    }
+  }
+  if (scale !== undefined) {
+    const validScale = Number.isFinite(scale) && scale >= 0.1 && scale <= 4;
+    if (!validScale || (scale !== 1 && format !== BoardExportFormat.PNG)) {
+      throw new HttpRequestError(400, 'Custom PNG export scale must be between 0.1 and 4');
+    }
+  }
+
+  return {
+    scope: toExportScope(scope),
+    format: toExportFormat(format),
+    rectangle,
+    scale,
+  };
+}
+
 function toExportCommand(request: ExportBoardRequest): ExportBoardFileCommand {
   if (request.expectedRevision === undefined) {
     throw new HttpRequestError(400, 'A saved board revision is required');
@@ -61,8 +95,7 @@ function toExportCommand(request: ExportBoardRequest): ExportBoardFileCommand {
   return {
     boardId: requireId(request.boardId),
     expectedRevision: request.expectedRevision,
-    scope: toExportScope(request.scope),
-    format: toExportFormat(request.format),
+    ...toExportOptions(request),
   };
 }
 

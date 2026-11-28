@@ -154,6 +154,45 @@ const nativeCases = [
   { body: todoBody, content: { kind: 'todo', itemId: unitId }, marker: 'data-todo-item-id' },
 ] as const;
 
+test('keeps document paragraph annotations precise and uses an object anchor on blank paper', async () => {
+  const app = contentBoard(documentBody, { kind: 'document', blockIds: [unitId] });
+  const draft = '[role="dialog"][aria-label="新建备注"]';
+
+  async function annotate(target: HTMLElement) {
+    await app.update(() => {
+      target.dispatchEvent(
+        new MouseEvent('click', {
+          bubbles: true,
+          cancelable: true,
+          detail: 1,
+          button: 0,
+          clientX: 460,
+          clientY: 320,
+        }),
+      );
+    });
+
+    return element(app.host, draft).querySelector('.whiteboard-feedback__target-label');
+  }
+
+  try {
+    await app.open(boardId);
+    await app.click('备注');
+    const paragraph = element(app.host, '[data-document-read-block]');
+    expect((await annotate(paragraph))?.textContent).toBe('文档段落 · 文档');
+    await app.click('取消');
+
+    const notes = element(app.host, '[aria-label="备注"]');
+    if (notes.getAttribute('aria-pressed') !== 'true') {
+      await app.click('备注');
+    }
+    const paper = element(app.host, '.studio-document-paper');
+    expect((await annotate(paper))?.textContent).toBe('文档');
+  } finally {
+    app.dispose();
+  }
+});
+
 test.each(nativeCases)(
   'follows a $content.kind reflow and reveals the unit from its list entry',
   async ({ body, content, marker }) => {

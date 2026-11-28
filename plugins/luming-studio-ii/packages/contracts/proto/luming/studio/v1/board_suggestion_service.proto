@@ -12,6 +12,7 @@ service BoardSuggestionService {
   rpc ListBoardSuggestions(ListBoardSuggestionsRequest) returns (ListBoardSuggestionsResponse);
   rpc PreviewBoardSuggestion(PreviewBoardSuggestionRequest) returns (PreviewBoardSuggestionResponse);
   rpc AcceptBoardSuggestion(AcceptBoardSuggestionRequest) returns (AcceptBoardSuggestionResponse);
+  rpc ChooseAgentBoardSuggestion(ChooseAgentBoardSuggestionRequest) returns (ChooseAgentBoardSuggestionResponse);
   rpc RejectBoardSuggestion(RejectBoardSuggestionRequest) returns (RejectBoardSuggestionResponse);
 }
 
@@ -143,6 +144,21 @@ message AcceptBoardSuggestionRequest {
 }
 
 message AcceptBoardSuggestionResponse {
+  BoardEditReceipt receipt = 1;
+}
+
+message ChooseAgentBoardSuggestionRequest {
+  string board_id = 1;
+  string agent_id = 2;
+  string task_id = 3;
+  string generation = 4;
+  string command_id = 5;
+  string proposal_id = 6;
+  string option_id = 7;
+  optional uint64 expected_proposal_version = 8;
+}
+
+message ChooseAgentBoardSuggestionResponse {
   BoardEditReceipt receipt = 1;
 }
 

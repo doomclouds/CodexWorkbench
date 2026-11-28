@@ -47,10 +47,13 @@ async function request<Input extends DescMessage, Output extends DescMessage>(
   method: DescMethodUnary<Input, Output>,
   input: MessageInitShape<Input>,
   signal?: AbortSignal,
+  keepalive?: boolean,
 ) {
   const path = '/' + method.parent.typeName + '/' + method.name;
   const body = toBinary(method.input, create(method.input, input));
-  const response = await post(path, body, signal);
+  const response = keepalive
+    ? await post(path, body, signal, true)
+    : await post(path, body, signal);
 
   return fromBinary(method.output, response, { readUnknownFields: false });
 }
@@ -172,6 +175,7 @@ export function createBoardRoomService(
         methods.leaveBoardPresence,
         { boardId, viewId, sequence },
         signal,
+        true,
       );
 
       return result.accepted;

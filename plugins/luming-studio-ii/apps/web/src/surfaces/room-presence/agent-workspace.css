@@ -10,6 +10,10 @@
   min-inline-size: 0;
 }
 
+.room-presence-avatar.room-agent-avatar {
+  border-radius: 6px;
+}
+
 .room-agent-workspace {
   display: flex;
   flex-wrap: wrap;
@@ -61,4 +65,204 @@
   color: var(--room-presence-text);
   font-size: 11px;
   overflow-wrap: anywhere;
+}
+
+.room-agent-workspace-overlay {
+  position: absolute;
+  z-index: 19;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.room-agent-workspace-frame[data-agent-terminal] {
+  animation: room-agent-workspace-exit var(--agent-workspace-fade) linear both;
+}
+
+.room-agent-workspace-outline {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1.5px dashed var(--agent-workspace-color);
+  border-radius: 6px;
+  background-color: color-mix(in srgb, var(--agent-workspace-color) 6%, transparent);
+}
+
+.room-agent-workspace-outline[data-agent-label-area]::after {
+  position: absolute;
+  inset: -1.5px;
+  border: inherit;
+  border-radius: inherit;
+  animation: room-agent-edge 1.8s ease-in-out infinite;
+  animation-play-state: var(--agent-workspace-play-state);
+  content: '';
+}
+
+.room-agent-workspace-outline[data-active-area] {
+  border-style: solid;
+  background-color: color-mix(in srgb, var(--agent-workspace-color) 16%, transparent);
+}
+
+.room-agent-workspace-label {
+  position: absolute;
+  display: flex;
+  box-sizing: border-box;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  color: var(--agent-workspace-label-ink);
+  background-color: var(--agent-workspace-color);
+  font:
+    11px/15px Arial,
+    'Microsoft YaHei',
+    sans-serif;
+  white-space: nowrap;
+}
+
+.room-agent-workspace-label > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.room-agent-working-mark {
+  position: relative;
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 19px;
+  height: 19px;
+}
+
+.room-agent-working-orbit {
+  position: absolute;
+  inset: 0;
+  animation: room-agent-orbit 2.8s linear infinite;
+  animation-play-state: var(--agent-workspace-play-state);
+  transform-origin: center;
+}
+
+.room-agent-working-orbit circle,
+.room-agent-working-dots i {
+  animation: room-agent-breathe 1.4s ease-in-out infinite;
+  animation-play-state: var(--agent-workspace-play-state);
+}
+
+.room-agent-working-dots {
+  display: flex;
+  flex: none;
+}
+
+.room-agent-working-dots i {
+  animation-duration: 1.8s;
+  font-style: normal;
+}
+
+.room-agent-working-dots i:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.room-agent-working-dots i:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+.room-agent-workspace-label .room-agent-release-button {
+  padding: 2px 5px;
+  border: 0;
+  border-radius: 999px;
+  color: inherit;
+  background: color-mix(in srgb, currentColor 14%, transparent);
+  white-space: nowrap;
+  pointer-events: auto;
+}
+
+.room-agent-workspace-label .room-agent-release-button:hover {
+  background: color-mix(in srgb, currentColor 24%, transparent);
+}
+
+.room-agent-workspace-label .room-agent-release-button:focus-visible {
+  outline-color: currentColor;
+}
+
+.room-agent-workspace-label .room-agent-release-button[aria-disabled='true'] {
+  opacity: 0.65;
+  cursor: default;
+}
+
+.room-agent-workspace-label .room-agent-release-error {
+  position: absolute;
+  inset-block-start: 100%;
+  inset-inline-start: 0;
+  width: max-content;
+  max-width: 100%;
+  padding: 5px 8px;
+  border-radius: 5px;
+  background: light-dark(#fff, #292b35);
+  color: light-dark(#25262d, #f0f1f4);
+  white-space: normal;
+}
+
+[data-agent-state='stale'] > .room-agent-workspace-outline,
+[data-agent-terminal] > .room-agent-workspace-outline {
+  border-color: light-dark(#87929e, #8e9aa7);
+  border-style: dashed;
+  background-color: transparent;
+}
+
+[data-agent-state='stale'] > .room-agent-workspace-outline[data-agent-label-area]::after,
+[data-agent-terminal] > .room-agent-workspace-outline[data-agent-label-area]::after {
+  display: none;
+}
+
+[data-agent-state='stale'] > .room-agent-workspace-label,
+[data-agent-terminal] > .room-agent-workspace-label {
+  --agent-workspace-color: light-dark(#56616e, #454d59);
+  --agent-workspace-label-ink: #fff;
+}
+
+@keyframes room-agent-orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes room-agent-breathe {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes room-agent-edge {
+  0%,
+  100% {
+    opacity: 0.2;
+  }
+
+  50% {
+    opacity: 0.65;
+  }
+}
+
+@keyframes room-agent-workspace-exit {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .room-agent-workspace-frame[data-agent-terminal],
+  .room-agent-working-orbit,
+  .room-agent-working-orbit circle,
+  .room-agent-working-dots i,
+  .room-agent-workspace-outline[data-agent-label-area]::after {
+    animation: none;
+  }
 }

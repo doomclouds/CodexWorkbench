@@ -11,10 +11,10 @@ interface FeedbackListProps {
   readonly draftThreadIds: ReadonlySet<string>;
   readonly authorId: string;
   readonly authors: readonly { readonly id: string; readonly label: string }[];
-  readonly mine: boolean;
+  readonly scope: 'all' | 'mine' | 'pending';
   readonly showResolved: boolean;
   readonly onAuthorChange: (authorId: string) => void;
-  readonly onMineChange: (mine: boolean) => void;
+  readonly onScopeChange: (scope: 'all' | 'mine' | 'pending') => void;
   readonly onShowResolvedChange: (showResolved: boolean) => void;
   readonly expandedId?: string;
   readonly expanded?: ReactNode;
@@ -89,6 +89,9 @@ function FeedbackListEntry({ thread, draft, expanded, details, onOpen }: Feedbac
             {thread.status === 'resolved' && <small>已解决</small>}
           </span>
           <span className="whiteboard-feedback__summary">{thread.first.text}</span>
+          {thread.attachment?.state === 'pending' && (
+            <span className="whiteboard-feedback__reply-count">待附加</span>
+          )}
           {thread.replyCount > 0 && (
             <span className="whiteboard-feedback__reply-count">{thread.replyCount} 条回复</span>
           )}
@@ -104,10 +107,10 @@ export function FeedbackList({
   draftThreadIds,
   authorId,
   authors,
-  mine,
+  scope,
   showResolved,
   onAuthorChange,
-  onMineChange,
+  onScopeChange,
   onShowResolvedChange,
   expandedId,
   expanded,
@@ -122,21 +125,32 @@ export function FeedbackList({
 }: FeedbackListProps) {
   const ready = !pending && !error;
   const empty = ready && threads.length === 0 && !hasVisibleSuggestions;
-  const filtered = mine || Boolean(authorId);
+  const filtered = scope !== 'all' || Boolean(authorId);
 
   return (
     <>
       <div className="whiteboard-feedback__list-controls">
         <div className="whiteboard-feedback__scope" role="group" aria-label="备注范围">
-          <button type="button" aria-pressed={!mine} onClick={() => onMineChange(false)}>
+          <button type="button" aria-pressed={scope === 'all'} onClick={() => onScopeChange('all')}>
             全部
           </button>
-          <button type="button" aria-pressed={mine} onClick={() => onMineChange(true)}>
+          <button
+            type="button"
+            aria-pressed={scope === 'mine'}
+            onClick={() => onScopeChange('mine')}
+          >
             我发起
+          </button>
+          <button
+            type="button"
+            aria-pressed={scope === 'pending'}
+            onClick={() => onScopeChange('pending')}
+          >
+            待附加
           </button>
         </div>
         <div className="whiteboard-feedback__filters">
-          {!mine && (
+          {scope === 'all' && (
             <label className="whiteboard-feedback__author-filter">
               作者
               <select

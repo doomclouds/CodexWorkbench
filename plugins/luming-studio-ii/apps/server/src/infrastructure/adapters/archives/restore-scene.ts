@@ -306,9 +306,17 @@ function nativeSceneReader(
 }
 
 function legacyActor(value: unknown) {
-  return value === undefined
-    ? undefined
-    : requiredId(record(value, 'version actor').id, 'actor ID');
+  if (value === undefined) {
+    return;
+  }
+
+  const actor = record(value, 'version actor');
+
+  return {
+    id: requiredId(actor.id, 'actor ID'),
+    agentName:
+      actor.kind === 'agent' && typeof actor.name === 'string' ? actor.name.trim() : undefined,
+  };
 }
 
 function versionDate(value: unknown, name: string) {
@@ -323,7 +331,8 @@ function parseVersion(entry: ArchiveData, artifact: ArchiveData, native: boolean
   }
 
   const data = native ? record(entry.studioII, 'Studio II version') : undefined;
-  const actorId = data ? optionalString(data.actorId, 'version actor') : legacyActor(entry.actor);
+  const actor = data ? undefined : legacyActor(entry.actor);
+  const actorId = data ? optionalString(data.actorId, 'version actor') : actor?.id;
   const savedAtMillis = data
     ? versionDate(data.savedAtMillis, 'version date')
     : archivedDate(entry.createdAt, 'version date');
@@ -346,6 +355,7 @@ function parseVersion(entry: ArchiveData, artifact: ArchiveData, native: boolean
     revision,
     title,
     actorId,
+    agentName: actor?.agentName,
     savedAtMillis,
     sourceRevision,
     kind,

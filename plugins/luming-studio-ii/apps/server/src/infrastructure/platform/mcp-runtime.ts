@@ -35,7 +35,15 @@ const privateToken = /^[A-Za-z0-9_-]{43}$/u;
 const loopbackOrigin = /^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}$/u;
 const healthRoute = '/luming.studio.v1.WhiteboardService/GetBoardScene';
 const suggestionAgentRoute = '/luming.studio.v1.BoardSuggestionService/SubmitBoardSuggestion';
+const choiceAgentRoute = '/luming.studio.v1.BoardSuggestionService/ChooseAgentBoardSuggestion';
 const activityAgentRoute = '/luming.studio.v1.BoardRoomService/ChangeAgentActivity';
+const writeAgentRoute = '/luming.studio.v1.BoardAgentWriteService/ApplyAgentBoardEdit';
+const receiptAgentRoute = '/luming.studio.v1.BoardAgentWriteService/GetAgentBoardEditReceipt';
+const agentFeedbackRoutes = new Set(
+  ['ListThreads', 'GetThread', 'ApplyFeedback', 'GetFeedbackReceipt'].map(
+    (method) => '/luming.studio.v1.FeedbackService/' + method,
+  ),
+);
 
 function systemCode(error: unknown): string | undefined {
   if (!(error instanceof Error) || !('code' in error)) {
@@ -294,7 +302,12 @@ export async function loadMcpRuntime(input: RuntimeOptions) {
   const pluginVersion = readVersion(JSON.parse(manifest) as unknown);
   let pending: Promise<LocalService> | undefined;
 
-  async function forward(request: RuntimeRequest, signal: AbortSignal, role: 'owner' | 'agent') {
+  async function forward(
+    request: RuntimeRequest,
+    signal: AbortSignal,
+    role: 'owner' | 'agent',
+    feedbackAuthorId?: string,
+  ) {
     signal.throwIfAborted();
     try {
       const service = await (pending ??= acquireService(options, pluginVersion));
@@ -311,6 +324,9 @@ export async function loadMcpRuntime(input: RuntimeOptions) {
       }
       if (request.commandId) {
         headers.set('x-studio-command-id', request.commandId);
+      }
+      if (feedbackAuthorId) {
+        headers.set('x-studio-feedback-agent-id', feedbackAuthorId);
       }
 
       const response = await fetch(endpoint, {
@@ -348,7 +364,20 @@ export async function loadMcpRuntime(input: RuntimeOptions) {
     dispatch: (request: RuntimeRequest, signal: AbortSignal) => forward(request, signal, 'owner'),
     dispatchAgentSuggestion: (body: Uint8Array, signal: AbortSignal) =>
       forwardAgent(suggestionAgentRoute, body, signal),
+    dispatchAgentChoice: (body: Uint8Array, signal: AbortSignal) =>
+      forwardAgent(choiceAgentRoute, body, signal),
     dispatchAgentActivity: (body: Uint8Array, signal: AbortSignal) =>
       forwardAgent(activityAgentRoute, body, signal),
+    dispatchAgentWrite: (body: Uint8Array, signal: AbortSignal) =>
+      forwardAgent(writeAgentRoute, body, signal),
+    dispatchAgentReceipt: (body: Uint8Array, signal: AbortSignal) =>
+      forwardAgent(receiptAgentRoute, body, signal),
+    dispatchAgentFeedback: (agentId: string, request: RuntimeRequest, signal: AbortSignal) => {
+      if (request.method !== 'POST' || !agentFeedbackRoutes.has(request.route)) {
+        throw new Error('Invalid Studio Agent feedback operation.');
+      }
+
+      return forward(request, signal, 'agent', agentId);
+    },
   };
 }

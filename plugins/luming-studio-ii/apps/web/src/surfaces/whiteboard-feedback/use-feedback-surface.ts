@@ -51,10 +51,13 @@ interface HostPointOptions {
   readonly onPick: (point: FeedbackPoint) => void;
 }
 
-function useHostPoint({ request, hostPicking, annotating, canWrite, onPick }: HostPointOptions) {
+function useHostRequest<T extends { readonly sequence: number }>(
+  request: T | undefined,
+  active: boolean,
+  receive: (request: T) => void,
+) {
   const handled = useRef<number | undefined>(undefined);
-  const pick = useEffectEvent(onPick);
-  const active = hostPicking && annotating && canWrite;
+  const pick = useEffectEvent(receive);
 
   useEffect(() => {
     if (!request || !active || handled.current === request.sequence) {
@@ -62,8 +65,23 @@ function useHostPoint({ request, hostPicking, annotating, canWrite, onPick }: Ho
     }
 
     handled.current = request.sequence;
-    pick(request.point);
+    pick(request);
   }, [request, active]);
+}
+
+function useHostPoint({ request, hostPicking, annotating, canWrite, onPick }: HostPointOptions) {
+  useHostRequest(request, Boolean(hostPicking) && annotating && canWrite, ({ point }) =>
+    onPick(point),
+  );
+}
+
+function useSelectionRequest(
+  request: WhiteboardFeedbackSurfaceProps['selectionAnnotationRequest'],
+  canWrite: boolean,
+  viewing: boolean,
+  onPick: (target: FeedbackTarget) => void,
+) {
+  useHostRequest(request, canWrite && !viewing, ({ target }) => onPick(target));
 }
 
 export function useFeedbackSurface({
@@ -84,6 +102,7 @@ export function useFeedbackSurface({
   onUnresolvedChange,
   onAttachThread,
   annotationRequest,
+  selectionAnnotationRequest,
   pointAnnotationRequest,
   hostPicking,
   focusedObjectId,
@@ -140,6 +159,8 @@ export function useFeedbackSurface({
     boardId,
     createCommandId,
     onAttachThread,
+    service,
+    onChanged: queries.refresh,
   });
 
   const command = useFeedbackCommand({
@@ -194,9 +215,22 @@ export function useFeedbackSurface({
 
   function restoreCanvasFocus() {
     const pin = triggerPin.current;
-    const target = pin?.isConnected ? pin : stage.current;
-    target?.focus({ preventScroll: true });
     triggerPin.current = undefined;
+
+    function restore() {
+      const target = pin?.isConnected && !pin.hidden ? pin : stage.current;
+      target?.focus({ preventScroll: true });
+    }
+
+    if (pin?.hidden) {
+      queueMicrotask(() => {
+        if (!triggerPin.current) {
+          restore();
+        }
+      });
+    } else {
+      restore();
+    }
   }
 
   function handleClosePanel() {
@@ -281,7 +315,7 @@ export function useFeedbackSurface({
         text: '',
         label: describeFeedbackTarget(
           target,
-          target.kind === 'board' ? undefined : objectsById.get(target.objectId),
+          'objectId' in target ? objectsById.get(target.objectId) : undefined,
         ),
         excerpt: feedbackDraftExcerpt(excerpt),
         frozenPoint: locateDraft(target, objectsById),
@@ -355,6 +389,7 @@ export function useFeedbackSurface({
     canWrite,
     onPick: handlePickLocation,
   });
+  useSelectionRequest(selectionAnnotationRequest, canWrite, viewing, startDraft);
 
   const reportUnresolved = useEffectEvent((unresolved: boolean) =>
     onUnresolvedChange?.(unresolved),

@@ -9,7 +9,7 @@ import type {
   CatalogThumbnailResult,
   CatalogTrashedBoard,
 } from '../domain/index.js';
-import type { CatalogLookup, CatalogRepository } from '../ports/index.js';
+import type { CatalogLookup, CatalogRepository, WorkbenchPreferences } from '../ports/index.js';
 import { createCatalogThumbnailReader } from './catalog-thumbnail.js';
 import { CatalogQueryError, readCatalogCursor, writeCatalogCursor } from './cursor.js';
 import { duplicateBoard, type DuplicateBoardCommand } from './duplicate-board.js';
@@ -29,6 +29,7 @@ export type {
   CatalogTrashedBoard,
 } from '../domain/index.js';
 export type { ManageBoardCommand, PurgeBoardsCommand } from './management.js';
+export type { WorkbenchPreferences } from '../ports/index.js';
 
 export interface CatalogActor {
   readonly id: string;
@@ -40,6 +41,7 @@ export interface CatalogListRequest {
   readonly pageSize: number;
   readonly cursor?: string;
   readonly pinnedOnly?: boolean;
+  readonly offset?: number;
 }
 
 export interface CatalogPage {
@@ -66,6 +68,8 @@ export interface CatalogApplication {
   manageBoard(actor: CatalogActor, command: ManageBoardCommand): CatalogReceipt;
   purgeBoards(actor: CatalogActor, command: PurgeBoardsCommand): CatalogReceipt;
   getReceipt(actor: CatalogActor, commandId: string): CatalogReceipt | undefined;
+  readPreferences(actor: CatalogActor): WorkbenchPreferences;
+  updatePreferences(actor: CatalogActor, changes: WorkbenchPreferences): void;
 }
 
 interface CatalogServices {
@@ -73,8 +77,9 @@ interface CatalogServices {
   readonly now: () => number;
 }
 
-const maxQueryLength = 200;
+const maxQueryLength = 512;
 const maxPageSize = 100;
+const maxOffset = 0xff_ff_ff_ff;
 const initialEntryVersion = 1n;
 
 function catalogLookup(
@@ -82,7 +87,7 @@ function catalogLookup(
   request: CatalogListRequest,
   view?: CatalogScope['view'],
 ): CatalogLookup {
-  const { order, pageSize, cursor } = request;
+  const { order, pageSize, cursor, offset } = request;
   const query = request.query.trim();
   if (query.length > maxQueryLength) {
     throw new CatalogQueryError('The catalog search query is too long.');
@@ -94,12 +99,19 @@ function catalogLookup(
     throw new CatalogQueryError('The catalog page size is out of range.');
   }
 
+  const invalidOffset = offset !== undefined && (offset < 0 || offset > maxOffset);
+  if (invalidOffset || (offset !== undefined && !Number.isInteger(offset))) {
+    throw new CatalogQueryError('The catalog offset is out of range.');
+  }
+  if (offset !== undefined && cursor !== undefined) {
+    throw new CatalogQueryError('The catalog offset and cursor are mutually exclusive.');
+  }
+
   const scope = { actorId: actor.id, query, order, view };
-  const pinnedScope =
-    view === undefined && request.pinnedOnly ? { ...scope, pinnedOnly: true } : scope;
+  const pinnedScope = request.pinnedOnly ? { ...scope, pinnedOnly: true } : scope;
   const after = cursor === undefined ? undefined : readCatalogCursor(cursor, pinnedScope);
 
-  return { ...pinnedScope, limit: pageSize + 1, after };
+  return { ...pinnedScope, limit: pageSize + 1, after, offset };
 }
 
 function listBoards(
@@ -206,5 +218,7 @@ export function createCatalogApplication(
     manageBoard: (actor, command) => manageBoard(repository, actor.id, command, services.now),
     purgeBoards: (actor, command) => purgeBoards(repository, actor.id, command),
     getReceipt: (actor, commandId) => repository.getReceipt(actor.id, commandId),
+    readPreferences: (actor) => repository.readPreferences(actor.id),
+    updatePreferences: (actor, changes) => repository.updatePreferences(actor.id, changes),
   };
 }

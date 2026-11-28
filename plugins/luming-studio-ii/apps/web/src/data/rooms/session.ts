@@ -22,7 +22,9 @@ interface RoomStream {
 
 interface RoomConnection {
   readonly observer: BoardRoomObserver;
+  visible: boolean;
   stream?: RoomStream;
+  stopObservingVisibility?: () => void;
   retry?: () => void;
   retryDelay: number;
 }
@@ -78,6 +80,7 @@ export function createBoardRoomSession({
   service,
   clock,
   observation,
+  visibility,
 }: BoardRoomSessionOptions): BoardRoomSession {
   let state = initialRoom(viewId);
   let active: RoomConnection | undefined;
@@ -107,14 +110,16 @@ export function createBoardRoomSession({
   }
 
   function stopStream(connection: RoomConnection) {
-    connection.stream?.controller.abort();
+    const stream = connection.stream;
     connection.stream = undefined;
+    stream?.controller.abort();
     presence.pause();
   }
 
   function dispose(connection: RoomConnection) {
     active = undefined;
     connection.retry?.();
+    connection.stopObservingVisibility?.();
     stopStream(connection);
     presence.leave();
     roomClock.reset();
@@ -177,6 +182,8 @@ export function createBoardRoomSession({
       participants: event.participants,
       timer: event.timer,
       agentWorkspaces: event.agentWorkspaces,
+      onlineAgentIds: event.onlineAgentIds,
+      readingAgentIds: event.readingAgentIds,
       canReleaseAgentActivity: event.canReleaseAgentActivity,
       feedbackUpdateKey: discussionUpdateKey(event.instanceId, event.feedbackVersion),
       suggestionsUpdateKey: discussionUpdateKey(event.instanceId, event.suggestionsVersion),
@@ -239,7 +246,12 @@ export function createBoardRoomSession({
         });
         break;
       case 'agentWorkspaces':
-        setState({ ...state, agentWorkspaces: event.workspaces });
+        setState({
+          ...state,
+          agentWorkspaces: event.workspaces,
+          onlineAgentIds: event.onlineAgentIds,
+          readingAgentIds: event.readingAgentIds,
+        });
         break;
       case 'accessLost':
         loseAccess(connection);
@@ -286,7 +298,7 @@ export function createBoardRoomSession({
   }
 
   function connect(connection: RoomConnection) {
-    if (active !== connection) {
+    if (active !== connection || !connection.visible) {
       return;
     }
 
@@ -318,14 +330,44 @@ export function createBoardRoomSession({
     }
   }
 
+  function syncVisibility(connection: RoomConnection, visible: boolean) {
+    if (active !== connection || connection.visible === visible || state.status === 'accessLost') {
+      return;
+    }
+
+    connection.visible = visible;
+    if (visible) {
+      connect(connection);
+      return;
+    }
+
+    connection.retry?.();
+    connection.retry = undefined;
+    stopStream(connection);
+    presence.leave();
+    setState({
+      ...state,
+      status: 'reconnecting',
+      canEdit: false,
+      participants: [],
+      notice: undefined,
+    });
+  }
+
   function open(observer: BoardRoomObserver = {}) {
     if (active) {
       dispose(active);
     }
 
-    const connection = { observer, retryDelay: initialRetryMs };
+    const connection: RoomConnection = { observer, retryDelay: initialRetryMs, visible: false };
     active = connection;
-    connect(connection);
+    if (visibility) {
+      connection.stopObservingVisibility = visibility((visible) =>
+        syncVisibility(connection, visible),
+      );
+    } else {
+      syncVisibility(connection, true);
+    }
 
     return () => {
       if (active === connection) {
@@ -410,5 +452,6 @@ export function createBoardRoomSession({
     releaseAgentWorkspace:
       typeof service.releaseAgentWorkspace === 'function' ? releaseAgentWorkspace : undefined,
     schedule: clock.schedule,
+    scheduleFrame: clock.scheduleFrame,
   };
 }

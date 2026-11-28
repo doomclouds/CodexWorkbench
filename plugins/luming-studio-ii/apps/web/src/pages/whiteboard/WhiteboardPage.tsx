@@ -31,6 +31,12 @@ interface BoardReviewReference extends AttachedReviewSource {
   readonly feedbackThreadId: string;
   readonly comment: string;
   readonly excerpt?: string;
+  readonly targetLabel?: string;
+  readonly selectedTargets?: readonly {
+    readonly objectId: string;
+    readonly kind: string;
+    readonly label: string;
+  }[];
 }
 
 interface DocumentAsset {
@@ -245,6 +251,7 @@ function whiteboardFeatures(props: WhiteboardPageProps): WhiteboardEditorFeature
               {...frame}
               service={historyService}
               createCommandId={createCommandId}
+              colorForAuthor={participantColor}
               download={downloadExport}
             />
           )
@@ -258,23 +265,43 @@ function whiteboardFeatures(props: WhiteboardPageProps): WhiteboardEditorFeature
             colorForAuthor={participantColor}
             onAttachThread={
               suggestions && onAttachReviewSource
-                ? async ({ boardId, threadId, commandId, signal }) => {
+                ? async ({ boardId, threadId, threadVersion, commandId, signal }) => {
                     const { thread } = await feedbackService.getThread(
                       { boardId, threadId, pageSize: 1 },
                       signal,
                     );
                     signal.throwIfAborted();
+                    if (thread.version !== threadVersion) {
+                      throw new Error('备注内容已更新，请重新核对后附加。');
+                    }
+
                     const source = await suggestions.createReviewSource(
                       { boardId, commandId, origin: { kind: 'feedback', threadId } },
                       signal,
                     );
                     signal.throwIfAborted();
+                    const target = thread.anchor.target;
+                    const targetLabel =
+                      target.kind === 'selection'
+                        ? (target.bounds ? '画板范围' : '选区') +
+                          ' · ' +
+                          target.objects.length +
+                          ' 个对象'
+                        : thread.anchor.frozenObject?.label;
                     await onAttachReviewSource(
                       {
                         boardId,
                         feedbackThreadId: thread.id,
                         comment: thread.first.text,
                         excerpt: thread.anchor.frozenExcerpt,
+                        targetLabel,
+                        selectedTargets: thread.anchor.frozenTargets?.map(
+                          ({ reference, object }) => ({
+                            objectId: reference.objectId,
+                            kind: object.kind,
+                            label: object.label,
+                          }),
+                        ),
                         sourceId: source.sourceId,
                         capturedBoardRevision: source.capturedBoardRevision,
                         targetsBoardRevision: source.targetsBoardRevision,

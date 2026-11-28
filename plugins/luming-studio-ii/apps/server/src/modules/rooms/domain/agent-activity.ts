@@ -29,6 +29,9 @@ export interface AgentWorkspace {
   readonly scope: AgentActivityScope;
   readonly areas: readonly WorkspaceArea[];
   readonly expiresAtUnixMs: number;
+  readonly lastProgressAtUnixMs?: number;
+  readonly endedAtUnixMs?: number;
+  readonly endReason?: AgentActivityEndReason;
 }
 
 export interface BeginAgentActivity {

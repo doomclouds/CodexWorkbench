@@ -28,7 +28,7 @@ const server = useWhiteboardTestServer();
 const ownerId = 'archive-editor';
 const outsiderId = 'archive-outsider';
 const archivePath = '/' + BoardArchiveService.typeName + '/ImportBoardArchive';
-const { getArchiveImportReceipt } = BoardArchiveService.method;
+const { getArchiveImportReceipt, listBoardAssets } = BoardArchiveService.method;
 const { exportBoard, getBoardScene, getObjectPayloads } = WhiteboardService.method;
 const { listBoards } = BoardCatalogService.method;
 const fixtures = new URL('../fixtures/archives/', import.meta.url);
@@ -124,6 +124,14 @@ test('publishes the current archive with its live scene, selected assets and exa
   expect(asset.headers.get('x-content-type-options')).toBe('nosniff');
   expect(await asset.text()).toContain('<svg');
   expect((await loadArchiveAsset(imagePath, outsiderId)).status).toBe(404);
+  const { assets } = await callProtobuf(server.address, ownerId, listBoardAssets, { boardId });
+  expect(assets).toEqual([
+    expect.objectContaining({
+      src: imagePath,
+      mediaType: 'image/svg+xml',
+      byteLength: expect.any(Number),
+    }),
+  ]);
   expect(Buffer.concat(retainedArchiveChunks(server.databasePath, boardId))).toEqual(
     await readFile(currentArchive),
   );

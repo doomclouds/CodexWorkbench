@@ -17,6 +17,8 @@ export const feedbackSchema = `
     object_width REAL,
     object_height REAL,
     object_rotation REAL,
+    selection_json TEXT CHECK (json_valid(selection_json)),
+    attachment_json TEXT CHECK (json_valid(attachment_json)),
     version INTEGER NOT NULL CHECK (version >= 1),
     updated_at_millis INTEGER NOT NULL CHECK (updated_at_millis >= 0),
     reply_count INTEGER NOT NULL CHECK (reply_count BETWEEN 0 AND 4294967295),

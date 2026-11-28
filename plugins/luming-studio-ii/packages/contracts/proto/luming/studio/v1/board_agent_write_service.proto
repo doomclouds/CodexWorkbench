@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package luming.studio.v1;
+
+import "luming/studio/v1/board_suggestion_service.proto";
+import "luming/studio/v1/whiteboard_edits.proto";
+
+service BoardAgentWriteService {
+  rpc ApplyAgentBoardEdit(ApplyAgentBoardEditRequest) returns (ApplyAgentBoardEditResponse);
+  // Looks up an already committed command with the original request and Agent identity.
+  rpc GetAgentBoardEditReceipt(GetAgentBoardEditReceiptRequest) returns (GetAgentBoardEditReceiptResponse);
+}
+
+message ApplyAgentBoardEditRequest {
+  string board_id = 1;
+  string agent_id = 2;
+  string task_id = 3;
+  string generation = 4;
+  string command_id = 5;
+  repeated BoardSuggestionEditInput operations = 6;
+}
+
+message ApplyAgentBoardEditResponse {
+  BoardEditReceipt receipt = 1;
+  bool details_omitted = 2;
+}
+
+message GetAgentBoardEditReceiptRequest {
+  ApplyAgentBoardEditRequest original = 1;
+}
+
+message GetAgentBoardEditReceiptResponse {
+  BoardEditReceipt receipt = 1;
+  bool details_omitted = 2;
+}

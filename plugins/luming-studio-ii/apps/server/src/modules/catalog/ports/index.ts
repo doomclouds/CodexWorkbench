@@ -33,6 +33,7 @@ export type {
 export interface CatalogLookup extends CatalogScope {
   readonly limit: number;
   readonly after?: CatalogPosition;
+  readonly offset?: number;
 }
 
 export interface StoredCatalogReceipt {
@@ -74,10 +75,18 @@ export interface CatalogWriter {
   ): void;
 }
 
+export interface WorkbenchPreferences {
+  readonly layout?: 'grid' | 'list';
+  readonly theme?: 'light' | 'dark';
+  readonly pinnedOnly?: boolean;
+}
+
 export interface CatalogRepository {
   listBoards(lookup: CatalogLookup): readonly CatalogBoardSummary[];
   listTrashedBoards(lookup: CatalogLookup): readonly CatalogTrashedBoard[];
   readThumbnail(lookup: CatalogThumbnailLookup, cached?: CatalogThumbnail): CatalogThumbnailRead;
   getReceipt(actorId: string, commandId: string): CatalogReceipt | undefined;
+  readPreferences(actorId: string): WorkbenchPreferences;
+  updatePreferences(actorId: string, changes: WorkbenchPreferences): void;
   write<T>(work: (writer: CatalogWriter) => T): T;
 }

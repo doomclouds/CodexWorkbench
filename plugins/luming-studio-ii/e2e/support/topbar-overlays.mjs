@@ -9,7 +9,7 @@ const { create, fromBinary, toBinary } = requireServer("@bufbuild/protobuf");
 const { BoardSuggestionService } = requireServer(
   "@codexworkbench/luming-studio-ii-contracts/suggestions/service",
 );
-const { BoardRoomService } = requireServer(
+const { AgentActivityPhase, AgentActivityEndReason, BoardRoomService } = requireServer(
   "@codexworkbench/luming-studio-ii-contracts/rooms/service",
 );
 const { WhiteboardService } = requireServer(
@@ -80,22 +80,44 @@ export async function seedTopbarAgentWorkspace(studio, board, objectId) {
   assert.ok(runtime && studio.edition === "ii", "The isolated Agent workspace fixture is required");
   const { changeAgentActivity } = BoardRoomService.method;
   const label = "检查发布区对象";
-  const task = create(changeAgentActivity.input, {
-    boardId: board.id,
-    agentId: "agent-topbar-fixture",
-    taskId: randomUUID(),
-    action: {
-      case: "begin",
-      value: { label, scope: { target: { case: "objects", value: { objectIds: [objectId] } } } },
-    },
-  });
-  const response = await runtime.openAgentWorkspace(toBinary(changeAgentActivity.input, task));
-  assert.equal(response.status, 200);
-  const { result } = fromBinary(
-    changeAgentActivity.output,
-    new Uint8Array(await response.arrayBuffer()),
-  );
-  assert.equal(result.case, "workspace", "An Agent must be able to begin the test workspace");
+  const taskId = randomUUID();
+  async function change(action) {
+    const task = create(changeAgentActivity.input, {
+      boardId: board.id,
+      agentId: "agent-topbar-fixture",
+      taskId,
+      action,
+    });
+    const response = await runtime.openAgentWorkspace(toBinary(changeAgentActivity.input, task));
+    assert.equal(response.status, 200);
 
-  return label;
+    return fromBinary(changeAgentActivity.output, new Uint8Array(await response.arrayBuffer()))
+      .result;
+  }
+
+  const result = await change({
+    case: "begin",
+    value: { label, scope: { target: { case: "objects", value: { objectIds: [objectId] } } } },
+  });
+  assert.equal(result.case, "workspace", "An Agent must be able to begin the test workspace");
+  const { generation } = result.value;
+  return {
+    label,
+    async progress() {
+      const response = await change({
+        case: "update",
+        value: { generation, phase: AgentActivityPhase.WRITING, activeObjectIds: [objectId] },
+      });
+      assert.equal(response.case, "workspace", "An Agent must be able to report progress");
+    },
+    async complete() {
+      const response = await change({ case: "end", value: { generation } });
+      assert.equal(response.case, "ended");
+      assert.equal(response.value.reason, AgentActivityEndReason.COMPLETED);
+    },
+    async disconnect() {
+      const response = await change({ case: "disconnect", value: {} });
+      assert.equal(response.case, "disconnected");
+    },
+  };
 }

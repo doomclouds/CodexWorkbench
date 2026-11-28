@@ -9,11 +9,33 @@ const base64Chunk = z.string().max(Math.ceil(bridgeChunkBytes / 3) * 4);
 const offset = z.number().int().min(0);
 const version = z.literal(1);
 const sessionId = z.uuid();
+const coordinate = z.number().min(-1_000_000_000).max(1_000_000_000);
+const panelCamera = z.strictObject({
+  x: coordinate,
+  y: coordinate,
+  zoom: z.number().min(0.05).max(8),
+});
+const panelState = z.strictObject({
+  boardId: id,
+  selectedIds: z.array(id).max(40),
+  selectedCount: z.number().int().min(0).max(0xffffffff),
+  viewport: panelCamera,
+  focusedObjectId: id.optional(),
+  returnViewport: panelCamera.optional(),
+});
 
 export const openSchema = z.object({ boardId: id.optional() }).strict();
 
 export const bridgeSchema = z.discriminatedUnion('action', [
   z.object({ version, action: z.literal('connect'), boardId: id.optional() }).strict(),
+  z.strictObject({
+    version,
+    action: z.literal('view'),
+    sessionId,
+    viewId: id,
+    sequence: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    state: panelState.optional(),
+  }),
   z
     .object({
       version,

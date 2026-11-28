@@ -163,6 +163,53 @@ function mount(room: ReturnType<typeof mockRoom>) {
   return { render, onViewportRequest, onContentChanged, onAccessLost };
 }
 
+test('preserves both Agent avatars and colors in the header and roster while idle', () => {
+  const room = mockRoom();
+  mount(room);
+  const first = 'agent-first';
+  const second = 'agent-second';
+  const work = {
+    taskId: 'scope',
+    generation: 'generation',
+    label: '整理流程',
+    phase: 'writing',
+    areas: [],
+    expiresAtUnixMs: 30_000,
+  } as const;
+  room.update({
+    onlineAgentIds: [first, second],
+    agentWorkspaces: [
+      { ...work, agentId: first },
+      { ...work, agentId: second },
+    ],
+  });
+  const headerColors = () =>
+    Array.from(
+      fixture.host.querySelectorAll<HTMLElement>('.room-presence-avatar-stack .room-agent-avatar'),
+      (avatar) => avatar.style.backgroundColor,
+    );
+
+  const colors = headerColors();
+  expect(colors).toHaveLength(2);
+  click('此刻在这里');
+  room.update({ agentWorkspaces: [] });
+  expect(headerColors()).toEqual(colors);
+  expect(
+    Array.from(fixture.host.querySelectorAll('.room-agent-identity')).filter((element) =>
+      element.textContent?.includes('空闲'),
+    ),
+  ).toHaveLength(2);
+  room.update({ readingAgentIds: [first] });
+  expect(fixture.host.textContent).toContain('正在读取');
+  room.update({ readingAgentIds: [] });
+  expect(fixture.host.textContent).not.toContain('正在读取');
+
+  room.update({ onlineAgentIds: [second] });
+  expect(headerColors()).toEqual(colors.slice(1));
+  room.update({ onlineAgentIds: [] });
+  expect(headerColors()).toEqual([]);
+});
+
 test('publishes its own viewport, renders remote cursors and fits a larger remote view', () => {
   const room = mockRoom();
   const surface = mount(room);

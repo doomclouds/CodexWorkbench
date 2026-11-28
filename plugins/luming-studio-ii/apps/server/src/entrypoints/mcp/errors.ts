@@ -1,4 +1,12 @@
-type BridgeCode = 'SESSION_EXPIRED' | 'INVALID_ARGUMENT' | 'TOO_LARGE' | 'UNAVAILABLE';
+type BridgeCode =
+  | 'SESSION_EXPIRED'
+  | 'INVALID_ARGUMENT'
+  | 'FORBIDDEN'
+  | 'NOT_FOUND'
+  | 'CONFLICT'
+  | 'COMMIT_RESULT_UNKNOWN'
+  | 'TOO_LARGE'
+  | 'UNAVAILABLE';
 
 export class BridgeError extends Error {
   constructor(

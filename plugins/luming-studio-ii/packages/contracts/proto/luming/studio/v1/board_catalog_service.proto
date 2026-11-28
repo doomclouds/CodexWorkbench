@@ -11,7 +11,27 @@ service BoardCatalogService {
   rpc ManageBoard(ManageBoardRequest) returns (ManageBoardResponse);
   rpc PurgeBoards(PurgeBoardsRequest) returns (PurgeBoardsResponse);
   rpc GetCatalogCommandReceipt(GetCatalogCommandReceiptRequest) returns (GetCatalogCommandReceiptResponse);
+  rpc GetWorkbenchPreferences(GetWorkbenchPreferencesRequest) returns (GetWorkbenchPreferencesResponse);
+  rpc UpdateWorkbenchPreferences(UpdateWorkbenchPreferencesRequest) returns (UpdateWorkbenchPreferencesResponse);
 }
+
+message WorkbenchPreferences {
+  optional string layout = 1;
+  optional string theme = 2;
+  optional bool pinned_only = 3;
+}
+
+message GetWorkbenchPreferencesRequest {}
+
+message GetWorkbenchPreferencesResponse {
+  WorkbenchPreferences preferences = 1;
+}
+
+message UpdateWorkbenchPreferencesRequest {
+  WorkbenchPreferences changes = 1;
+}
+
+message UpdateWorkbenchPreferencesResponse {}
 
 enum BoardSortOrder {
   BOARD_SORT_ORDER_UNSPECIFIED = 0;
@@ -35,6 +55,7 @@ message ListBoardsRequest {
   uint32 page_size = 3;
   optional string cursor = 4;
   bool pinned_only = 5;
+  optional uint32 offset = 6;
 }
 
 message ListBoardsResponse {
@@ -52,6 +73,8 @@ message ListTrashedBoardsRequest {
   BoardSortOrder order = 2;
   uint32 page_size = 3;
   optional string cursor = 4;
+  bool pinned_only = 5;
+  optional uint32 offset = 6;
 }
 
 message ListTrashedBoardsResponse {

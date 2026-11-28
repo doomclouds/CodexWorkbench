@@ -23,6 +23,7 @@ export type {
   FeedbackPost,
   FeedbackReceipt,
   FeedbackRejection,
+  FeedbackSelectionTarget,
   FeedbackStatus,
   FeedbackTarget,
   FeedbackThread,
@@ -53,7 +54,10 @@ export function createBoardFeedbackService(post: FeedbackPost): BoardFeedbackSer
   const { listThreads, getThread, applyFeedback, getFeedbackReceipt } = FeedbackService.method;
 
   return {
-    async listThreads({ boardId, pageSize, cursor, status, authorId, authoredByViewer }, signal) {
+    async listThreads(
+      { boardId, pageSize, cursor, status, authorId, authoredByViewer, pendingAttachment },
+      signal,
+    ) {
       const response = await request(
         post,
         listThreads,
@@ -64,6 +68,7 @@ export function createBoardFeedbackService(post: FeedbackPost): BoardFeedbackSer
           status: status ? threadStatus[status] : undefined,
           authorActorId: authorId,
           authoredByViewer,
+          pendingAttachment,
         },
         signal,
       );

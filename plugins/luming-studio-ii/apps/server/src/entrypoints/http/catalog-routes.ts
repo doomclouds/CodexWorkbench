@@ -16,6 +16,7 @@ import type {
   ManageBoardCommand,
 } from '../../modules/catalog/application/index.js';
 import { WhiteboardAccessError } from '../../modules/whiteboard/application/index.js';
+import { createCatalogPreferenceRoutes } from './catalog-preferences.js';
 import { HttpRequestError, requireId } from './request.js';
 import { unaryRoute, type RouteEntry } from './unary-route.js';
 
@@ -125,25 +126,29 @@ export function createCatalogRoutes(application: CatalogApplication): readonly R
   } = BoardCatalogService.method;
 
   return [
+    ...createCatalogPreferenceRoutes(application),
     unaryRoute(listBoards, (actor, request) => {
-      const { query, order, pageSize, cursor, pinnedOnly } = request;
+      const { query, order, pageSize, cursor, pinnedOnly, offset } = request;
       const result = application.listBoards(actor, {
         query,
         order: toSortOrder(order),
         pageSize,
         cursor,
         pinnedOnly,
+        offset,
       });
 
       return { boards: [...result.boards], nextCursor: result.nextCursor };
     }),
     unaryRoute(listTrashedBoards, (actor, request) => {
-      const { query, order, pageSize, cursor } = request;
+      const { query, order, pageSize, cursor, pinnedOnly, offset } = request;
       const result = application.listTrashedBoards(actor, {
         query,
         order: toSortOrder(order),
         pageSize,
         cursor,
+        pinnedOnly,
+        offset,
       });
 
       return { boards: [...result.boards], nextCursor: result.nextCursor };

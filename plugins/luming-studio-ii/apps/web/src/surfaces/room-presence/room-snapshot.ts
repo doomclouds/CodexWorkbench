@@ -122,6 +122,17 @@ function sameAgentWorkspaces(current: BoardRoomState, next: BoardRoomState) {
   });
 }
 
+function sameOnlineAgents(
+  current: readonly string[] | undefined,
+  next: readonly string[] | undefined,
+) {
+  return (
+    current === next ||
+    (current?.length === next?.length &&
+      current?.every((id, index) => id === next?.[index]) === true)
+  );
+}
+
 function sameChrome(current: BoardRoomState, next: BoardRoomState) {
   const sameAccess = current.status === next.status && current.canEdit === next.canEdit;
   return (
@@ -130,6 +141,8 @@ function sameChrome(current: BoardRoomState, next: BoardRoomState) {
     current.suggestionsUpdateKey === next.suggestionsUpdateKey &&
     current.canReleaseAgentActivity === next.canReleaseAgentActivity &&
     sameAgentWorkspaces(current, next) &&
+    sameOnlineAgents(current.onlineAgentIds, next.onlineAgentIds) &&
+    sameOnlineAgents(current.readingAgentIds, next.readingAgentIds) &&
     sameViewer(current, next) &&
     sameMembers(current, next, sameChromeMember)
   );

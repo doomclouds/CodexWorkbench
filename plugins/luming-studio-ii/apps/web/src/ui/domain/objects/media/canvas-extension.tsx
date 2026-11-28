@@ -161,6 +161,7 @@ function VideoView({
   interactive,
   expanded,
   focusedReading,
+  annotationActive,
 }: CanvasObjectViewProps) {
   const value = isRecord(payload?.value) ? payload.value : {};
 
@@ -171,7 +172,7 @@ function VideoView({
       src={text(value.src)}
       poster={text(value.poster)}
       status={mediaStatus(value.status)}
-      interactive={Boolean(interactive || expanded || focusedReading)}
+      interactive={!annotationActive && Boolean(interactive || expanded || focusedReading)}
     />
   );
 }

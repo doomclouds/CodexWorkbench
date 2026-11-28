@@ -1,15 +1,18 @@
 import {
+  FeedbackAttachmentState,
   FeedbackRejectionReason,
   FeedbackThreadStatus,
 } from '@codexworkbench/luming-studio-ii-contracts/feedback/service';
 import type {
   FeedbackAnchor as WireAnchor,
   FeedbackAnchorTarget as WireTarget,
+  FeedbackAttachment as WireAttachment,
   FeedbackContentPoint as WireContent,
   FeedbackFrozenObject as WireFrozenObject,
   FeedbackMessage as WireMessage,
   FeedbackPoint as WirePoint,
   FeedbackReceipt as WireReceipt,
+  FeedbackSourceObject as WireSourceObject,
   FeedbackThread as WireThread,
 } from '@codexworkbench/luming-studio-ii-contracts/feedback/service';
 import type {
@@ -34,6 +37,7 @@ const rejections = new Map<FeedbackRejectionReason, FeedbackRejection>([
   [FeedbackRejectionReason.FORBIDDEN, 'forbidden'],
   [FeedbackRejectionReason.VERSION_CHANGED, 'versionChanged'],
   [FeedbackRejectionReason.COMMAND_ID_REUSE, 'commandIdReuse'],
+  [FeedbackRejectionReason.ATTACHMENT_CLAIMED, 'attachmentClaimed'],
 ]);
 
 function dateMillis(value: bigint) {
@@ -108,6 +112,21 @@ function readTarget({ target }: WireTarget): FeedbackTarget {
     return { kind: 'object', ...targetPoint(target.value) };
   }
 
+  if (target.case === 'selection') {
+    const { point, bounds, objects, expectedBoardRevision } = target.value;
+    if (expectedBoardRevision === undefined) {
+      throw new Error('备注服务缺少选区的白板版次。');
+    }
+
+    return {
+      kind: 'selection',
+      point: readPoint(point),
+      bounds,
+      objects: objects.map(readSourceObject),
+      expectedBoardRevision,
+    };
+  }
+
   if (target.case === 'contentPoint') {
     const { payloadVersion, content } = target.value;
     if (payloadVersion === undefined) {
@@ -123,6 +142,18 @@ function readTarget({ target }: WireTarget): FeedbackTarget {
   }
 
   throw new Error('备注服务未返回有效的目标。');
+}
+
+function readSourceObject(reference: WireSourceObject | undefined) {
+  if (!reference?.objectId || reference.geometryVersion === undefined) {
+    throw new Error('备注服务缺少已冻结目标的标识或版次。');
+  }
+
+  return {
+    objectId: reference.objectId,
+    geometryVersion: reference.geometryVersion,
+    payloadVersion: reference.payloadVersion,
+  };
 }
 
 function readFrozenObject(value: WireFrozenObject): FrozenFeedbackObject {
@@ -144,8 +175,41 @@ function readAnchor(anchor: WireAnchor): FeedbackAnchor {
     sourceRevision: anchor.sourceBoardRevision,
     frozenPoint: readPoint(anchor.frozenPoint),
     frozenObject: anchor.frozenObject && readFrozenObject(anchor.frozenObject),
+    frozenTargets: anchor.frozenTargets.map(({ reference, object }) => {
+      if (!object) {
+        throw new Error('备注服务缺少冻结对象。');
+      }
+
+      return { reference: readSourceObject(reference), object: readFrozenObject(object) };
+    }),
     frozenExcerpt: anchor.frozenExcerpt,
     targetMissing: anchor.targetMissing,
+  };
+}
+
+function readAttachment(value: WireAttachment | undefined): FeedbackThread['attachment'] {
+  if (!value) {
+    return;
+  }
+
+  const states = {
+    [FeedbackAttachmentState.PENDING]: 'pending',
+    [FeedbackAttachmentState.CLAIMED]: 'claimed',
+    [FeedbackAttachmentState.ATTACHED]: 'attached',
+  } as const;
+
+  if (
+    value.state !== FeedbackAttachmentState.PENDING &&
+    value.state !== FeedbackAttachmentState.CLAIMED &&
+    value.state !== FeedbackAttachmentState.ATTACHED
+  ) {
+    throw new Error('备注服务返回了未知的附加状态。');
+  }
+
+  return {
+    requestId: value.requestId,
+    state: states[value.state],
+    threadVersion: value.threadVersion,
   };
 }
 
@@ -201,6 +265,7 @@ export function readFeedbackThread(value: WireThread): FeedbackThread {
     replyCount,
     canResolve,
     canDelete,
+    attachment,
   } = value;
 
   if (!threadId || !anchor || !first) {
@@ -217,6 +282,7 @@ export function readFeedbackThread(value: WireThread): FeedbackThread {
     replyCount,
     canResolve,
     canDelete,
+    attachment: readAttachment(attachment),
   };
 }
 

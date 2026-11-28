@@ -6,7 +6,12 @@ import type {
   PayloadRecord,
 } from '../../modules/whiteboard/ports/index.js';
 import type { SqliteConnection, SqliteRow } from '../platform/index.js';
-import { retainBackupGuest } from './board-backup-metadata.js';
+import {
+  historyAgentName,
+  readBackupActors,
+  retainBackupAgent,
+  retainBackupGuest,
+} from './board-backup-metadata.js';
 import { decodeSceneObject } from './board-object-storage.js';
 import { decodePayload, storedText, storedVersion } from './stored-values.js';
 
@@ -185,7 +190,11 @@ export function publishBoardVersion(
   const { boardId, title } = before;
   const { actorId, kind, savedAtMillis, sourceRevision, changedObjectCount } = commit;
   const lifecycleKind = kind === 'trash' || kind === 'restoreTrash' ? kind : null;
-  retainBackupGuest(connection, boardId, actorId);
+  if (commit.actorKind === 'agent') {
+    retainBackupAgent(connection, boardId, actorId);
+  } else {
+    retainBackupGuest(connection, boardId, actorId);
+  }
   connection
     .prepare(`
     INSERT INTO board_versions (board_id, ${versionColumns})
@@ -321,6 +330,30 @@ function withCreationVersion(connection: SqliteConnection, boardId: string, row:
   return version;
 }
 
+const generatedAgentId =
+  /^agent-(?:[a-f0-9]{32}|[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})$/u;
+
+function withHistoryAuthor(
+  version: BoardVersionSummary,
+  actors: ReturnType<typeof readBackupActors>,
+): BoardVersionSummary {
+  const { actorId } = version;
+  if (!actorId) {
+    return version;
+  }
+
+  const profile = actors.get(actorId);
+  const agent = profile ? profile.kind === 'agent' : generatedAgentId.test(actorId);
+
+  return agent
+    ? {
+        ...version,
+        actorKind: 'agent',
+        actorName: profile?.name.trim() || historyAgentName(actorId),
+      }
+    : version;
+}
+
 export function readBoardVersions(
   connection: SqliteConnection,
   boardId: string,
@@ -334,8 +367,15 @@ export function readBoardVersions(
   `);
   query.setReadBigInts(true);
   const rows = before === undefined ? query.all(boardId, limit) : query.all(boardId, limit, before);
+  if (!rows.length) {
+    return [];
+  }
 
-  return rows.map((row) => withCreationVersion(connection, boardId, row));
+  const authors = readBackupActors(connection, boardId);
+
+  return rows.map((row) =>
+    withHistoryAuthor(withCreationVersion(connection, boardId, row), authors),
+  );
 }
 
 export function readBoardVersion(

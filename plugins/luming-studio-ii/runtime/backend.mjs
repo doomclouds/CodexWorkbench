@@ -38,10 +38,10 @@ var __toESM = (mod, isNodeMode, target2) => (target2 = mod != null ? __create(__
 // ../../../../node_modules/.pnpm/graceful-fs@4.2.11/node_modules/graceful-fs/polyfills.js
 var require_polyfills = __commonJS({
   "../../../../node_modules/.pnpm/graceful-fs@4.2.11/node_modules/graceful-fs/polyfills.js"(exports, module) {
-    var constants2 = __require("constants");
+    var constants3 = __require("constants");
     var origCwd = process.cwd;
     var cwd = null;
-    var platform = process.env.GRACEFUL_FS_PLATFORM || process.platform;
+    var platform2 = process.env.GRACEFUL_FS_PLATFORM || process.platform;
     process.cwd = function() {
       if (!cwd)
         cwd = origCwd.call(process);
@@ -62,7 +62,7 @@ var require_polyfills = __commonJS({
     var chdir;
     module.exports = patch;
     function patch(fs) {
-      if (constants2.hasOwnProperty("O_SYMLINK") && process.version.match(/^v0\.6\.[0-2]|^v0\.5\./)) {
+      if (constants3.hasOwnProperty("O_SYMLINK") && process.version.match(/^v0\.6\.[0-2]|^v0\.5\./)) {
         patchLchmod(fs);
       }
       if (!fs.lutimes) {
@@ -100,7 +100,7 @@ var require_polyfills = __commonJS({
         fs.lchownSync = function() {
         };
       }
-      if (platform === "win32") {
+      if (platform2 === "win32") {
         fs.rename = typeof fs.rename !== "function" ? fs.rename : (function(fs$rename) {
           function rename(from, to, cb) {
             var start = Date.now();
@@ -164,7 +164,7 @@ var require_polyfills = __commonJS({
         fs2.lchmod = function(path3, mode, callback) {
           fs2.open(
             path3,
-            constants2.O_WRONLY | constants2.O_SYMLINK,
+            constants3.O_WRONLY | constants3.O_SYMLINK,
             mode,
             function(err, fd) {
               if (err) {
@@ -180,7 +180,7 @@ var require_polyfills = __commonJS({
           );
         };
         fs2.lchmodSync = function(path3, mode) {
-          var fd = fs2.openSync(path3, constants2.O_WRONLY | constants2.O_SYMLINK, mode);
+          var fd = fs2.openSync(path3, constants3.O_WRONLY | constants3.O_SYMLINK, mode);
           var threw = true;
           var ret;
           try {
@@ -200,9 +200,9 @@ var require_polyfills = __commonJS({
         };
       }
       function patchLutimes(fs2) {
-        if (constants2.hasOwnProperty("O_SYMLINK") && fs2.futimes) {
+        if (constants3.hasOwnProperty("O_SYMLINK") && fs2.futimes) {
           fs2.lutimes = function(path3, at, mt, cb) {
-            fs2.open(path3, constants2.O_SYMLINK, function(er, fd) {
+            fs2.open(path3, constants3.O_SYMLINK, function(er, fd) {
               if (er) {
                 if (cb) cb(er);
                 return;
@@ -215,7 +215,7 @@ var require_polyfills = __commonJS({
             });
           };
           fs2.lutimesSync = function(path3, at, mt) {
-            var fd = fs2.openSync(path3, constants2.O_SYMLINK);
+            var fd = fs2.openSync(path3, constants3.O_SYMLINK);
             var ret;
             var threw = true;
             try {
@@ -1630,13 +1630,27 @@ function isArchiveIdentifier(value) {
 
 // src/modules/archives/application/index.ts
 var MAX_ARCHIVE_IMPORT_BYTES = 128 * 1024 * 1024;
+var MAX_BOARD_ASSET_IMPORT_BYTES = 20 * 1024 * 1024;
 var ArchiveRequestError = class extends Error {
+};
+var BoardAssetAccessError = class extends Error {
 };
 function requireCommandId(value) {
   if (!isArchiveIdentifier(value)) {
     throw new ArchiveRequestError("Invalid archive command identifier.");
   }
   return value;
+}
+function requireAssetId(value) {
+  if (!isArchiveIdentifier(value)) {
+    throw new ArchiveRequestError("Invalid board or asset identifier.");
+  }
+}
+function requireOwnerResult(result) {
+  if (result === void 0) {
+    throw new BoardAssetAccessError("Board assets require an active board owner.");
+  }
+  return result;
 }
 function createArchiveImportApplication(port, dependencies) {
   return {
@@ -1657,6 +1671,39 @@ function createArchiveImportApplication(port, dependencies) {
         throw new ArchiveRequestError("Invalid imported asset identifier.");
       }
       return port.getAsset(actorId2, boardId, assetId, allowTrashedOwner);
+    },
+    listBoardAssets(actorId2, boardId, cursor = "", limit = 50) {
+      requireAssetId(boardId);
+      if (cursor !== "") {
+        requireAssetId(cursor);
+      }
+      if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+        throw new ArchiveRequestError("Board asset page size must be between 1 and 100.");
+      }
+      return requireOwnerResult(port.listBoardAssets(actorId2, boardId, cursor, limit));
+    },
+    async importBoardAsset(actorId2, boardId, commandId, content) {
+      requireAssetId(boardId);
+      requireCommandId(commandId);
+      if (!port.isActiveBoardOwner(actorId2, boardId)) {
+        throw new BoardAssetAccessError("Board assets require an active board owner.");
+      }
+      if (content.byteLength > MAX_BOARD_ASSET_IMPORT_BYTES) {
+        return { kind: "rejected", reason: "tooLarge" };
+      }
+      const assetId = "managed-" + dependencies.digest(JSON.stringify([boardId, actorId2, commandId]));
+      const asset = await dependencies.prepareAsset(boardId, assetId, content);
+      if (!asset) {
+        return { kind: "rejected", reason: "invalidMedia" };
+      }
+      return requireOwnerResult(
+        port.importBoardAsset(actorId2, boardId, assetId, dependencies.digest(content), asset)
+      );
+    },
+    deleteBoardAsset(actorId2, boardId, assetId) {
+      requireAssetId(boardId);
+      requireAssetId(assetId);
+      return requireOwnerResult(port.deleteBoardAsset(actorId2, boardId, assetId));
     }
   };
 }
@@ -2613,11 +2660,12 @@ function purgeBoards(repository, actorId2, command) {
 }
 
 // src/modules/catalog/application/index.ts
-var maxQueryLength = 200;
+var maxQueryLength = 512;
 var maxPageSize = 100;
+var maxOffset = 4294967295;
 var initialEntryVersion = 1n;
 function catalogLookup(actor, request, view) {
-  const { order, pageSize, cursor } = request;
+  const { order, pageSize, cursor, offset: offset2 } = request;
   const query = request.query.trim();
   if (query.length > maxQueryLength) {
     throw new CatalogQueryError("The catalog search query is too long.");
@@ -2628,10 +2676,17 @@ function catalogLookup(actor, request, view) {
   if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > maxPageSize) {
     throw new CatalogQueryError("The catalog page size is out of range.");
   }
+  const invalidOffset = offset2 !== void 0 && (offset2 < 0 || offset2 > maxOffset);
+  if (invalidOffset || offset2 !== void 0 && !Number.isInteger(offset2)) {
+    throw new CatalogQueryError("The catalog offset is out of range.");
+  }
+  if (offset2 !== void 0 && cursor !== void 0) {
+    throw new CatalogQueryError("The catalog offset and cursor are mutually exclusive.");
+  }
   const scope2 = { actorId: actor.id, query, order, view };
-  const pinnedScope = view === void 0 && request.pinnedOnly ? { ...scope2, pinnedOnly: true } : scope2;
+  const pinnedScope = request.pinnedOnly ? { ...scope2, pinnedOnly: true } : scope2;
   const after = cursor === void 0 ? void 0 : readCatalogCursor(cursor, pinnedScope);
-  return { ...pinnedScope, limit: pageSize + 1, after };
+  return { ...pinnedScope, limit: pageSize + 1, after, offset: offset2 };
 }
 function listBoards(repository, actor, request) {
   const { pageSize } = request;
@@ -2700,7 +2755,9 @@ function createCatalogApplication(repository, services) {
     ),
     manageBoard: (actor, command) => manageBoard(repository, actor.id, command, services.now),
     purgeBoards: (actor, command) => purgeBoards(repository, actor.id, command),
-    getReceipt: (actor, commandId) => repository.getReceipt(actor.id, commandId)
+    getReceipt: (actor, commandId) => repository.getReceipt(actor.id, commandId),
+    readPreferences: (actor) => repository.readPreferences(actor.id),
+    updatePreferences: (actor, changes) => repository.updatePreferences(actor.id, changes)
   };
 }
 
@@ -2836,8 +2893,8 @@ var maximumBoardCoordinate = 1e9;
 function validCoordinate(value) {
   return Number.isFinite(value) && Math.abs(value) <= maximumBoardCoordinate;
 }
-function validPoint(point2) {
-  return validCoordinate(point2.x) && validCoordinate(point2.y);
+function validPoint(point3) {
+  return validCoordinate(point3.x) && validCoordinate(point3.y);
 }
 function inUnitInterval(value) {
   return Number.isFinite(value) && value >= 0 && value <= 1;
@@ -2884,6 +2941,36 @@ function freezeFeedbackAnchor(sourceBoardRevision, target2, object3, contentSour
     targetMissing: false
   };
 }
+function validSelection(target2) {
+  const { point: point3, bounds: bounds2, objects } = target2;
+  const ids = new Set(objects.map(({ objectId }) => objectId));
+  const validBounds2 = !bounds2 || validPoint(bounds2) && validCoordinate(bounds2.x + bounds2.width) && validCoordinate(bounds2.y + bounds2.height) && bounds2.width > 0 && bounds2.height > 0;
+  return validPoint(point3) && validBounds2 && Boolean(bounds2 || objects.length) && objects.length <= 120 && ids.size === objects.length;
+}
+function freezeFeedbackSelection(revision, target2, objects) {
+  if (!validSelection(target2)) {
+    return { kind: "rejected", reason: "invalidAnchor" };
+  }
+  if (target2.expectedBoardRevision !== revision || objects.some((object3, index) => {
+    const reference2 = target2.objects[index];
+    return !object3 || object3.objectId !== reference2?.objectId || object3.geometryVersion !== reference2.geometryVersion || object3.payloadVersion !== reference2.payloadVersion;
+  })) {
+    return { kind: "rejected", reason: "targetChanged" };
+  }
+  return {
+    target: target2,
+    sourceBoardRevision: revision,
+    frozenPoint: target2.point,
+    frozenTargets: objects.flatMap((object3) => {
+      if (!object3) {
+        return [];
+      }
+      const { objectId, geometryVersion, payloadVersion, ...geometry } = object3;
+      return [{ reference: { objectId, geometryVersion, payloadVersion }, object: geometry }];
+    }),
+    targetMissing: false
+  };
+}
 
 // src/modules/feedback/application/errors.ts
 var FeedbackAccessError = class extends Error {
@@ -2907,7 +2994,8 @@ function permitsFeedback(access) {
   return access.canComment ?? access.canEdit;
 }
 function requireAccess(reader2, actor, boardId) {
-  const access = reader2.getAccess(boardId, actor.id);
+  const principalId = actor.kind === "agent" ? actor.principalId ?? actor.id : actor.id;
+  const access = reader2.getAccess(boardId, principalId);
   if (!access) {
     throw new FeedbackAccessError();
   }
@@ -2933,12 +3021,76 @@ function viewMessage(actor, access, message, legacyNames) {
   };
 }
 function viewThread(actor, access, thread, legacyNames) {
+  const { attachment } = thread;
   return {
     ...thread,
+    attachment: attachment && {
+      requestId: attachment.requestId,
+      state: attachment.state,
+      threadVersion: attachment.threadVersion
+    },
     first: viewMessage(actor, access, thread.first, legacyNames),
     canResolve: permitsFeedback(access),
     canDelete: canDeleteThread(actor, access, thread)
   };
+}
+
+// src/modules/feedback/application/attachments.ts
+var claimRecoveryDelay = 120000n;
+function applyAttachment(writer2, actor, owner, boardId, thread, operation, commandId, now) {
+  const current = thread.attachment;
+  const applied2 = {
+    kind: "applied",
+    threadId: thread.threadId,
+    threadVersion: thread.version,
+    deleted: false
+  };
+  function store(attachment) {
+    writer2.updateThread(boardId, { ...thread, attachment });
+    return applied2;
+  }
+  if (actor.kind === "agent") {
+    return { kind: "rejected", reason: "forbidden" };
+  }
+  if (operation.kind === "requestAttachment") {
+    if (operation.expectedThreadVersion !== thread.version) {
+      return { kind: "rejected", reason: "versionChanged", currentVersion: thread.version };
+    }
+    if (current?.threadVersion === thread.version) {
+      return applied2;
+    }
+    if (current?.state === "claimed") {
+      return { kind: "rejected", reason: "attachmentClaimed" };
+    }
+    return store({
+      requestId: writer2.allocateId(),
+      state: "pending",
+      threadVersion: thread.version
+    });
+  }
+  if (!owner) {
+    return { kind: "rejected", reason: "forbidden" };
+  }
+  if (!current || current.requestId !== operation.requestId) {
+    return { kind: "rejected", reason: "notFound" };
+  }
+  if (operation.kind === "claimAttachment") {
+    if (current.state !== "pending") {
+      return { kind: "rejected", reason: "attachmentClaimed" };
+    }
+    if (current.threadVersion !== thread.version) {
+      return { kind: "rejected", reason: "versionChanged", currentVersion: thread.version };
+    }
+    return store({ ...current, state: "claimed", claimId: commandId, claimedAtMillis: now });
+  }
+  if (operation.kind === "resetAttachmentClaim") {
+    const abandoned = current.state === "claimed" && (current.claimedAtMillis === void 0 || now - current.claimedAtMillis >= claimRecoveryDelay);
+    return abandoned ? store({ requestId: writer2.allocateId(), state: "pending", threadVersion: thread.version }) : { kind: "rejected", reason: "attachmentClaimed" };
+  }
+  if (current.state !== "claimed" || current.claimId !== operation.claimId) {
+    return { kind: "rejected", reason: "attachmentClaimed" };
+  }
+  return store({ ...current, state: "attached", claimId: void 0, claimedAtMillis: void 0 });
 }
 
 // src/modules/feedback/application/commands.ts
@@ -2959,6 +3111,20 @@ function timestamp(now, previous = 0n) {
 function anchorSignature(target2) {
   if (target2.kind === "board") {
     return [target2.kind, String(target2.point.x), String(target2.point.y)];
+  }
+  if (target2.kind === "selection") {
+    const { point: point3, bounds: bounds2, objects, expectedBoardRevision } = target2;
+    return [
+      target2.kind,
+      point3,
+      bounds2,
+      expectedBoardRevision.toString(),
+      objects.map(({ objectId, geometryVersion, payloadVersion }) => [
+        objectId,
+        geometryVersion.toString(),
+        payloadVersion?.toString()
+      ])
+    ];
   }
   if (target2.kind === "content") {
     const unit = target2.content;
@@ -3002,10 +3168,21 @@ function commandSignature(operation) {
     case "resolve":
     case "reopen":
     case "delete":
+    case "requestAttachment":
       return JSON.stringify([
         operation.kind,
         operation.threadId,
         operation.expectedThreadVersion.toString()
+      ]);
+    case "claimAttachment":
+    case "resetAttachmentClaim":
+      return JSON.stringify([operation.kind, operation.threadId, operation.requestId]);
+    case "confirmAttachment":
+      return JSON.stringify([
+        operation.kind,
+        operation.threadId,
+        operation.requestId,
+        operation.claimId
       ]);
   }
 }
@@ -3030,19 +3207,26 @@ function applied(thread, message) {
     deleted: false
   };
 }
+function freezeThreadAnchor({ writer: writer2, boardId }, target2) {
+  const revision = writer2.getBoardRevision(boardId);
+  if (target2.kind === "selection") {
+    const objects = target2.objects.length <= 120 ? target2.objects.map(({ objectId }) => writer2.getObject(boardId, objectId)) : [];
+    return freezeFeedbackSelection(revision, target2, objects);
+  }
+  if (target2.kind === "content" && !validFeedbackContentUnit(target2.content)) {
+    return { kind: "rejected", reason: "invalidAnchor" };
+  }
+  const object3 = target2.kind === "board" ? void 0 : writer2.getObject(boardId, target2.objectId);
+  const content = target2.kind === "content" && object3 ? writer2.getContentSource(boardId, target2) : void 0;
+  return freezeFeedbackAnchor(revision, target2, object3, content);
+}
 function createThread(context, operation) {
   const text3 = normalizedText(operation.text);
   if (!text3) {
     return { kind: "rejected", reason: "invalidText" };
   }
   const { writer: writer2, boardId, now } = context;
-  const target2 = operation.anchor;
-  if (target2.kind === "content" && !validFeedbackContentUnit(target2.content)) {
-    return { kind: "rejected", reason: "invalidAnchor" };
-  }
-  const object3 = target2.kind === "board" ? void 0 : writer2.getObject(boardId, target2.objectId);
-  const content = target2.kind === "content" && object3 ? writer2.getContentSource(boardId, target2) : void 0;
-  const anchor2 = freezeFeedbackAnchor(writer2.getBoardRevision(boardId), target2, object3, content);
+  const anchor2 = freezeThreadAnchor(context, operation.anchor);
   if ("kind" in anchor2) {
     return anchor2;
   }
@@ -3148,6 +3332,20 @@ function executeCommand(context, operation) {
     case "resolve":
     case "reopen":
       return changeThread(context, thread, operation);
+    case "requestAttachment":
+    case "claimAttachment":
+    case "confirmAttachment":
+    case "resetAttachmentClaim":
+      return applyAttachment(
+        context.writer,
+        context.actor,
+        context.access.isOwner,
+        context.boardId,
+        thread,
+        operation,
+        context.commandId,
+        timestamp(context.now)
+      );
   }
 }
 function applyFeedback(repository, services, actor, command) {
@@ -3163,14 +3361,17 @@ function applyFeedback(repository, services, actor, command) {
       }
       return { boardId, commandId, outcome: { kind: "rejected", reason: "commandIdReuse" } };
     }
+    const principalName = access.isOwner ? services.ownerDisplayName : access.name;
+    const authorName = actor.kind === "agent" ? "Codex \xB7 " + actor.id.slice(-8) : principalName;
     const outcome = executeCommand(
       {
         writer: writer2,
         actor,
         access,
         boardId,
+        commandId,
         now: services.now,
-        authorName: access.isOwner ? services.ownerDisplayName : access.name
+        authorName
       },
       operation
     );
@@ -3257,7 +3458,7 @@ function createFeedbackApplication(repository, services) {
   return {
     listThreads: (actor, boardId, query) => repository.read((reader2) => {
       const access = requireAccess(reader2, actor, boardId);
-      const { cursor, status, authorActorId } = query;
+      const { cursor, status, authorActorId, pendingAttachment } = query;
       const limit = pageLimit(query.pageSize);
       const position = readThreadPosition(cursor);
       const rows2 = reader2.listThreads({
@@ -3265,7 +3466,8 @@ function createFeedbackApplication(repository, services) {
         limit: limit + 1,
         position,
         status,
-        authorActorId
+        authorActorId,
+        pendingAttachment
       });
       const page = rows2.slice(0, limit);
       const last = page.at(-1);
@@ -3361,7 +3563,7 @@ function intersects(left, right) {
 }
 function projectedActivityAreas(scope2, metadata) {
   const ids = metadata.map(({ id }) => id);
-  const validGeometry2 = metadata.every(({ bounds }) => validBounds(bounds));
+  const validGeometry2 = metadata.every(({ bounds: bounds2 }) => validBounds(bounds2));
   if (!validGeometry2 || !validActivityObjectIds(ids)) {
     return void 0;
   }
@@ -3370,9 +3572,9 @@ function projectedActivityAreas(scope2, metadata) {
   if (missingTargets) {
     return void 0;
   }
-  const areas = metadata.map(({ id, bounds }) => ({ id, bounds: { ...bounds }, active: false }));
+  const areas = metadata.map(({ id, bounds: bounds2 }) => ({ id, bounds: { ...bounds2 }, active: false }));
   if (scope2.kind === "area") {
-    const withinScope = areas.filter(({ bounds }) => contains(scope2.bounds, bounds));
+    const withinScope = areas.filter(({ bounds: bounds2 }) => contains(scope2.bounds, bounds2));
     return [{ id: declaredAreaId, bounds: scope2.bounds, active: false }, ...withinScope];
   }
   return areas;
@@ -3403,8 +3605,8 @@ function validViewId(id) {
 function withinWorld(value) {
   return Number.isFinite(value) && Math.abs(value) <= boardLimit;
 }
-function validCursor(point2) {
-  return point2 === void 0 || [point2.x, point2.y].every(withinWorld);
+function validCursor(point3) {
+  return point3 === void 0 || [point3.x, point3.y].every(withinWorld);
 }
 function validViewport(viewport) {
   if (!viewport) {
@@ -3436,12 +3638,12 @@ function validEditingObjects(ids) {
   return length <= maxEditingIdentifierUnits && unique2.every((id) => editingObjectId.test(id));
 }
 function validGestureChange({ objectId, expectedGeometryVersion, geometry }) {
-  const validId2 = objectId.trim().length > 0 && objectId.length <= maxGestureObjectIdLength;
+  const validId3 = objectId.trim().length > 0 && objectId.length <= maxGestureObjectIdLength;
   const validVersion2 = expectedGeometryVersion >= 0n && expectedGeometryVersion <= maxGeometryVersion;
   const { x, y, width, height, rotation } = geometry;
   const coordinatesFit = [x, y, width, height, rotation].every(withinWorld);
   const positiveSize = width > 0 && height > 0;
-  return validId2 && validVersion2 && coordinatesFit && positiveSize;
+  return validId3 && validVersion2 && coordinatesFit && positiveSize;
 }
 function validGesture(gesture) {
   if (!gesture) {
@@ -3469,8 +3671,8 @@ function validDuration(milliseconds) {
   return Number.isInteger(milliseconds) && inRange;
 }
 function timerView(state, now) {
-  const { version: version2, durationMs, deadlineUnixMs, pausedRemainingMs } = state;
-  const base = { version: version2, durationMs };
+  const { version: version3, durationMs, deadlineUnixMs, pausedRemainingMs } = state;
+  const base = { version: version3, durationMs };
   if (pausedRemainingMs !== void 0) {
     return { ...base, phase: "paused", remainingMs: pausedRemainingMs };
   }
@@ -3529,6 +3731,10 @@ function changeTimer(current, action, now) {
 
 // src/modules/rooms/application/agent-activity.ts
 var leaseMs = 10 * 6e4;
+var idleMs = 2e4;
+var readPresenceMs = 12e4;
+var maxReads = 128;
+var terminalDisplayMs = 4e3;
 var maxBoardWorkspaces = 12;
 var maxAgentWorkspaces = 6;
 var maxBoardHistory = 256;
@@ -3546,22 +3752,28 @@ function validPrincipal({ boardId, ownerId, agentId }) {
 function rejected(reason) {
   return { kind: "rejected", reason };
 }
-function resultOf(record7) {
-  if (record7.kind === "active") {
-    return { kind: "active", workspace: record7.workspace };
+function resultOf(record8) {
+  if (record8.kind === "active") {
+    return { kind: "active", workspace: record8.workspace };
   }
-  return { kind: "ended", generation: record7.generation, reason: record7.reason };
+  return { kind: "ended", generation: record8.generation, reason: record8.reason };
 }
-function retire(generation, reason) {
-  return { kind: "ended", generation, reason };
+function retire({ ownerId, workspace }, reason, endedAtUnixMs) {
+  return {
+    kind: "ended",
+    generation: workspace.generation,
+    reason,
+    display: { ...workspace, endedAtUnixMs, endReason: reason },
+    presence: { ownerId, agentId: workspace.agentId, idleUntil: endedAtUnixMs + idleMs }
+  };
 }
 function currentRecord(board, key, now) {
-  const record7 = board.get(key);
-  const expired = record7?.kind === "active" && record7.workspace.expiresAtUnixMs <= now;
+  const record8 = board.get(key);
+  const expired = record8?.kind === "active" && record8.workspace.expiresAtUnixMs <= now;
   if (!expired) {
-    return record7;
+    return record8;
   }
-  const retired = retire(record7.workspace.generation, "expired");
+  const retired = retire(record8, "expired", record8.workspace.expiresAtUnixMs);
   board.set(key, retired);
   return retired;
 }
@@ -3570,33 +3782,69 @@ function liveWorkspaces(board, now, ownerId) {
     return emptyWorkspaces;
   }
   const workspaces = [];
-  for (const record7 of board.values()) {
-    if (record7.kind !== "active" || record7.workspace.expiresAtUnixMs <= now) {
+  for (const record8 of board.values()) {
+    if (record8.kind !== "active" || record8.workspace.expiresAtUnixMs <= now) {
       continue;
     }
-    if (ownerId === void 0 || record7.ownerId === ownerId) {
-      workspaces.push(record7.workspace);
+    if (ownerId === void 0 || record8.ownerId === ownerId) {
+      workspaces.push(record8.workspace);
     }
   }
   return workspaces.length ? workspaces : emptyWorkspaces;
 }
-function priorBegin(record7, input, scope2) {
+function visibleWorkspaces(board, now) {
+  if (!board) {
+    return emptyWorkspaces;
+  }
+  const active = liveWorkspaces(board, now);
+  const ended = [];
+  for (const key of board.keys()) {
+    const record8 = currentRecord(board, key, now);
+    if (record8?.kind !== "ended" || !record8.display) {
+      continue;
+    }
+    const { display, ...receipt } = record8;
+    if ((display.endedAtUnixMs ?? 0) + terminalDisplayMs > now) {
+      ended.push(display);
+    } else {
+      board.set(key, receipt);
+    }
+  }
+  if (!ended.length) {
+    return active;
+  }
+  ended.sort((a, b) => (b.endedAtUnixMs ?? 0) - (a.endedAtUnixMs ?? 0));
+  return [...active, ...ended.slice(0, Math.max(0, maxBoardWorkspaces - active.length))];
+}
+function onlineAgentIds(board, now) {
+  const agents = /* @__PURE__ */ new Set();
+  for (const key of board?.keys() ?? []) {
+    const record8 = board && currentRecord(board, key, now);
+    if (record8?.kind === "active") {
+      agents.add(record8.workspace.agentId);
+    } else if (record8?.presence && record8.presence.idleUntil > now) {
+      agents.add(record8.presence.agentId);
+    }
+  }
+  return [...agents].sort();
+}
+function priorBegin(record8, input, scope2) {
   const priorGeneration = input.previousGeneration;
-  if (!record7) {
+  if (!record8) {
     return priorGeneration === void 0 ? void 0 : rejected("generationChanged");
   }
-  if (record7.kind === "ended") {
-    if (record7.reason === "released") {
+  if (record8.kind === "ended") {
+    if (record8.reason === "released") {
       return rejected("workspaceReleased");
     }
-    return record7.generation === priorGeneration ? void 0 : rejected("generationChanged");
+    return record8.generation === priorGeneration ? void 0 : rejected("generationChanged");
   }
-  const alreadyActive = priorGeneration === void 0 || record7.workspace.generation === priorGeneration;
-  const repeatsRenewal = record7.precedingGeneration === priorGeneration;
+  const alreadyActive = priorGeneration === void 0 || record8.workspace.generation === priorGeneration;
+  const repeatsRenewal = record8.precedingGeneration === priorGeneration;
   if (!alreadyActive && !repeatsRenewal) {
     return rejected("generationChanged");
   }
-  return sameActivityScope(record7.workspace.scope, scope2) ? resultOf(record7) : rejected("invalid");
+  return sameActivityScope(record8.workspace.scope, scope2) ? resultOf(record8) : rejected("invalid");
 }
 function labelOf(raw) {
   const label2 = raw.trim();
@@ -3615,6 +3863,8 @@ function focusedAreas(areas, focused) {
 }
 function createAgentActivity(options) {
   const boards = /* @__PURE__ */ new Map();
+  const disconnected = /* @__PURE__ */ new Map();
+  const reads = /* @__PURE__ */ new Map();
   let stored = 0;
   function boardFor(boardId) {
     const known = boards.get(boardId);
@@ -3639,13 +3889,13 @@ function createAgentActivity(options) {
     }
     const key = taskKey(principal, input.taskId);
     const known = boards.get(principal.boardId);
-    const record7 = known && currentRecord(known, key, now);
-    const existing = priorBegin(record7, input, scope2);
+    const record8 = known && currentRecord(known, key, now);
+    const existing = priorBegin(record8, input, scope2);
     if (existing) {
       return existing;
     }
     const capacity = stored < maxStored && (known?.size ?? 0) < maxBoardHistory;
-    if (!record7 && !capacity) {
+    if (!record8 && !capacity) {
       return rejected("capacity");
     }
     const active = liveWorkspaces(known, now, principal.ownerId);
@@ -3669,7 +3919,8 @@ function createAgentActivity(options) {
       scope: scope2,
       phase: "preparing",
       areas,
-      expiresAtUnixMs: now + leaseMs
+      expiresAtUnixMs: now + leaseMs,
+      lastProgressAtUnixMs: now
     };
     board.set(key, {
       kind: "active",
@@ -3677,20 +3928,20 @@ function createAgentActivity(options) {
       precedingGeneration: input.previousGeneration,
       workspace
     });
-    if (!record7) {
+    if (!record8) {
       stored += 1;
     }
     return { kind: "active", workspace };
   }
-  function update2(principal, board, record7, input, now) {
-    const { workspace } = record7;
+  function update2(principal, board, record8, input, now) {
+    const { workspace } = record8;
     const { phase, activeObjectIds } = input;
     if (!validActivityPhase(phase) || !validActivityObjectIds(activeObjectIds)) {
       return rejected("invalid");
     }
     const focused = new Set(activeObjectIds);
     if (phase === workspace.phase && sameFocus(workspace, focused)) {
-      return resultOf(record7);
+      return resultOf(record8);
     }
     const resolved = resolve(principal, workspace.scope, activeObjectIds);
     const areas = resolved && focusedAreas(resolved, focused);
@@ -3703,12 +3954,18 @@ function createAgentActivity(options) {
     if (others.some((other) => overlappingWorkspaces(other.areas, areas))) {
       return rejected("overlap");
     }
-    const changed = { ...workspace, phase, areas, expiresAtUnixMs: now + leaseMs };
-    board.set(taskKey(principal, input.taskId), { ...record7, workspace: changed });
+    const changed = {
+      ...workspace,
+      phase,
+      areas,
+      expiresAtUnixMs: now + leaseMs,
+      lastProgressAtUnixMs: now
+    };
+    board.set(taskKey(principal, input.taskId), { ...record8, workspace: changed });
     return { kind: "active", workspace: changed };
   }
-  function close(board, record7, key, reason) {
-    const terminal2 = retire(record7.workspace.generation, reason);
+  function close(board, record8, key, reason, now) {
+    const terminal2 = retire(record8, reason, now);
     board.set(key, terminal2);
     return resultOf(terminal2);
   }
@@ -3718,29 +3975,32 @@ function createAgentActivity(options) {
       return rejected("invalid");
     }
     const now = options.now();
+    if (isDisconnected(principal, now)) {
+      return rejected("workspaceReleased");
+    }
     if (operation.kind === "begin") {
       return begin(principal, operation, now);
     }
     const board = boards.get(principal.boardId);
     const key = taskKey(principal, taskId);
-    const record7 = board && currentRecord(board, key, now);
-    if (!board || !record7) {
+    const record8 = board && currentRecord(board, key, now);
+    if (!board || !record8) {
       return rejected("notFound");
     }
     if (operation.kind === "status") {
-      return resultOf(record7);
+      return resultOf(record8);
     }
-    const generation = record7.kind === "active" ? record7.workspace.generation : record7.generation;
+    const generation = record8.kind === "active" ? record8.workspace.generation : record8.generation;
     if (generation !== operation.generation) {
       return rejected("generationChanged");
     }
-    if (record7.kind === "ended") {
-      return operation.kind === "end" ? resultOf(record7) : rejected("generationChanged");
+    if (record8.kind === "ended") {
+      return operation.kind === "end" ? resultOf(record8) : rejected("generationChanged");
     }
     if (operation.kind === "end") {
-      return close(board, record7, key, "completed");
+      return close(board, record8, key, "completed", now);
     }
-    return update2(principal, board, record7, operation, now);
+    return update2(principal, board, record8, operation, now);
   }
   function release(request) {
     const { boardId, taskId, generation } = request;
@@ -3750,40 +4010,119 @@ function createAgentActivity(options) {
     const board = boards.get(boardId);
     const key = taskKey(request, taskId);
     const now = options.now();
-    const record7 = board && currentRecord(board, key, now);
-    if (!board || !record7) {
+    const record8 = board && currentRecord(board, key, now);
+    if (!board || !record8) {
       return rejected("notFound");
     }
-    if (record7.kind === "ended") {
-      return record7.generation === generation ? resultOf(record7) : rejected("generationChanged");
+    if (record8.kind === "ended") {
+      return record8.generation === generation ? resultOf(record8) : rejected("generationChanged");
     }
-    if (record7.workspace.generation !== generation) {
+    if (record8.workspace.generation !== generation) {
       return rejected("generationChanged");
     }
-    return close(board, record7, key, "released");
+    return close(board, record8, key, "released", now);
   }
   function withdraw({ ownerId, agentId }) {
     const now = options.now();
+    rememberDisconnect(ownerId, agentId, now);
     const affected = /* @__PURE__ */ new Set();
+    for (const [key, read] of reads) {
+      if (read.ownerId === ownerId && read.agentId === agentId) {
+        reads.delete(key);
+        affected.add(read.boardId);
+      }
+    }
     for (const [boardId, board] of boards) {
-      for (const [key, record7] of board) {
-        if (record7.kind !== "active" || record7.workspace.agentId !== agentId) {
-          continue;
-        }
-        if (record7.ownerId === ownerId && record7.workspace.expiresAtUnixMs > now) {
-          close(board, record7, key, "released");
+      for (const key of board.keys()) {
+        const record8 = currentRecord(board, key, now);
+        const ended = disconnectWorkspace(record8, ownerId, agentId, now);
+        if (ended) {
+          const { presence: _presence, ...receipt } = ended;
+          board.set(key, receipt);
           affected.add(boardId);
         }
       }
     }
     return [...affected];
   }
+  function isDisconnected({ ownerId, agentId }, now) {
+    return (disconnected.get(JSON.stringify([ownerId, agentId])) ?? 0) > now;
+  }
+  function setReadPresence(principal, activityId, reading) {
+    const now = options.now();
+    if (!validPrincipal(principal) || !validAgentActivityId(activityId)) {
+      return;
+    }
+    if (isDisconnected(principal, now)) {
+      return;
+    }
+    for (const [id, read] of reads) {
+      if (read.expiresAt <= now) {
+        reads.delete(id);
+      }
+    }
+    const { boardId, ownerId, agentId } = principal;
+    const key = JSON.stringify([boardId, ownerId, agentId, activityId]);
+    const previous = reads.get(key);
+    const starting = reading && !previous && reads.size < maxReads;
+    const finishing = !reading && previous?.reading;
+    if (starting || finishing) {
+      reads.set(key, {
+        ...principal,
+        reading,
+        expiresAt: now + (reading ? readPresenceMs : idleMs)
+      });
+    }
+  }
+  function readAgentIds(boardId, now, readingOnly = false) {
+    const ids = /* @__PURE__ */ new Set();
+    for (const read of reads.values()) {
+      const active = read.boardId === boardId && read.expiresAt > now;
+      if (active && (!readingOnly || read.reading)) {
+        ids.add(read.agentId);
+      }
+    }
+    return ids;
+  }
+  function roster(boardId) {
+    const now = options.now();
+    const present = readAgentIds(boardId, now);
+    for (const agentId of onlineAgentIds(boards.get(boardId), now)) {
+      present.add(agentId);
+    }
+    return [...present].sort();
+  }
+  function rememberDisconnect(ownerId, agentId, now) {
+    for (const [id, deadline] of disconnected) {
+      if (deadline <= now) {
+        disconnected.delete(id);
+      }
+    }
+    disconnected.set(JSON.stringify([ownerId, agentId]), now + leaseMs);
+    if (disconnected.size > maxStored) {
+      const earliest = disconnected.keys().next().value;
+      if (earliest !== void 0) {
+        disconnected.delete(earliest);
+      }
+    }
+  }
   return {
     change,
     release,
     snapshot: (boardId, ownerId) => liveWorkspaces(boards.get(boardId), options.now(), ownerId),
+    visibleSnapshot: (boardId) => visibleWorkspaces(boards.get(boardId), options.now()),
+    onlineAgentIds: roster,
+    readingAgentIds: (boardId) => [...readAgentIds(boardId, options.now(), true)].sort(),
+    setReadPresence,
     withdraw
   };
+}
+function disconnectWorkspace(workspace, ownerId, agentId, now) {
+  if (workspace?.kind === "active") {
+    return workspace.ownerId === ownerId && workspace.workspace.agentId === agentId ? retire(workspace, "released", now) : void 0;
+  }
+  const presence = workspace?.presence;
+  return presence?.ownerId === ownerId && presence.agentId === agentId ? workspace : void 0;
 }
 
 // src/modules/rooms/application/room-event-journal.ts
@@ -3843,7 +4182,13 @@ function peerKey({ actorId: actorId2, viewId }) {
   return JSON.stringify([actorId2, viewId]);
 }
 function absent(old, now, sequence3 = old.sequence) {
-  return { key: old.key, sequence: sequence3, updatedAt: now, releaseAt: now + tombstoneTtlMs };
+  return {
+    key: old.key,
+    sequence: sequence3,
+    updatedAt: now,
+    releaseAt: now + tombstoneTtlMs,
+    streamCount: old.streamCount
+  };
 }
 function acceptUpdate(previous, sequence3, now) {
   const throttled = previous.participant !== void 0 && now - previous.updatedAt < minimumUpdateGapMs;
@@ -3867,6 +4212,8 @@ var RoomMemory = class {
   publicSequence = 0n;
   baselineRevision;
   agentWorkspaces = [];
+  onlineAgentIds = [];
+  readingAgentIds = [];
   feedbackVersion = 0n;
   suggestionsVersion = 0n;
   get active() {
@@ -3942,20 +4289,51 @@ var RoomMemory = class {
       this.pending.length = 0;
     }
   }
-  listen(listener2, owner = true) {
+  retainStream(key, now) {
+    const id = peerKey(key);
+    const previous = this.slots.get(id);
+    if (!previous && this.slots.size >= maxPresenceSlots) {
+      return false;
+    }
+    const slot = previous ?? { key, sequence: 0n, updatedAt: now, releaseAt: now };
+    this.slots.set(id, { ...slot, streamCount: (slot.streamCount ?? 0) + 1 });
+    return true;
+  }
+  releaseStream(key, now) {
+    const id = peerKey(key);
+    const previous = this.slots.get(id);
+    if (!previous?.streamCount) {
+      return;
+    }
+    if (previous.streamCount > 1) {
+      this.slots.set(id, { ...previous, streamCount: previous.streamCount - 1 });
+      return;
+    }
+    this.slots.set(id, { ...absent(previous, now), streamCount: 0 });
+    if (previous.participant) {
+      this.change({ upserts: [], removals: [key] }, now);
+    }
+  }
+  listen(listener2, owner = true, connection) {
     if (this.listeners.size >= maxSubscriptions) {
+      return void 0;
+    }
+    if (connection && !this.retainStream(connection.key, connection.now())) {
       return void 0;
     }
     this.listeners.set(listener2, owner);
     return () => {
-      this.listeners.delete(listener2);
+      if (this.listeners.delete(listener2) && connection) {
+        this.releaseStream(connection.key, connection.now());
+      }
     };
   }
   close() {
-    for (const listener2 of [...this.listeners.keys()]) {
+    const listeners = [...this.listeners.keys()];
+    this.listeners.clear();
+    for (const listener2 of listeners) {
       listener2.close();
     }
-    this.listeners.clear();
     this.slots.clear();
     this.pending.length = 0;
   }
@@ -3975,7 +4353,7 @@ var RoomMemory = class {
           this.slots.set(id, absent(slot, now));
           removals.push(slot.key);
         }
-      } else if (slot.releaseAt <= now) {
+      } else if (!slot.streamCount && slot.releaseAt <= now) {
         this.slots.delete(id);
       }
     }
@@ -3988,6 +4366,9 @@ var RoomMemory = class {
     const key = { actorId: actorId2, viewId: input.viewId };
     const id = peerKey(key);
     const previous = this.slots.get(id);
+    if (previous?.streamCount === 0) {
+      return false;
+    }
     if (previous && !acceptUpdate(previous, input.sequence, now)) {
       return false;
     }
@@ -4018,7 +4399,8 @@ var RoomMemory = class {
       sequence: participant.sequence,
       updatedAt: now,
       releaseAt: participant.expiresAtUnixMs + tombstoneTtlMs,
-      participant
+      participant,
+      streamCount: previous?.streamCount
     });
     this.change({ upserts: [participant], removals: [] }, now);
     return true;
@@ -4033,7 +4415,8 @@ var RoomMemory = class {
     if (!previous && this.slots.size >= maxPresenceSlots) {
       return false;
     }
-    this.slots.set(id, { key, sequence: sequence3, updatedAt: now, releaseAt: now + tombstoneTtlMs });
+    const next = previous ? absent(previous, now, sequence3) : { key, sequence: sequence3, updatedAt: now, releaseAt: now + tombstoneTtlMs };
+    this.slots.set(id, next);
     if (previous?.participant) {
       this.change({ upserts: [], removals: [key] }, now);
     }
@@ -4098,6 +4481,9 @@ function requireAccess2(access) {
   }
   return access;
 }
+function sameItems(previous, incoming) {
+  return previous.length === incoming.length && previous.every((entry, index) => entry === incoming[index]);
+}
 function limitedChange(change) {
   const {
     boardId,
@@ -4144,10 +4530,15 @@ function createRoomsApplication(repository, clock, instanceId, activityOptions) 
     if (!agentActivity) {
       return;
     }
-    const workspaces = agentActivity.snapshot(boardId);
-    if (workspaces.length !== room.agentWorkspaces.length || workspaces.some((workspace, index) => workspace !== room.agentWorkspaces[index])) {
+    const workspaces = agentActivity.visibleSnapshot(boardId);
+    const onlineAgentIds2 = agentActivity.onlineAgentIds(boardId);
+    const readingAgentIds = agentActivity.readingAgentIds(boardId);
+    const samePresence = sameItems(room.onlineAgentIds, onlineAgentIds2) && sameItems(room.readingAgentIds, readingAgentIds);
+    if (!samePresence || !sameItems(room.agentWorkspaces, workspaces)) {
       room.agentWorkspaces = workspaces;
-      room.publish({ kind: "agentWorkspaces", workspaces }, now);
+      room.onlineAgentIds = onlineAgentIds2;
+      room.readingAgentIds = readingAgentIds;
+      room.publish({ kind: "agentWorkspaces", workspaces, onlineAgentIds: onlineAgentIds2, readingAgentIds }, now);
     }
   }
   function authorizeAgentActivity(boardId, ownerId) {
@@ -4181,6 +4572,8 @@ function createRoomsApplication(repository, clock, instanceId, activityOptions) 
           participants: room.currentParticipants(now),
           timer: timerView(stored.timer, now),
           agentWorkspaces: room.agentWorkspaces,
+          onlineAgentIds: agentActivity ? room.onlineAgentIds : void 0,
+          readingAgentIds: agentActivity ? room.readingAgentIds : void 0,
           canReleaseAgentActivity: agentActivity !== void 0 && stored.access.role === "owner",
           feedbackVersion: room.feedbackVersion,
           suggestionsVersion: owner ? room.suggestionsVersion : void 0
@@ -4199,8 +4592,9 @@ function createRoomsApplication(repository, clock, instanceId, activityOptions) 
     room.baselineRevision = change.boardRevision;
     room.publish({ kind: "contentChanged", change: limitedChange(change) }, clock.nowMillis());
   }
-  function listen(room, listener2, access2) {
-    const release = room.listen(listener2, access2.role === "owner");
+  function listen(room, listener2, access2, streamView) {
+    const presence = streamView && { key: streamView, now: () => clock.nowMillis() };
+    const release = room.listen(listener2, access2.role === "owner", presence);
     if (!release) {
       throw new RoomCapacityError("Too many room connections");
     }
@@ -4243,7 +4637,7 @@ function createRoomsApplication(repository, clock, instanceId, activityOptions) 
       const { room, event, access: access2 } = readSnapshot2(boardId, key.actorId, clock.nowMillis());
       return { initial: event, access: access2, release: listen(room, listener2, access2) };
     },
-    subscribeAfter(boardId, key, cursor, listener2) {
+    subscribeAfter(boardId, key, cursor, listener2, connection) {
       if (!validViewId(key.viewId)) {
         throw new RoomInputError("Invalid room presence identity");
       }
@@ -4259,7 +4653,12 @@ function createRoomsApplication(repository, clock, instanceId, activityOptions) 
       });
       const replay = cursor && room.replay(cursor, currentAccess.role === "owner");
       const events = replay ?? [readSnapshot2(boardId, key.actorId, now).event];
-      return { events, access: currentAccess, release: listen(room, listener2, currentAccess) };
+      const streamView = connection === "stream" ? key : void 0;
+      return {
+        events,
+        access: currentAccess,
+        release: listen(room, listener2, currentAccess, streamView)
+      };
     },
     tick(boardId, boardRevision) {
       rooms.get(boardId)?.sweep(clock.nowMillis());
@@ -4294,6 +4693,9 @@ function createRoomsApplication(repository, clock, instanceId, activityOptions) 
       publishAgentWorkspaces(boardId);
       return result;
     },
+    agentWriteWorkspaces(boardId, ownerId) {
+      return agentActivity?.snapshot(boardId, ownerId) ?? [];
+    },
     releaseAgentActivity(request) {
       const { boardId, ownerId } = request;
       const activity = authorizeAgentActivity(boardId, ownerId);
@@ -4301,12 +4703,22 @@ function createRoomsApplication(repository, clock, instanceId, activityOptions) 
       publishAgentWorkspaces(boardId);
       return result;
     },
+    disconnectAgent(ownerId, agentId) {
+      for (const boardId of agentActivity?.withdraw({ ownerId, agentId }) ?? []) {
+        publishAgentWorkspaces(boardId);
+      }
+    },
+    setAgentReadPresence(principal, activityId, reading) {
+      const { boardId, ownerId } = principal;
+      authorizeAgentActivity(boardId, ownerId).setReadPresence(principal, activityId, reading);
+      publishAgentWorkspaces(boardId);
+    },
     publishContentChange,
     publishDiscussionChange(boardId, kind) {
       const room = rooms.get(boardId);
       if (room) {
-        const version2 = kind === "feedbackChanged" ? ++room.feedbackVersion : ++room.suggestionsVersion;
-        room.publish({ kind, version: version2 }, clock.nowMillis());
+        const version3 = kind === "feedbackChanged" ? ++room.feedbackVersion : ++room.suggestionsVersion;
+        room.publish({ kind, version: version3 }, clock.nowMillis());
       }
     },
     close() {
@@ -4322,112 +4734,6 @@ function createRoomsApplication(repository, clock, instanceId, activityOptions) 
 var maxExportFileBytes = 32 * 1024 * 1024;
 var maxBoardBackupBytes = 128 * 1024 * 1024;
 var maxBoardBackupAssetBytes = 20 * 1024 * 1024;
-
-// src/modules/whiteboard/domain/section.ts
-var radiansPerDegree = Math.PI / 180;
-var degreesPerTurn = 360;
-function rotationOf({ rotation }) {
-  const angle = rotation % degreesPerTurn * radiansPerDegree;
-  return { cosine: Math.cos(angle), sine: Math.sin(angle) };
-}
-function corners(geometry) {
-  const { x, y, width, height } = geometry;
-  const halfWidth = width / 2;
-  const halfHeight = height / 2;
-  const { cosine, sine } = rotationOf(geometry);
-  const offsets = [
-    { x: -halfWidth, y: -halfHeight },
-    { x: halfWidth, y: -halfHeight },
-    { x: halfWidth, y: halfHeight },
-    { x: -halfWidth, y: halfHeight }
-  ];
-  return offsets.map(({ x: dx, y: dy }) => ({
-    x: x + halfWidth + dx * cosine - dy * sine,
-    y: y + halfHeight + dx * sine + dy * cosine
-  }));
-}
-function sectionContains(section, candidate) {
-  const halfWidth = section.width / 2;
-  const halfHeight = section.height / 2;
-  const { cosine, sine } = rotationOf(section);
-  const tolerance = Number.EPSILON * Math.max(halfWidth, halfHeight);
-  return corners(candidate).every(({ x, y }) => {
-    const dx = x - section.x - halfWidth;
-    const dy = y - section.y - halfHeight;
-    const localX = dx * cosine + dy * sine;
-    const localY = -dx * sine + dy * cosine;
-    return Math.abs(localX) <= halfWidth + tolerance && Math.abs(localY) <= halfHeight + tolerance;
-  });
-}
-
-// src/modules/whiteboard/domain/export-scope.ts
-var maxContainmentChecks = 1e6;
-function indexByRelation(objects, field) {
-  const index = /* @__PURE__ */ new Map();
-  for (const object3 of objects) {
-    const relation = object3[field];
-    if (relation === void 0) {
-      continue;
-    }
-    const bucket = index.get(relation);
-    if (bucket) {
-      bucket.push(object3);
-    } else {
-      index.set(relation, [object3]);
-    }
-  }
-  return index;
-}
-function addObjects(ids, objects) {
-  for (const { objectId } of objects ?? []) {
-    ids.add(objectId);
-  }
-}
-function includeWithinSection(ids, objects, section) {
-  for (const object3 of objects) {
-    if (!ids.has(object3.objectId) && sectionContains(section.geometry, object3.geometry)) {
-      ids.add(object3.objectId);
-    }
-  }
-}
-function expandSelection(ids, objects, byId3) {
-  const byParent = indexByRelation(objects, "parentId");
-  const byGroup = indexByRelation(objects, "groupId");
-  const groups = /* @__PURE__ */ new Set();
-  let checks = 0;
-  for (const id of ids) {
-    const entry = byId3.get(id);
-    if (!entry) {
-      return { kind: "rejected", reason: "invalidSelection" };
-    }
-    addObjects(ids, byParent.get(id));
-    if (entry.groupId !== void 0 && !groups.has(entry.groupId)) {
-      groups.add(entry.groupId);
-      addObjects(ids, byGroup.get(entry.groupId));
-    }
-    if (entry.kind === "section") {
-      checks += objects.length;
-      if (checks > maxContainmentChecks) {
-        return { kind: "rejected", reason: "tooLarge" };
-      }
-      includeWithinSection(ids, objects, entry);
-    }
-  }
-}
-function selectExportObjects(objects, byId3, scope2) {
-  if (scope2.kind === "whole") {
-    return objects;
-  }
-  if (scope2.objectIds.length === 0) {
-    return { kind: "rejected", reason: "invalidSelection" };
-  }
-  const ids = new Set(scope2.objectIds);
-  const expansionFailure = expandSelection(ids, objects, byId3);
-  if (expansionFailure) {
-    return expansionFailure;
-  }
-  return objects.filter(({ objectId }) => ids.has(objectId));
-}
 
 // ../../packages/contracts/whiteboard/connector-route.ts
 var normals = {
@@ -4465,8 +4771,8 @@ function rotate({ x, y }, degrees) {
   const ry = x * sin + y * cos;
   return { x: Math.abs(rx) < epsilon ? 0 : rx, y: Math.abs(ry) < epsilon ? 0 : ry };
 }
-function offset(point2, direction, distance) {
-  return { x: point2.x + direction.x * distance, y: point2.y + direction.y * distance };
+function offset(point3, direction, distance) {
+  return { x: point3.x + direction.x * distance, y: point3.y + direction.y * distance };
 }
 function connectorPortPoint(geometry, port, along = 0) {
   const normal = rotate(normals[port], geometry.rotation);
@@ -4490,8 +4796,8 @@ function terminal(target2, other) {
     return { point: fallback2 };
   }
   const port = target2.port ?? facingPort(geometry, other);
-  const point2 = connectorPortPoint(geometry, port);
-  return finite(point2) ? { point: point2, normal: rotate(normals[port], geometry.rotation) } : { point: fallback2 };
+  const point3 = connectorPortPoint(geometry, port);
+  return finite(point3) ? { point: point3, normal: rotate(normals[port], geometry.rotation) } : { point: fallback2 };
 }
 function horizontal(normal) {
   return normal && Math.abs(normal.x) >= Math.abs(normal.y);
@@ -4527,8 +4833,8 @@ function boundsFor(target2, padding) {
     }
   ];
 }
-function inside(point2, bounds) {
-  return point2.x > bounds.left + epsilon && point2.x < bounds.right - epsilon && point2.y > bounds.top + epsilon && point2.y < bounds.bottom - epsilon;
+function inside(point3, bounds2) {
+  return point3.x > bounds2.left + epsilon && point3.x < bounds2.right - epsilon && point3.y > bounds2.top + epsilon && point3.y < bounds2.bottom - epsilon;
 }
 function range(a, b, minimum, maximum) {
   const change = b - a;
@@ -4539,21 +4845,21 @@ function range(a, b, minimum, maximum) {
   const last = (maximum - epsilon - a) / change;
   return [Math.min(first, last), Math.max(first, last)];
 }
-function crosses(from, to, bounds) {
-  const x = range(from.x, to.x, bounds.left, bounds.right);
-  const y = range(from.y, to.y, bounds.top, bounds.bottom);
+function crosses(from, to, bounds2) {
+  const x = range(from.x, to.x, bounds2.left, bounds2.right);
+  const y = range(from.y, to.y, bounds2.top, bounds2.bottom);
   return x && y && Math.max(0, x[0], y[0]) + epsilon < Math.min(1, x[1], y[1]);
 }
 function clear(points, obstacles) {
-  return points.every((point2, index) => {
+  return points.every((point3, index) => {
     const before = points[index - 1];
-    return !before || obstacles.every((bounds) => !crosses(before, point2, bounds));
+    return !before || obstacles.every((bounds2) => !crosses(before, point3, bounds2));
   });
 }
 function unique(points) {
-  return points.filter((point2, index) => {
+  return points.filter((point3, index) => {
     const before = points[index - 1];
-    return !before || magnitude(delta(before, point2)) > epsilon;
+    return !before || magnitude(delta(before, point3)) > epsilon;
   });
 }
 function pointsOut(terminal2, other) {
@@ -4566,24 +4872,24 @@ function pointsOut(terminal2, other) {
   const vector = delta(terminal2.point, other);
   return dot(vector, terminal2.normal) > (1 - epsilon) * magnitude(vector);
 }
-function traceExit(point2, normal, bounds) {
-  const x = normal.x ? ((normal.x > 0 ? bounds.right : bounds.left) - point2.x) / normal.x : Infinity;
-  const y = normal.y ? ((normal.y > 0 ? bounds.bottom : bounds.top) - point2.y) / normal.y : Infinity;
+function traceExit(point3, normal, bounds2) {
+  const x = normal.x ? ((normal.x > 0 ? bounds2.right : bounds2.left) - point3.x) / normal.x : Infinity;
+  const y = normal.y ? ((normal.y > 0 ? bounds2.bottom : bounds2.top) - point3.y) / normal.y : Infinity;
   return Math.max(0, Math.min(x, y));
 }
-function lead({ point: point2, normal }, obstacles) {
+function lead({ point: point3, normal }, obstacles) {
   if (!normal) {
-    return point2;
+    return point3;
   }
   let distance = clearance;
   for (let pass = 0; pass < obstacles.length; pass += 1) {
-    const insideBox = obstacles.find((bounds) => inside(offset(point2, normal, distance), bounds));
+    const insideBox = obstacles.find((bounds2) => inside(offset(point3, normal, distance), bounds2));
     if (!insideBox) {
       break;
     }
-    distance = traceExit(point2, normal, insideBox) + objectPadding;
+    distance = traceExit(point3, normal, insideBox) + objectPadding;
   }
-  return offset(point2, normal, distance);
+  return offset(point3, normal, distance);
 }
 function bridgeChoices(from, to, obstacles) {
   const outer = {
@@ -4635,7 +4941,7 @@ function bridge(from, to, start, end2, obstacles) {
     if (route.length < 2 || !clear(route, obstacles)) {
       continue;
     }
-    const length = route.slice(1).reduce((sum, point2, index) => sum + magnitude(delta(route[index], point2)), 0);
+    const length = route.slice(1).reduce((sum, point3, index) => sum + magnitude(delta(route[index], point3)), 0);
     const score = length + (route.length - 2) * objectPadding;
     if (score < fallbackScore) {
       fallbackScore = score;
@@ -4658,8 +4964,8 @@ function automatic(start, end2, from, to) {
   const last = lead(end2, obstacles);
   return unique([start.point, ...bridge(first, last, start, end2, obstacles), end2.point]);
 }
-function step(point2, coordinate2, alongX) {
-  return alongX ? { x: coordinate2, y: point2.y } : { x: point2.x, y: coordinate2 };
+function step(point3, coordinate2, alongX) {
+  return alongX ? { x: coordinate2, y: point3.y } : { x: point3.x, y: coordinate2 };
 }
 function relativeRoute({ firstAxis, offsets }, from, to) {
   if (!offsets.length || offsets.length > maximumRelativeBends || !offsets.every(Number.isFinite)) {
@@ -4794,15 +5100,15 @@ function geometryCorners(geometry) {
     { x: horizontal2, y: -vertical },
     { x: horizontal2, y: vertical },
     { x: -horizontal2, y: vertical }
-  ].map((point2) => {
-    const rotated = rotatePoint(point2, geometry.rotation);
+  ].map((point3) => {
+    const rotated = rotatePoint(point3, geometry.rotation);
     return { x: center2.x + rotated.x, y: center2.y + rotated.y };
   });
 }
 function target(endpoint2, geometry) {
-  const { attachment, point: point2 } = endpoint2;
+  const { attachment, point: point3 } = endpoint2;
   const object3 = attachment && geometry.get(attachment.objectId);
-  return { fallback: point2, geometry: object3?.geometry, port: attachment?.port };
+  return { fallback: point3, geometry: object3?.geometry, port: attachment?.port };
 }
 function exportConnector(detail, geometry) {
   const points = resolveConnectorRoute(
@@ -4822,6 +5128,124 @@ function exportConnector(detail, geometry) {
     y: (first.y + second.y) / 2 + (detail.labelOffset?.y ?? 0)
   };
   return finitePoint(label2) ? { points, label: label2 } : void 0;
+}
+
+// src/modules/whiteboard/domain/section.ts
+var radiansPerDegree = Math.PI / 180;
+var degreesPerTurn = 360;
+function rotationOf({ rotation }) {
+  const angle = rotation % degreesPerTurn * radiansPerDegree;
+  return { cosine: Math.cos(angle), sine: Math.sin(angle) };
+}
+function corners(geometry) {
+  const { x, y, width, height } = geometry;
+  const halfWidth = width / 2;
+  const halfHeight = height / 2;
+  const { cosine, sine } = rotationOf(geometry);
+  const offsets = [
+    { x: -halfWidth, y: -halfHeight },
+    { x: halfWidth, y: -halfHeight },
+    { x: halfWidth, y: halfHeight },
+    { x: -halfWidth, y: halfHeight }
+  ];
+  return offsets.map(({ x: dx, y: dy }) => ({
+    x: x + halfWidth + dx * cosine - dy * sine,
+    y: y + halfHeight + dx * sine + dy * cosine
+  }));
+}
+function sectionContains(section, candidate) {
+  const halfWidth = section.width / 2;
+  const halfHeight = section.height / 2;
+  const { cosine, sine } = rotationOf(section);
+  const tolerance = Number.EPSILON * Math.max(halfWidth, halfHeight);
+  return corners(candidate).every(({ x, y }) => {
+    const dx = x - section.x - halfWidth;
+    const dy = y - section.y - halfHeight;
+    const localX = dx * cosine + dy * sine;
+    const localY = -dx * sine + dy * cosine;
+    return Math.abs(localX) <= halfWidth + tolerance && Math.abs(localY) <= halfHeight + tolerance;
+  });
+}
+
+// src/modules/whiteboard/domain/export-scope.ts
+var maxContainmentChecks = 1e6;
+function indexByRelation(objects, field) {
+  const index = /* @__PURE__ */ new Map();
+  for (const object3 of objects) {
+    const relation = object3[field];
+    if (relation === void 0) {
+      continue;
+    }
+    const bucket = index.get(relation);
+    if (bucket) {
+      bucket.push(object3);
+    } else {
+      index.set(relation, [object3]);
+    }
+  }
+  return index;
+}
+function addObjects(ids, objects) {
+  for (const { objectId } of objects ?? []) {
+    ids.add(objectId);
+  }
+}
+function includeWithinSection(ids, objects, section) {
+  for (const object3 of objects) {
+    if (!ids.has(object3.objectId) && sectionContains(section.geometry, object3.geometry)) {
+      ids.add(object3.objectId);
+    }
+  }
+}
+function expandSelection(ids, objects, byId3) {
+  const byParent = indexByRelation(objects, "parentId");
+  const byGroup = indexByRelation(objects, "groupId");
+  const groups = /* @__PURE__ */ new Set();
+  let checks = 0;
+  for (const id of ids) {
+    const entry = byId3.get(id);
+    if (!entry) {
+      return { kind: "rejected", reason: "invalidSelection" };
+    }
+    addObjects(ids, byParent.get(id));
+    if (entry.groupId !== void 0 && !groups.has(entry.groupId)) {
+      groups.add(entry.groupId);
+      addObjects(ids, byGroup.get(entry.groupId));
+    }
+    if (entry.kind === "section") {
+      checks += objects.length;
+      if (checks > maxContainmentChecks) {
+        return { kind: "rejected", reason: "tooLarge" };
+      }
+      includeWithinSection(ids, objects, entry);
+    }
+  }
+}
+function selectExportObjects(objects, byId3, scope2) {
+  if (scope2.kind === "whole") {
+    return objects;
+  }
+  if (scope2.objectIds.length === 0) {
+    return { kind: "rejected", reason: "invalidSelection" };
+  }
+  const ids = new Set(scope2.objectIds);
+  const expansionFailure = expandSelection(ids, objects, byId3);
+  if (expansionFailure) {
+    return expansionFailure;
+  }
+  return objects.filter(({ objectId }) => ids.has(objectId));
+}
+function selectExportRectangle(objects, byId3, { x, y, width, height }) {
+  const right = x + width;
+  const bottom = y + height;
+  const selected = objects.filter((object3) => {
+    const route = object3.detail?.kind === "connector" && exportConnector(object3.detail, byId3);
+    const points = route ? [...route.points, route.label] : geometryCorners(object3.geometry);
+    const overlapsWidth = points.some((point3) => point3.x < right) && points.some((point3) => point3.x > x);
+    const overlapsHeight = points.some((point3) => point3.y < bottom) && points.some((point3) => point3.y > y);
+    return overlapsWidth && overlapsHeight;
+  });
+  return selected.length ? selected : { kind: "rejected", reason: "invalidSelection" };
 }
 
 // ../../packages/contracts/whiteboard/rich-text.ts
@@ -5176,17 +5600,17 @@ function todoSourceAttribute(source) {
   if (!source || typeof source.objectId !== "string") {
     return "";
   }
-  const { objectId, boardId, blockId, itemId, version: version2 } = source;
-  const numericVersion2 = typeof version2 === "string" ? Number(version2) : version2;
-  const exportedVersion = Number.isSafeInteger(numericVersion2) ? numericVersion2 : version2;
-  const reference = {
+  const { objectId, boardId, blockId, itemId, version: version3 } = source;
+  const numericVersion2 = typeof version3 === "string" ? Number(version3) : version3;
+  const exportedVersion = Number.isSafeInteger(numericVersion2) ? numericVersion2 : version3;
+  const reference2 = {
     elementId: objectId,
     artifactId: boardId,
     blockId,
     itemId,
     version: exportedVersion
   };
-  return ` data-source-ref="${escapeXml(JSON.stringify(reference))}"`;
+  return ` data-source-ref="${escapeXml(JSON.stringify(reference2))}"`;
 }
 function todoCard(object3, data) {
   const { width, height } = object3.geometry;
@@ -5317,8 +5741,8 @@ function svgInk(object3, data) {
     return void 0;
   }
   const { width, height } = object3.geometry;
-  const points = data.points.map((point2) => {
-    const entry = record3(point2);
+  const points = data.points.map((point3) => {
+    const entry = record3(point3);
     if (typeof entry?.x !== "number" || typeof entry.y !== "number") {
       return void 0;
     }
@@ -5651,15 +6075,15 @@ function frameFrom(points) {
   return { left, top, right, bottom };
 }
 function expandFrame(frame, points) {
-  const bounds = frameFrom(points);
+  const bounds2 = frameFrom(points);
   if (!frame) {
-    return bounds;
+    return bounds2;
   }
   return {
-    left: Math.min(frame.left, bounds.left),
-    top: Math.min(frame.top, bounds.top),
-    right: Math.max(frame.right, bounds.right),
-    bottom: Math.max(frame.bottom, bounds.bottom)
+    left: Math.min(frame.left, bounds2.left),
+    top: Math.min(frame.top, bounds2.top),
+    right: Math.max(frame.right, bounds2.right),
+    bottom: Math.max(frame.bottom, bounds2.bottom)
   };
 }
 function arrowHead(head2, points, atStart, stroke, width) {
@@ -5746,12 +6170,13 @@ function exportViewport(frame) {
   const height = (frame ? frame.bottom - frame.top : 1) + pad * 2;
   return { x, y, width, height };
 }
-function svgDocument(snapshot, frame, body) {
-  const { x, y, width, height } = exportViewport(frame);
+function svgDocument(snapshot, viewBox, viewport, body, exactCrop) {
+  const { x, y, width, height } = viewBox;
   const title = escapeXml(snapshot.board.title);
   const revision = snapshot.board.revision.toString();
   const description = `\u767D\u677F\u7248\u672C ${revision}\uFF0C\u5305\u542B ${snapshot.objects.length} \u4E2A\u5BF9\u8C61\u3002`;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="${x} ${y} ${width} ${height}" role="img" font-family="sans-serif"><title>${title}</title><desc>${description}</desc><rect x="${x}" y="${y}" width="${width}" height="${height}" fill="#f5f5f5"/>${body}</svg>
+  const aspectRatio = exactCrop ? ' preserveAspectRatio="none"' : "";
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${viewport.width}" height="${viewport.height}" viewBox="${x} ${y} ${width} ${height}"${aspectRatio} role="img" font-family="sans-serif"><title>${title}</title><desc>${description}</desc><rect x="${x}" y="${y}" width="${width}" height="${height}" fill="#f5f5f5"/>${body}</svg>
 `;
 }
 function richRegion(object3, index, payload, snapshot) {
@@ -5791,7 +6216,7 @@ function richMarkup({ index, width, height, scripted }) {
   }
   return `<foreignObject width="${width}" height="${height}"><div xmlns="http://www.w3.org/1999/xhtml" data-studio-png-region="${index}"></div></foreignObject>`;
 }
-function renderExportSvg(snapshot) {
+function renderExportSvg(snapshot, options) {
   const payloads = new Map(snapshot.payloads.map((payload) => [payload.objectId, payload]));
   const layers = [];
   const regions = [];
@@ -5820,12 +6245,21 @@ function renderExportSvg(snapshot) {
       return { kind: "rejected", reason: "tooLarge" };
     }
     layers.push(markup.value);
-    frame = expandFrame(frame, markup.bounds);
+    if (!options?.rectangle) {
+      frame = expandFrame(frame, markup.bounds);
+    }
   }
+  const viewBox = options?.rectangle ?? exportViewport(frame);
+  const scale = options?.scale ?? 1;
+  const exactCrop = options?.rectangle !== void 0;
+  const viewport = exactCrop || scale !== 1 ? {
+    width: Math.max(1, Math.floor(viewBox.width * scale)),
+    height: Math.max(1, Math.floor(viewBox.height * scale))
+  } : viewBox;
   return {
-    svg: svgDocument(snapshot, frame, layers.join("")),
+    svg: svgDocument(snapshot, viewBox, viewport, layers.join(""), exactCrop),
     regions,
-    viewport: exportViewport(frame)
+    viewport
   };
 }
 
@@ -5948,8 +6382,8 @@ function objectLayer(object3, index, snapshot, payload) {
   if (native === void 0) {
     return nativePayloadKinds.has(object3.kind) ? void 0 : vectorLayer(object3, index, payload, snapshot);
   }
-  const bounds = geometryCorners(object3.geometry);
-  return bounds.every(finitePoint) ? { value: native, bounds } : void 0;
+  const bounds2 = geometryCorners(object3.geometry);
+  return bounds2.every(finitePoint) ? { value: native, bounds: bounds2 } : void 0;
 }
 function renderExportHtmlSource(snapshot) {
   const [payload] = snapshot.payloads;
@@ -6054,17 +6488,19 @@ function encodeFile(snapshot, data, extension, mimeType, title = snapshot.board.
     content
   };
 }
-function renderVectorFile(snapshot, format) {
-  const scene = renderExportSvg(snapshot);
+function renderVectorFile(snapshot, format, options) {
+  const scene = renderExportSvg(snapshot, options);
   if (scene.kind === "rejected") {
     return scene;
   }
-  if (scene.regions.length) {
-    const { width, height } = scene.viewport;
+  const { width, height } = scene.viewport;
+  if (format === "png" || scene.regions.length) {
     const dimensions3 = width <= 16384 && height <= 16384;
     if (!dimensions3 || Math.ceil(width) * Math.ceil(height) > 32e6) {
       return { kind: "rejected", reason: "tooLarge" };
     }
+  }
+  if (scene.regions.length) {
     return {
       kind: "browserPng",
       filename: exportFilename(snapshot.board.title, format),
@@ -6077,11 +6513,13 @@ function renderVectorFile(snapshot, format) {
   }
   return encodeFile(snapshot, scene.svg, "svg", "image/svg+xml");
 }
-function renderExportFile(snapshot, { format }) {
+function renderExportFile(snapshot, command) {
+  const { format } = command;
   switch (format) {
     case "svg":
-    case "png":
       return renderVectorFile(snapshot, format);
+    case "png":
+      return renderVectorFile(snapshot, format, command);
     case "html":
       return encodeFile(snapshot, renderExportHtml(snapshot), "html", "text/html");
     case "html-source":
@@ -6174,11 +6612,11 @@ function documentBlock(value, source, depth) {
     throw new BackupElementError("tooLarge");
   }
   const { blockId, type, props, content, children } = object2(value);
-  const fields = object2(props);
+  const fields2 = object2(props);
   return {
     id: blockId,
     type,
-    props: { ...fields, url: rewrite(fields.url, source) },
+    props: { ...fields2, url: rewrite(fields2.url, source) },
     content,
     children: array(children).map((child3) => documentBlock(child3, source, depth + 1))
   };
@@ -6225,10 +6663,10 @@ function contentFields(element, payload, source) {
     case "todo":
       return { data: { items: array(data.items).map(todoItem) } };
     case "table": {
-      const { rows: rows2, ...fields } = object2(data.grid);
+      const { rows: rows2, ...fields2 } = object2(data.grid);
       return {
         data: {
-          ...fields,
+          ...fields2,
           rows: array(rows2).map((row) => array(object2(row).cells).map(tableCell))
         }
       };
@@ -6252,10 +6690,10 @@ function contentFields(element, payload, source) {
     case "ink":
       return {
         points: array(data.points).flatMap((value) => {
-          const point2 = object2(value);
+          const point3 = object2(value);
           return [
-            Number(point2.x) * (element.geometry.width || 1),
-            Number(point2.y) * (element.geometry.height || 1)
+            Number(point3.x) * (element.geometry.width || 1),
+            Number(point3.y) * (element.geometry.height || 1)
           ];
         })
       };
@@ -6270,8 +6708,8 @@ function contentFields(element, payload, source) {
       };
   }
 }
-function endPoint({ attachment, point: point2 }) {
-  return attachment?.objectId ?? [point2.x, point2.y];
+function endPoint({ attachment, point: point3 }) {
+  return attachment?.objectId ?? [point3.x, point3.y];
 }
 function connectorFields(detail) {
   const { start, end: end2, bends, relativeBends, startHead, endHead, labelOffset } = detail;
@@ -6302,11 +6740,11 @@ function backupElement(element, payload, source) {
   }
   const { width, height, x, y, rotation } = geometry;
   const { geometryVersion, payloadVersion } = element;
-  const version2 = geometryVersion > (payloadVersion ?? 0n) ? geometryVersion : payloadVersion ?? 0n;
+  const version3 = geometryVersion > (payloadVersion ?? 0n) ? geometryVersion : payloadVersion ?? 0n;
   return {
     id: objectId,
     type: legacyType.get(kind) ?? kind,
-    version: Number(version2 < maxLegacyVersion ? version2 + 1n : maxLegacyVersion),
+    version: Number(version3 < maxLegacyVersion ? version3 + 1n : maxLegacyVersion),
     x,
     y,
     w: width,
@@ -6393,9 +6831,9 @@ function frozenElement(thread) {
     object_width: w,
     object_height: h,
     object_rotation: rotation,
-    object_geometry_version: version2
+    object_geometry_version: version3
   } = thread;
-  return { id, type: "shape", text: text3, x, y, w, h, rotation, version: Number(version2) + 1 };
+  return { id, type: "shape", text: text3, x, y, w, h, rotation, version: Number(version3) + 1 };
 }
 function legacyBackupFeedback(boardId, { threads, messages, contentAnchors }, actorFor, formatTime, findTarget) {
   const messagesByThread = /* @__PURE__ */ new Map();
@@ -6462,11 +6900,11 @@ function legacyBackupFeedback(boardId, { threads, messages, contentAnchors }, ac
 
 // src/modules/whiteboard/domain/movement.ts
 var maxStoredVersion = (1n << 63n) - 1n;
-function validVersion(version2) {
-  return version2 >= 0n && version2 <= maxStoredVersion;
+function validVersion(version3) {
+  return version3 >= 0n && version3 <= maxStoredVersion;
 }
-function canAdvanceVersion(version2) {
-  return validVersion(version2) && version2 < maxStoredVersion;
+function canAdvanceVersion(version3) {
+  return validVersion(version3) && version3 < maxStoredVersion;
 }
 function commandSignature2({ delta: delta2, targets: targets2 }) {
   const targetKeys = targets2.map(
@@ -6505,7 +6943,7 @@ function translateEndpoint(endpoint2, delta2) {
 function translateConnector(detail, delta2) {
   const start = translateEndpoint(detail.start, delta2);
   const end2 = translateEndpoint(detail.end, delta2);
-  const bends = detail.bends.map((point2) => translatePoint(point2, delta2));
+  const bends = detail.bends.map((point3) => translatePoint(point3, delta2));
   if (![start.point, end2.point, ...bends].every(
     ({ x, y }) => Number.isFinite(x) && Number.isFinite(y)
   )) {
@@ -6607,8 +7045,8 @@ function connectorAttachmentIds(detail) {
   const ids = [start.attachment?.objectId, end2.attachment?.objectId];
   return [...new Set(ids.filter((id) => id !== void 0))];
 }
-function validEndpoint({ point: point2, attachment }) {
-  return pointInWorld(point2) && (!attachment || validNewObjectId(attachment.objectId));
+function validEndpoint({ point: point3, attachment }) {
+  return pointInWorld(point3) && (!attachment || validNewObjectId(attachment.objectId));
 }
 function hasValidConnectorGeometry(detail) {
   const { start, end: end2, bends, relativeBends, labelOffset } = detail;
@@ -6655,10 +7093,10 @@ function nextDetail(object3, { geometry, connector: connector2 }, transform) {
   return detail;
 }
 function preservesAttachment(before, after) {
-  const { attachment, point: point2 } = before;
+  const { attachment, point: point3 } = before;
   const next = after.attachment;
   const sameTarget = attachment?.objectId === next?.objectId && attachment?.port === next?.port;
-  const samePoint = point2.x === after.point.x && point2.y === after.point.y;
+  const samePoint = point3.x === after.point.x && point3.y === after.point.y;
   return sameTarget && (!attachment || samePoint);
 }
 function preservesConnectorBinding(before, after) {
@@ -6986,11 +7424,11 @@ function validInkPoints(points) {
   }
   const path3 = [];
   for (const value of points) {
-    const point2 = readInkPoint(value);
-    if (!point2) {
+    const point3 = readInkPoint(value);
+    if (!point3) {
       return false;
     }
-    path3.push(point2);
+    path3.push(point3);
   }
   return hasValidEditInk(path3);
 }
@@ -7093,8 +7531,8 @@ function adjacentShapeConnector(source, target2, { sourcePort, targetPort, conne
   if (!first || !second || !last) {
     return void 0;
   }
-  const x = route.points.map((point2) => point2.x);
-  const y = route.points.map((point2) => point2.y);
+  const x = route.points.map((point3) => point3.x);
+  const y = route.points.map((point3) => point3.y);
   const left = Math.min(...x);
   const top = Math.min(...y);
   return {
@@ -7208,8 +7646,8 @@ function checkBlocks(blocks, assets, known) {
     }
     const block = contentRecord(entry.block);
     const id = block?.blockId;
-    const validId2 = typeof id === "string" && contentIdentifier.test(id);
-    if (!block || !validId2) {
+    const validId3 = typeof id === "string" && contentIdentifier.test(id);
+    if (!block || !validId3) {
       return "invalidEdit";
     }
     if (ids.has(id) || !validBlock(block, assets, known)) {
@@ -7283,13 +7721,13 @@ function validText(text3) {
   return text3.length <= maxTodoTextBytes && encoder2.encode(text3).byteLength <= maxTodoTextBytes;
 }
 function sourceData(source) {
-  const { boardId, objectId, blockId, itemId, version: version2 } = source;
+  const { boardId, objectId, blockId, itemId, version: version3 } = source;
   return {
     objectId,
     ...boardId === void 0 ? {} : { boardId },
     ...blockId === void 0 ? {} : { blockId },
     ...itemId === void 0 ? {} : { itemId },
-    ...version2 === void 0 ? {} : { version: version2 }
+    ...version3 === void 0 ? {} : { version: version3 }
   };
 }
 function rowData({ itemId, text: text3, checked, sourceRef }) {
@@ -7309,8 +7747,8 @@ function readRows(value) {
   for (const raw of value) {
     const row = contentRecord(raw);
     const id = row?.itemId;
-    const validId2 = typeof id === "string" && contentIdentifier.test(id);
-    if (!row || !validId2 || ids.has(id)) {
+    const validId3 = typeof id === "string" && contentIdentifier.test(id);
+    if (!row || !validId3 || ids.has(id)) {
       return;
     }
     if (typeof row.text !== "string" || typeof row.checked !== "boolean") {
@@ -7454,9 +7892,9 @@ function validStateLeaf(state, depth) {
   if (Array.isArray(state)) {
     return state.every((entry) => validStateLeaf(entry, depth + 1));
   }
-  const record7 = contentRecord(state);
-  if (record7) {
-    return Object.values(record7).every((entry) => validStateLeaf(entry, depth + 1));
+  const record8 = contentRecord(state);
+  if (record8) {
+    return Object.values(record8).every((entry) => validStateLeaf(entry, depth + 1));
   }
   return typeof state !== "number" || Number.isFinite(state);
 }
@@ -7615,8 +8053,8 @@ function hasSignature(view) {
   if (view.byteLength < screenDescriptorSize || view.getUint32(0) !== 1195984440) {
     return false;
   }
-  const version2 = view.getUint16(4);
-  return version2 === 14177 || version2 === 14689;
+  const version3 = view.getUint16(4);
+  return version3 === 14177 || version3 === 14689;
 }
 function skipSubBlocks(bytes, start) {
   for (let offset2 = start; offset2 < bytes.byteLength; ) {
@@ -7801,10 +8239,10 @@ function safeText(text3, parent) {
     if (decimal2 === void 0 && hex === void 0) {
       return "";
     }
-    const point2 = decimal2 === void 0 ? Number.parseInt(hex ?? "", 16) : Number(decimal2);
-    const whitespace = point2 === 9 || point2 === 10 || point2 === 13;
-    const basic = point2 >= 32 && point2 <= 55295 || point2 >= 57344 && point2 <= 65533;
-    const supplementary = point2 >= 65536 && point2 <= 1114111;
+    const point3 = decimal2 === void 0 ? Number.parseInt(hex ?? "", 16) : Number(decimal2);
+    const whitespace = point3 === 9 || point3 === 10 || point3 === 13;
+    const basic = point3 >= 32 && point3 <= 55295 || point3 >= 57344 && point3 <= 65533;
+    const supplementary = point3 >= 65536 && point3 <= 1114111;
     return whitespace || basic || supplementary ? "" : "&";
   }).includes("&");
 }
@@ -8642,11 +9080,11 @@ function tidyUnits(units) {
   const y = Math.min(...ordered.map((unit) => unit.bounds.y));
   const width = Math.max(...ordered.map((unit) => unit.bounds.width));
   const height = Math.max(...ordered.map((unit) => unit.bounds.height));
-  return ordered.map(({ bounds, ids }, index) => ({
+  return ordered.map(({ bounds: bounds2, ids }, index) => ({
     ids,
     delta: {
-      dx: x + index % columns * (width + gap) + (width - bounds.width) / 2 - bounds.x,
-      dy: y + Math.floor(index / columns) * (height + gap) - bounds.y
+      dx: x + index % columns * (width + gap) + (width - bounds2.width) / 2 - bounds2.x,
+      dy: y + Math.floor(index / columns) * (height + gap) - bounds2.y
     }
   }));
 }
@@ -8658,7 +9096,7 @@ function arrangeSelection(selection, movable, preset) {
     return /* @__PURE__ */ new Map();
   }
   const target2 = selectionFrame(selection);
-  const offsets = preset === "tidy" ? tidyUnits(units) : units.map(({ bounds, ids }) => ({ ids, delta: alignDelta(target2, bounds, preset) }));
+  const offsets = preset === "tidy" ? tidyUnits(units) : units.map(({ bounds: bounds2, ids }) => ({ ids, delta: alignDelta(target2, bounds2, preset) }));
   const result = /* @__PURE__ */ new Map();
   for (const { ids, delta: delta2 } of offsets) {
     if (delta2.dx !== 0 || delta2.dy !== 0) {
@@ -8816,11 +9254,11 @@ function copiedEndpoint(source, translated, resolved, scope2) {
   }
   const copy = scope2.ids.get(attachment.objectId);
   const base = resolved ?? source.point;
-  const point2 = { x: base.x + scope2.delta.dx, y: base.y + scope2.delta.dy };
+  const point3 = { x: base.x + scope2.delta.dx, y: base.y + scope2.delta.dy };
   if (copy !== void 0) {
-    return { point: point2, attachment: { ...attachment, objectId: copy } };
+    return { point: point3, attachment: { ...attachment, objectId: copy } };
   }
-  return scope2.attachableObjects.has(attachment.objectId) ? source : { point: point2 };
+  return scope2.attachableObjects.has(attachment.objectId) ? source : { point: point3 };
 }
 function clipboardObject(source, objectId, scope2) {
   const moved2 = translateObject({ ...source, geometryVersion: 0n }, scope2.delta);
@@ -9025,7 +9463,7 @@ function captureSnapshot(reader2, command, board) {
     return { kind: "rejected", reason: "tooLarge" };
   }
   const geometry = new Map(objects.map((object3) => [object3.objectId, object3]));
-  const selected = selectExportObjects(objects, geometry, command.scope);
+  const selected = command.rectangle ? selectExportRectangle(objects, geometry, command.rectangle) : selectExportObjects(objects, geometry, command.scope);
   if ("kind" in selected) {
     return selected;
   }
@@ -9275,20 +9713,20 @@ function requireOwner(reader2, actor, boardId) {
   return metadata;
 }
 function numericVersion(value) {
-  const version2 = Number(value);
-  if (!Number.isSafeInteger(version2) || version2 < 0) {
+  const version3 = Number(value);
+  if (!Number.isSafeInteger(version3) || version3 < 0) {
     throw new BackupError("unsupported");
   }
-  return version2;
+  return version3;
 }
-function artifact(board, metadata, formatTime, version2) {
+function artifact(board, metadata, formatTime, version3) {
   return {
     id: board.boardId,
-    title: version2?.title ?? board.title,
+    title: version3?.title ?? board.title,
     type: "whiteboard",
-    revision: numericVersion(version2?.revision ?? board.revision),
+    revision: numericVersion(version3?.revision ?? board.revision),
     createdAt: formatTime(metadata.createdAtMillis ?? metadata.updatedAtMillis),
-    updatedAt: formatTime(version2?.savedAtMillis ?? metadata.updatedAtMillis),
+    updatedAt: formatTime(version3?.savedAtMillis ?? metadata.updatedAtMillis),
     pinned: metadata.pinned,
     sharing: false
   };
@@ -9297,8 +9735,8 @@ var lifecycleSummaries = {
   trash: "\u79FB\u5165\u56DE\u6536\u7AD9",
   restoreTrash: "\u6062\u590D\u4F5C\u54C1"
 };
-function historyEntry(version2, actor, metadata, formatTime, changedIds) {
-  const { actorId: actorId2, revision, savedAtMillis, kind, sourceRevision, changedObjectCount } = version2;
+function historyEntry(version3, actor, metadata, formatTime, changedIds) {
+  const { actorId: actorId2, revision, savedAtMillis, kind, sourceRevision, changedObjectCount } = version3;
   const lifecycleKind = kind === "trash" || kind === "restoreTrash" ? kind : void 0;
   return {
     id: "revision-" + revision,
@@ -9435,13 +9873,13 @@ function capture(reader2, actor, command, formatTime, ownerName) {
   const elements2 = builder.elements(reader2.listObjects(boardId, maxObjects + 1));
   const details = reader2.getBackupDetails?.(boardId);
   const authors = /* @__PURE__ */ new Map();
-  function author(id, role, name) {
+  function author(id, role, name, kind) {
     const known = authors.get(id) ?? details?.actors.get(id);
     const ownerFallback = id === actor.id && (!known || known.name === id || known.name === "\u6211");
     const profile = {
       id,
       name: name ?? (ownerFallback ? ownerName : void 0) ?? known?.name ?? id,
-      kind: known?.kind ?? "human",
+      kind: known?.kind ?? kind ?? "human",
       role: known?.role ?? role
     };
     authors.set(id, profile);
@@ -9452,28 +9890,30 @@ function capture(reader2, actor, command, formatTime, ownerName) {
     versions.push(reader2.getVersion(boardId, board.revision) ?? currentVersion(board));
   }
   let previous;
-  const history = versions.slice(-maxVersions).map((version2) => {
-    const scene = version2.revision === board.revision ? elements2 : builder.elements(reader2.listVersionObjects(boardId, version2.revision), version2.revision);
+  const history = versions.slice(-maxVersions).map((version3) => {
+    const scene = version3.revision === board.revision ? elements2 : builder.elements(reader2.listVersionObjects(boardId, version3.revision), version3.revision);
     const changedIds = previous ? changedObjectIds(previous, scene) : [];
     previous = scene;
     return {
       entry: historyEntry(
-        version2,
+        version3,
         author(
-          version2.actorId ?? actor.id,
-          !version2.actorId || version2.actorId === actor.id ? "owner" : "editor"
+          version3.actorId ?? actor.id,
+          !version3.actorId || version3.actorId === actor.id ? "owner" : "editor",
+          version3.actorName,
+          version3.actorKind
         ),
         metadata,
         formatTime,
         changedIds
       ),
-      artifact: artifact(board, metadata, formatTime, version2),
+      artifact: artifact(board, metadata, formatTime, version3),
       elements: scene
     };
   });
   const feedback = details?.feedback ?? { threads: [], messages: [], contentAnchors: [] };
   const historyElements = new Map(
-    history.map((version2) => [String(version2.entry.revision), version2.elements])
+    history.map((version3) => [String(version3.entry.revision), version3.elements])
   );
   const legacyFeedback = legacyBackupFeedback(
     boardId,
@@ -9559,8 +9999,10 @@ function runBoardEdit(repository, actor, identity, request, plan) {
 }
 function runBoardEditInTransaction(writer2, actor, identity, request, plan) {
   const { boardId, commandId } = identity;
-  const access = writer2.getAccess(boardId, actor.id);
-  const board = access?.canEdit ? writer2.getBoard(boardId) : void 0;
+  const { ownerActorId } = request;
+  const access = writer2.getAccess(boardId, ownerActorId ?? actor.id);
+  const canEdit = access?.canEdit && (ownerActorId === void 0 || access.isOwner);
+  const board = canEdit ? writer2.getBoard(boardId) : void 0;
   if (!board) {
     return rejected3(identity, "forbidden");
   }
@@ -9575,8 +10017,14 @@ function runBoardEditInTransaction(writer2, actor, identity, request, plan) {
   if (!canAdvanceVersion(board.revision)) {
     return rejected3(identity, "invalidEdit");
   }
-  const { signature, ...details } = request;
-  const applied2 = writer2.applyBoardChanges(board, decision, { ...details, actorId: actor.id });
+  const { signature, kind, savedAtMillis, sourceRevision } = request;
+  const applied2 = writer2.applyBoardChanges(board, decision, {
+    kind,
+    savedAtMillis,
+    sourceRevision,
+    actorId: actor.id,
+    actorKind: ownerActorId === void 0 ? void 0 : "agent"
+  });
   const advancedRevision = applied2.boardRevision > board.revision;
   const outcome = advancedRevision ? applied2 : { ...applied2, order: void 0 };
   const receipt = { ...identity, outcome };
@@ -9589,10 +10037,11 @@ function readBoardEditReceipt(repository, actor, identity) {
     (reader2) => reader2.getAccess(boardId, actor.id)?.canEdit ? reader2.getEditReceipt(boardId, actor.id, commandId)?.receipt : rejected3(identity, "forbidden")
   );
 }
-function checkBoardEditBeforePreparation(repository, actor, identity, signature) {
+function checkBoardEditBeforePreparation(repository, actor, identity, signature, ownerActorId) {
   const { boardId, commandId } = identity;
   return repository.read((reader2) => {
-    if (!reader2.getAccess(boardId, actor.id)?.canEdit) {
+    const access = reader2.getAccess(boardId, ownerActorId ?? actor.id);
+    if (!access?.canEdit || ownerActorId !== void 0 && !access.isOwner) {
       return rejected3(identity, "forbidden");
     }
     const stored = reader2.getEditReceipt(boardId, actor.id, commandId);
@@ -9614,6 +10063,22 @@ function readArchivedSvgImage(content) {
   }
   const bytes = encodeSafeSvgImage(svg, maximumBoardImageBytes);
   return bytes.byteLength <= maximumBoardImageBytes ? bytes : void 0;
+}
+async function prepareBoardAsset(boardId, assetId, content, validateUploadedSvg) {
+  let vector;
+  if (looksLikeSvgImage(content)) {
+    vector = readSafeSvgImage(content);
+    if (!vector || !await validateUploadedSvg(vector.markup)) {
+      return void 0;
+    }
+  }
+  const image = planDocumentImageAsset(boardId, assetId, content, vector);
+  if (image.kind === "changes") {
+    const [{ mimeType: mimeType2, bytes }] = image.assets;
+    return { mimeType: mimeType2, bytes };
+  }
+  const mimeType = inspectVideo(content);
+  return mimeType ? { mimeType, bytes: content } : void 0;
 }
 function createImageEdit(repository, now, validateUploadedSvg) {
   return async function editImage(actor, command, plan) {
@@ -10559,8 +11024,8 @@ function hasBlock(blocks, blockId) {
   }
   return false;
 }
-function validSourceVersion(version2) {
-  return version2 === void 0 || sourceVersionPattern2.test(version2) && BigInt(version2) <= maxSourceVersion;
+function validSourceVersion(version3) {
+  return version3 === void 0 || sourceVersionPattern2.test(version3) && BigInt(version3) <= maxSourceVersion;
 }
 function optionalStableId(value) {
   return value === void 0 || stableId.test(value);
@@ -10580,14 +11045,14 @@ function resolveSourceLocation(writer2, boardId, { objectId, blockId, itemId }) 
   return payload.bodyKind === "todo" && Array.isArray(items) && items.some((row) => isRecord(row) && row.itemId === itemId);
 }
 function validTodoSource(writer2, boardId, source) {
-  const { boardId: owner, objectId, blockId, itemId, version: version2 } = source;
+  const { boardId: owner, objectId, blockId, itemId, version: version3 } = source;
   const sameBoard = owner === void 0 || owner === boardId;
   const validIds2 = [objectId, blockId, itemId].every(optionalStableId);
   const unambiguous = blockId === void 0 || itemId === void 0;
   if (!sameBoard || !validIds2 || !unambiguous) {
     return false;
   }
-  if (!validSourceVersion(version2)) {
+  if (!validSourceVersion(version3)) {
     return false;
   }
   return resolveSourceLocation(writer2, boardId, source);
@@ -10853,15 +11318,18 @@ function geometryTargets(operation) {
   }
 }
 function operationFitsSource(request, sourceIds) {
+  return scopedOperationTargets(request)?.every((id) => sourceIds.has(id)) === true;
+}
+function scopedOperationTargets(request) {
   if (request.kind === "content") {
-    return sourceIds.has(request.operation.objectId);
+    return [request.operation.objectId];
   }
   const operation = request.operation;
   const writesPalette = operation.kind === "removeCustomColor" || operation.kind === "style" && operation.rememberColor !== void 0;
   if (operation.kind === "paste" || writesPalette) {
-    return false;
+    return void 0;
   }
-  return geometryTargets(operation).every((id) => sourceIds.has(id));
+  return geometryTargets(operation);
 }
 function planSuggestion(reader2, board, request) {
   return request.kind === "geometry" ? planGeometryEdit(reader2, board, request.operation) : planContentEdit(reader2, board, request.operation);
@@ -10880,12 +11348,17 @@ function suggestionWrittenIds(changes) {
 function changesFitSource(changes, sourceIds) {
   return suggestionWrittenIds(changes).every((id) => sourceIds.has(id));
 }
-function planScopedSuggestion(reader2, board, request, sourceIds) {
+function planScopedSuggestion(reader2, board, request, sourceIds, authorizeChanges) {
   if (!operationFitsSource(request, sourceIds)) {
     return { kind: "rejected", reason: "forbidden" };
   }
   const decision = planSuggestion(reader2, board, request);
-  if (decision.kind === "changes" && !changesFitSource(decision, sourceIds)) {
+  if (decision.kind !== "changes") {
+    return decision;
+  }
+  const withinSource = changesFitSource(decision, sourceIds);
+  const authorized = authorizeChanges?.(reader2, decision);
+  if (!withinSource || authorized === false) {
     return { kind: "rejected", reason: "forbidden" };
   }
   return decision;
@@ -10898,13 +11371,25 @@ function changeFingerprint(changes, digest2) {
     )
   );
 }
-function planSuggestionOption(reader2, board, option, sourceIds, decodeEdit2) {
+function planSuggestionOption(reader2, board, option, sourceIds, decodeEdit2, authorizeChanges) {
   if (!option.additionalEdits?.length) {
-    return planScopedSuggestion(reader2, board, decodeEdit2(option.edit), sourceIds);
+    return planScopedSuggestion(
+      reader2,
+      board,
+      decodeEdit2(option.edit),
+      sourceIds,
+      authorizeChanges
+    );
   }
   const staged = createSuggestionOverlay(reader2, board.boardId, true);
   for (const edit of [option.edit, ...option.additionalEdits]) {
-    const decision = planScopedSuggestion(staged.reader, board, decodeEdit2(edit), sourceIds);
+    const decision = planScopedSuggestion(
+      staged.reader,
+      board,
+      decodeEdit2(edit),
+      sourceIds,
+      authorizeChanges
+    );
     if (decision.kind !== "changes") {
       return decision;
     }
@@ -10962,6 +11447,194 @@ function planDraftOptions(reader2, board, options, sourceIds, decodeEdit2, diges
   });
 }
 
+// src/modules/whiteboard/application/agent-board-write-scope.ts
+function agentWriteBounds({ x, y, width, height, rotation }) {
+  const angle = rotation * Math.PI / 180;
+  const sine = Math.abs(Math.sin(angle));
+  const cosine = Math.abs(Math.cos(angle));
+  const wrappedWidth = Math.max(1, cosine * width + sine * height);
+  const wrappedHeight = Math.max(1, sine * width + cosine * height);
+  return {
+    x: x + (width - wrappedWidth) / 2,
+    y: y + (height - wrappedHeight) / 2,
+    width: wrappedWidth,
+    height: wrappedHeight
+  };
+}
+function contained(outer, inner) {
+  const epsilon2 = 1e-6;
+  const fitsX = inner.x >= outer.x - epsilon2 && inner.x + inner.width <= outer.x + outer.width + epsilon2;
+  const fitsY = inner.y >= outer.y - epsilon2 && inner.y + inner.height <= outer.y + outer.height + epsilon2;
+  return fitsX && fitsY;
+}
+function overlaps(left, right) {
+  const crossesX = left.x < right.x + right.width && right.x < left.x + left.width;
+  const crossesY = left.y < right.y + right.height && right.y < left.y + left.height;
+  return crossesX && crossesY;
+}
+function footprint(reader2, boardId, scope2) {
+  return scope2.kind === "area" ? { ids: /* @__PURE__ */ new Set(), areas: [scope2.bounds] } : {
+    ids: new Set(scope2.objectIds),
+    areas: reader2.getObjects(boardId, scope2.objectIds).map(({ geometry }) => agentWriteBounds(geometry))
+  };
+}
+function agentWorkspacesDisjoint(reader2, boardId, target2, workspaces) {
+  const current = footprint(reader2, boardId, target2.scope);
+  return workspaces.every((workspace) => {
+    if (workspace === target2) {
+      return true;
+    }
+    const other = footprint(reader2, boardId, workspace.scope);
+    const sharedObject = [...other.ids].some((id) => current.ids.has(id));
+    const overlapsArea = current.areas.some(
+      (area) => other.areas.some((bound) => overlaps(bound, area))
+    );
+    return !sharedObject && !overlapsArea;
+  });
+}
+function ownsObject(scope2, object3) {
+  return scope2.kind === "objects" ? scope2.objectIds.includes(object3.objectId) : contained(scope2.bounds, agentWriteBounds(object3.geometry));
+}
+function agentOwnsTargets(reader2, boardId, scope2, ids) {
+  if (scope2.kind === "objects") {
+    return ids.every((id) => scope2.objectIds.includes(id));
+  }
+  const unique2 = [...new Set(ids)];
+  const objects = reader2.getObjects(boardId, unique2);
+  return objects.length === unique2.length && objects.every((object3) => ownsObject(scope2, object3));
+}
+function reorderedIds(reader2, boardId, order) {
+  if (!order) {
+    return [];
+  }
+  const current = reader2.listObjects(boardId).map(({ objectId }) => objectId);
+  const currentSet = new Set(current);
+  const incomingSet = new Set(order);
+  const before = current.filter((id) => incomingSet.has(id));
+  const after = order.filter((id) => currentSet.has(id));
+  return after.filter((id, index) => before[index] !== id);
+}
+function changedPosition(before, after) {
+  if (!before) {
+    return false;
+  }
+  if (!after) {
+    return true;
+  }
+  const left = before.geometry;
+  const right = after.geometry;
+  const moved2 = left.x !== right.x || left.y !== right.y;
+  const sized = left.width !== right.width || left.height !== right.height;
+  const reshaped = before.detail?.kind === "shape" && after.detail?.kind === "shape" && before.detail.outline !== after.detail.outline;
+  const geometryChanged = moved2 || sized || left.rotation !== right.rotation;
+  return geometryChanged || reshaped;
+}
+function ownsChangedReferences(reader2, boardId, scope2, before, after, changed) {
+  const { parentId, groupId } = after;
+  if (parentId && before?.parentId !== parentId) {
+    const parent = changed.get(parentId) ?? reader2.getObjects(boardId, [parentId])[0];
+    if (!parent || !ownsObject(scope2, parent)) {
+      return false;
+    }
+  }
+  return !groupId || before?.groupId === groupId || reader2.listGroupObjects(boardId, groupId).every((object3) => ownsObject(scope2, changed.get(object3.objectId) ?? object3));
+}
+function agentOwnsChanges(reader2, boardId, scope2, changes) {
+  if (changes.customColors || changes.assets?.length) {
+    return false;
+  }
+  const affected = [
+    ...suggestionWrittenIds(changes),
+    ...reorderedIds(reader2, boardId, changes.order)
+  ];
+  const current = new Map(
+    reader2.getObjects(boardId, affected).map((object3) => [object3.objectId, object3])
+  );
+  const changed = new Map((changes.objects ?? []).map((object3) => [object3.objectId, object3]));
+  const removed = new Set(changes.removedObjectIds);
+  const moved2 = [...current.keys()].filter(
+    (id) => changedPosition(
+      current.get(id),
+      removed.has(id) ? void 0 : changed.get(id) ?? current.get(id)
+    )
+  );
+  const connectors = moved2.length ? reader2.listRelatedConnectors(boardId, moved2) : [];
+  if (connectors.some((line) => !ownsObject(scope2, line))) {
+    return false;
+  }
+  return affected.every((id) => {
+    const before = current.get(id);
+    const after = changed.get(id);
+    const outsideBefore = before && !ownsObject(scope2, before);
+    const outsideAfter = after && !ownsObject(scope2, after);
+    const missing = !before && !after;
+    if (outsideBefore || outsideAfter || missing) {
+      return false;
+    }
+    return !after || ownsChangedReferences(reader2, boardId, scope2, before, after, changed);
+  });
+}
+
+// src/modules/whiteboard/application/agent-board-write.ts
+var maximumAgentBoardWriteOperations = 60;
+var forbidden = { kind: "rejected", reason: "forbidden" };
+function targetWorkspace({ agentId, taskId, generation }, workspaces) {
+  return workspaces.find(
+    (task) => task.agentId === agentId && task.taskId === taskId && task.generation === generation
+  );
+}
+function planWrites(reader2, board, command, workspaces) {
+  const target2 = targetWorkspace(command, workspaces);
+  if (!target2 || !agentWorkspacesDisjoint(reader2, board.boardId, target2, workspaces)) {
+    return forbidden;
+  }
+  if (!command.operations.length || command.operations.length > maximumAgentBoardWriteOperations) {
+    return { kind: "rejected", reason: "invalidEdit" };
+  }
+  const { boardId } = board;
+  const { scope: scope2 } = target2;
+  const staged = createSuggestionOverlay(reader2, boardId, true);
+  for (const operation of command.operations) {
+    const targets2 = scopedOperationTargets(operation);
+    if (!targets2 || !agentOwnsTargets(staged.reader, boardId, scope2, targets2)) {
+      return forbidden;
+    }
+    const next = planSuggestion(staged.reader, board, operation);
+    if (next.kind !== "changes") {
+      return next;
+    }
+    if (!agentOwnsChanges(staged.reader, boardId, scope2, next)) {
+      return forbidden;
+    }
+    staged.stage(next);
+  }
+  return agentWorkspacesDisjoint(staged.reader, boardId, target2, workspaces) ? staged.changes() : forbidden;
+}
+function createBoardAgentWriteApplication(repository, { now, resolveWorkspaces }) {
+  return {
+    getReceipt(ownerId, { boardId, commandId, agentId, signature }) {
+      return checkBoardEditBeforePreparation(
+        repository,
+        { id: agentId },
+        { boardId, commandId },
+        signature,
+        ownerId
+      );
+    },
+    apply(ownerActorId, command) {
+      const { boardId, commandId, agentId, signature } = command;
+      const kind = command.operations.some(({ kind: kind2 }) => kind2 === "geometry") ? "geometry" : "content";
+      return runBoardEdit(
+        repository,
+        { id: agentId },
+        { boardId, commandId },
+        { kind, signature, savedAtMillis: now(), ownerActorId },
+        (reader2, board) => planWrites(reader2, board, command, resolveWorkspaces(boardId, ownerActorId))
+      );
+    }
+  };
+}
+
 // src/modules/whiteboard/application/board-suggestion-review.ts
 var noReview = { applications: [], objectClocks: [] };
 var unavailableVersion = {
@@ -10985,19 +11658,19 @@ function suggestionFootprint(changes) {
     payloadIds: [...new Set(payloadIds)]
   };
 }
-function readSnapshot(reader2, boardId, footprint) {
-  const objects = reader2.getObjects(boardId, footprint.objectIds);
+function readSnapshot(reader2, boardId, footprint2) {
+  const objects = reader2.getObjects(boardId, footprint2.objectIds);
   const found = new Set(objects.map(({ objectId }) => objectId));
-  const payloadIds = footprint.payloadIds ?? [];
+  const payloadIds = footprint2.payloadIds ?? [];
   const payloads = reader2.getPayloads(boardId, payloadIds);
   const loadedPayloads = new Set(payloads.map(({ objectId }) => objectId));
   return {
     kind: "changes",
     objects,
     payloads,
-    removedObjectIds: footprint.objectIds.filter((id) => !found.has(id)),
+    removedObjectIds: footprint2.objectIds.filter((id) => !found.has(id)),
     removedPayloadObjectIds: payloadIds.filter((id) => found.has(id) && !loadedPayloads.has(id)),
-    order: footprint.editsOrder ? reader2.listObjects(boardId).map(({ objectId }) => objectId) : void 0
+    order: footprint2.editsOrder ? reader2.listObjects(boardId).map(({ objectId }) => objectId) : void 0
   };
 }
 function scopesOverlap(left, right) {
@@ -11160,7 +11833,7 @@ function undoChangesLockedGeometry(reader2, boardId, application) {
   });
 }
 function reviewBoardRevision(board, state, reversed) {
-  const matching = reversed.find(({ footprint }) => footprint.editsOrder);
+  const matching = reversed.find(({ footprint: footprint2 }) => footprint2.editsOrder);
   return matching?.baselineBoardRevision ?? clockOf(board.revision, state.boardClock);
 }
 function prepareSuggestionDecision({
@@ -11170,7 +11843,8 @@ function prepareSuggestionDecision({
   choice,
   decodeEdit: decodeEdit2,
   digest: digest2,
-  applying
+  applying,
+  authorizeChanges
 }) {
   const option = proposal.options.find(({ optionId }) => optionId === choice.optionId);
   if (!option) {
@@ -11187,12 +11861,21 @@ function prepareSuggestionDecision({
     return { decision: { kind: "rejected", reason: "forbidden" } };
   }
   return prepareFromSource(
-    { reader: reader2, board, proposal, choice, decodeEdit: decodeEdit2, digest: digest2, applying },
+    { reader: reader2, board, proposal, choice, decodeEdit: decodeEdit2, digest: digest2, applying, authorizeChanges },
     new Set(source.objectIds),
     option
   );
 }
-function prepareFromSource({ reader: reader2, board, proposal, choice, decodeEdit: decodeEdit2, digest: digest2, applying }, sourceIds, option) {
+function prepareFromSource({
+  reader: reader2,
+  board,
+  proposal,
+  choice,
+  decodeEdit: decodeEdit2,
+  digest: digest2,
+  applying,
+  authorizeChanges
+}, sourceIds, option) {
   if (proposal.acceptedOptionId && !proposal.reviewState) {
     return unavailableVersion;
   }
@@ -11202,12 +11885,12 @@ function prepareFromSource({ reader: reader2, board, proposal, choice, decodeEdi
     return { decision: { kind: "changes" } };
   }
   const reversed = selected ? [selected] : state.applications.filter(
-    ({ footprint }) => !option.footprint || scopesOverlap(footprint, option.footprint)
+    ({ footprint: footprint2 }) => !option.footprint || scopesOverlap(footprint2, option.footprint)
   );
   if (reversed.some((application) => !stillOwnsUndo(reader2, board, application, digest2))) {
     return conflict3(board.revision);
   }
-  if (reversed.some(({ footprint }) => footprint.objectIds.some((id) => !sourceIds.has(id)))) {
+  if (reversed.some(({ footprint: footprint2 }) => footprint2.objectIds.some((id) => !sourceIds.has(id)))) {
     return { decision: { kind: "rejected", reason: "forbidden" } };
   }
   if (reversed.some((application) => undoChangesLockedGeometry(reader2, board.boardId, application))) {
@@ -11219,6 +11902,9 @@ function prepareFromSource({ reader: reader2, board, proposal, choice, decodeEdi
     false
   );
   for (const application of reversed) {
+    if (authorizeChanges?.(working.reader, application.inverse) === false) {
+      return { decision: { kind: "rejected", reason: "forbidden" } };
+    }
     working.stage(application.inverse);
   }
   const logicalRevision = reviewBoardRevision(board, state, reversed);
@@ -11236,20 +11922,21 @@ function prepareFromSource({ reader: reader2, board, proposal, choice, decodeEdi
     };
   }
   return prepareCandidate(
-    { reader: reader2, board, proposal, choice, decodeEdit: decodeEdit2, digest: digest2, applying },
+    { reader: reader2, board, proposal, choice, decodeEdit: decodeEdit2, digest: digest2, applying, authorizeChanges },
     sourceIds,
     option,
     { working, state, reversed, logicalRevision, restored }
   );
 }
-function prepareCandidate({ reader: reader2, board, choice, decodeEdit: decodeEdit2, digest: digest2 }, sourceIds, option, { working, state, reversed, logicalRevision, restored }) {
+function prepareCandidate({ reader: reader2, board, choice, decodeEdit: decodeEdit2, digest: digest2, authorizeChanges }, sourceIds, option, { working, state, reversed, logicalRevision, restored }) {
   const logicalBoard = { ...board, revision: logicalRevision };
   const decision = planSuggestionOption(
     working.reader,
     logicalBoard,
     option,
     sourceIds,
-    decodeEdit2
+    decodeEdit2,
+    authorizeChanges
   );
   if (decision.kind !== "changes") {
     return { decision };
@@ -11257,8 +11944,8 @@ function prepareCandidate({ reader: reader2, board, choice, decodeEdit: decodeEd
   if (changeFingerprint(decision, digest2) !== option.plannedFingerprint) {
     return conflict3(board.revision);
   }
-  const footprint = suggestionFootprint(decision);
-  const inverse = readSnapshot(working.reader, board.boardId, footprint);
+  const footprint2 = suggestionFootprint(decision);
+  const inverse = readSnapshot(working.reader, board.boardId, footprint2);
   working.stage(decision);
   const carriesLogicalClocks = state.objectClocks.length > 0 || reversed.length > 0;
   const logical = reversed.length ? working.changes() : decision;
@@ -11268,7 +11955,7 @@ function prepareCandidate({ reader: reader2, board, choice, decodeEdit: decodeEd
       return object3.geometryVersion !== before?.geometryVersion;
     }).map(({ objectId }) => objectId)
   );
-  const selectedPayloads = new Set(footprint.payloadIds);
+  const selectedPayloads = new Set(footprint2.payloadIds);
   return {
     decision: carriesLogicalClocks ? materialize(reader2, board, logical) : decision,
     review: {
@@ -11277,12 +11964,12 @@ function prepareCandidate({ reader: reader2, board, choice, decodeEdit: decodeEd
       application: {
         optionId: choice.optionId,
         baselineBoardRevision: logicalRevision,
-        footprint,
+        footprint: footprint2,
         inverse
       },
       restoredObjects: restored.objects?.filter(({ objectId }) => !selectedGeometry.has(objectId)) ?? [],
       restoredPayloads: restored.payloads?.filter(({ objectId }) => !selectedPayloads.has(objectId)) ?? [],
-      restoredBoardRevision: !footprint.editsOrder && restored.order ? logicalRevision : void 0
+      restoredBoardRevision: !footprint2.editsOrder && restored.order ? logicalRevision : void 0
     }
   };
 }
@@ -11408,7 +12095,7 @@ function captureSource(writer2, board, actor, request, sourceId, frozen) {
     if (!frozen) {
       throw new BoardSuggestionError(404, "\u8FD9\u6761\u6279\u6CE8\u5DF2\u4E0D\u5B58\u5728\u3002");
     }
-    const objectIds2 = frozen.objectId ? [frozen.objectId] : [];
+    const objectIds2 = frozen.objectIds ?? (frozen.objectId ? [frozen.objectId] : []);
     return {
       boardId: board.boardId,
       sourceId,
@@ -11459,7 +12146,7 @@ function rejectPending(writer2, request, now) {
   }
   return { ...proposal, proposalVersion: proposal.proposalVersion + 1n, rejected: true };
 }
-function reviewChoice(reader2, board, proposed, choice, decodeEdit2, time, digest2, applying) {
+function reviewChoice(reader2, board, proposed, choice, decodeEdit2, time, digest2, applying, authorizeChanges) {
   if (!proposed || proposed.expiresAtMillis <= BigInt(time)) {
     return { decision: { kind: "rejected", reason: "versionUnavailable" } };
   }
@@ -11470,21 +12157,47 @@ function reviewChoice(reader2, board, proposed, choice, decodeEdit2, time, diges
     choice,
     decodeEdit: decodeEdit2,
     digest: digest2,
-    applying
+    applying,
+    authorizeChanges
   });
 }
-function acceptPending(writer2, actor, request, decodeEdit2, timeMillis, digest2) {
-  const board = requireOwner2(writer2, actor, request.boardId, "human");
+function authorizeAgentChoice(reader2, { boardId, agentId, generation, taskId }, workspaces) {
+  const active = workspaces.find(
+    (workspace) => workspace.agentId === agentId && workspace.generation === generation && workspace.taskId === taskId
+  );
+  if (!active || !agentWorkspacesDisjoint(reader2, boardId, active, workspaces)) {
+    return void 0;
+  }
+  return (stagedReader, changes) => {
+    if (!agentOwnsChanges(stagedReader, boardId, active.scope, changes)) {
+      return false;
+    }
+    const projected = createSuggestionOverlay(stagedReader, boardId, false);
+    projected.stage(changes);
+    return agentWorkspacesDisjoint(projected.reader, boardId, active, workspaces);
+  };
+}
+function acceptPending(writer2, actor, request, decodeEdit2, timeMillis, digest2, agent) {
+  const board = requireOwner2(writer2, actor, request.boardId, agent ? "agent" : "human");
   const { boardId, commandId, signature, proposalId, optionId } = request;
   const proposal = writer2.getSuggestion(boardId, proposalId);
   const option = proposal?.options.find((entry) => entry.optionId === optionId);
   let review;
   const edit = runBoardEditInTransaction(
     writer2,
-    actor,
+    agent ? { id: agent.agentId } : actor,
     { boardId, commandId },
-    { signature, savedAtMillis: timeMillis, kind: option?.edit.kind ?? "geometry" },
+    {
+      signature,
+      savedAtMillis: timeMillis,
+      kind: option?.edit.kind ?? "geometry",
+      ownerActorId: agent ? actor.id : void 0
+    },
     () => {
+      const authorize = agent?.authorize(writer2);
+      if (agent && !authorize) {
+        return { kind: "rejected", reason: "forbidden" };
+      }
       const prepared = reviewChoice(
         writer2,
         board,
@@ -11493,8 +12206,12 @@ function acceptPending(writer2, actor, request, decodeEdit2, timeMillis, digest2
         decodeEdit2,
         timeMillis,
         digest2,
-        true
+        true,
+        authorize
       );
+      if (prepared.decision.kind === "changes" && authorize?.(writer2, prepared.decision) === false) {
+        return { kind: "rejected", reason: "forbidden" };
+      }
       review = prepared.review;
       return prepared.decision;
     }
@@ -11518,7 +12235,23 @@ function acceptPending(writer2, actor, request, decodeEdit2, timeMillis, digest2
   }
   return { receipt: edit, changed: review !== void 0 && edit.outcome.kind === "applied" };
 }
-function createBoardSuggestionApplication(repository, { now, newId, digest: digest2, readFeedbackSource, onChanged }) {
+function createBoardSuggestionApplication(repository, {
+  now,
+  newId,
+  digest: digest2,
+  readFeedbackSource,
+  onChanged,
+  resolveAgentWorkspaces
+}) {
+  function choose(actor, request, decodeEdit2, agent) {
+    const { receipt, changed } = repository.write(
+      (writer2) => acceptPending(writer2, actor, request, decodeEdit2, now(), digest2, agent)
+    );
+    if (changed) {
+      onChanged?.(request.boardId);
+    }
+    return receipt;
+  }
   return {
     createSource(actor, request) {
       const frozen = attachedFeedback(repository, actor, request, readFeedbackSource);
@@ -11608,13 +12341,17 @@ function createBoardSuggestionApplication(repository, { now, newId, digest: dige
       });
     },
     accept(actor, request, decodeEdit2) {
-      const { receipt, changed } = repository.write(
-        (writer2) => acceptPending(writer2, actor, request, decodeEdit2, now(), digest2)
-      );
-      if (changed) {
-        onChanged?.(request.boardId);
-      }
-      return receipt;
+      return choose(actor, request, decodeEdit2);
+    },
+    acceptAgent(actor, request, decodeEdit2) {
+      return choose(actor, request, decodeEdit2, {
+        agentId: request.agentId,
+        authorize: (reader2) => authorizeAgentChoice(
+          reader2,
+          request,
+          resolveAgentWorkspaces?.(request.boardId, actor.id) ?? []
+        )
+      });
     },
     reject(actor, request) {
       let changed = false;
@@ -11721,9 +12458,9 @@ function rebindAssets(value, resolve, depth = 0) {
   if (Array.isArray(value)) {
     return value.map((entry) => rebindAssets(entry, resolve, depth + 1));
   }
-  const record7 = propertyValue(value);
-  return record7 ? Object.fromEntries(
-    Object.entries(record7).map(([key, child3]) => [
+  const record8 = propertyValue(value);
+  return record8 ? Object.fromEntries(
+    Object.entries(record8).map(([key, child3]) => [
       key,
       rebindAssets(child3, resolve, depth + 1)
     ])
@@ -11736,14 +12473,14 @@ function rebindMediaFields(value, resolve, depth = 0) {
   if (Array.isArray(value)) {
     return value.map((entry) => rebindMediaFields(entry, resolve, depth + 1));
   }
-  const record7 = propertyValue(value);
-  if (!record7) {
+  const record8 = propertyValue(value);
+  if (!record8) {
     return value;
   }
   return Object.fromEntries(
-    Object.entries(record7).map(([key, child3]) => {
-      const reference = typeof child3 === "string" && uriFields.has(key) && child3.startsWith(assetPrefix3);
-      return [key, reference ? resolve(child3) : rebindMediaFields(child3, resolve, depth + 1)];
+    Object.entries(record8).map(([key, child3]) => {
+      const reference2 = typeof child3 === "string" && uriFields.has(key) && child3.startsWith(assetPrefix3);
+      return [key, reference2 ? resolve(child3) : rebindMediaFields(child3, resolve, depth + 1)];
     })
   );
 }
@@ -11826,11 +12563,11 @@ function rejected4(reason) {
   return { kind: "rejected", reason };
 }
 function currentSourceReader(writer2, { sourceBoardId, sourceRevision }, current) {
-  const version2 = current ? void 0 : sourceRevision;
+  const version3 = current ? void 0 : sourceRevision;
   return {
     objects: (ids) => current ? writer2.getObjects(sourceBoardId, ids) : writer2.listVersionObjects(sourceBoardId, sourceRevision, ids),
     payloads: (ids) => current ? writer2.getPayloads(sourceBoardId, ids) : writer2.getVersionPayloads(sourceBoardId, sourceRevision, ids),
-    bytes: (ids) => writer2.payloadByteSize?.(sourceBoardId, ids, version2) ?? 0n
+    bytes: (ids) => writer2.payloadByteSize?.(sourceBoardId, ids, version3) ?? 0n
   };
 }
 function clipboardAttachments(objects) {
@@ -12186,7 +12923,7 @@ function changesLockedPayload(object3, current, saved) {
 }
 function advanceVersion(revision, ...versions) {
   const latest = versions.reduce(
-    (maximum, version2) => version2 !== void 0 && version2 > maximum ? version2 : maximum,
+    (maximum, version3) => version3 !== void 0 && version3 > maximum ? version3 : maximum,
     revision
   );
   return canAdvanceVersion(latest) ? latest + 1n : void 0;
@@ -12212,8 +12949,8 @@ function planRestoredPayload(context, before, source) {
   if (!saved) {
     return { changed: true };
   }
-  const version2 = advanceVersion(context.revision, previousVersion, saved.payloadVersion);
-  return version2 === void 0 ? { kind: "rejected", reason: "invalidEdit" } : { changed: true, version: version2, row: { ...saved, payloadVersion: version2 } };
+  const version3 = advanceVersion(context.revision, previousVersion, saved.payloadVersion);
+  return version3 === void 0 ? { kind: "rejected", reason: "invalidEdit" } : { changed: true, version: version3, row: { ...saved, payloadVersion: version3 } };
 }
 function restoredObject(context, source, delta2) {
   const { objectId } = source;
@@ -12341,9 +13078,9 @@ function nextObjectClock(revision, ...clocks) {
   );
   return canAdvanceVersion(latest) ? latest + 1n : void 0;
 }
-function reverseFields(current, expected, desired, fields) {
+function reverseFields(current, expected, desired, fields2) {
   const changes = {};
-  for (const field of fields) {
+  for (const field of fields2) {
     if (sameReversalValue(expected[field], desired[field])) {
       continue;
     }
@@ -12355,17 +13092,17 @@ function reverseFields(current, expected, desired, fields) {
   return changes;
 }
 function reverseObjectFields(current, expected, desired) {
-  const fields = reverseFields(current, expected, desired, objectFields);
+  const fields2 = reverseFields(current, expected, desired, objectFields);
   const geometry = reverseFields(
     current.geometry,
     expected.geometry,
     desired.geometry,
     geometryFields
   );
-  if (!fields || !geometry) {
+  if (!fields2 || !geometry) {
     return void 0;
   }
-  return { ...current, ...fields, geometry: { ...current.geometry, ...geometry } };
+  return { ...current, ...fields2, geometry: { ...current.geometry, ...geometry } };
 }
 function samePayloadContent(left, right) {
   return left?.bodyKind === right?.bodyKind && sameReversalValue(left?.data, right?.data);
@@ -12639,9 +13376,9 @@ function planBoardReverse(reader2, board, actor, command) {
   if (!source || source.revision === 0n) {
     return { kind: "rejected", reason: "versionUnavailable" };
   }
-  const version2 = reader2.getVersion(boardId, source.revision);
+  const version3 = reader2.getVersion(boardId, source.revision);
   const prior = source.revision - 1n;
-  if (version2?.actorId !== actor.id || version2.kind === "restore" || !reader2.getVersion(boardId, prior)) {
+  if (version3?.actorId !== actor.id || version3.kind === "restore" || !reader2.getVersion(boardId, prior)) {
     return { kind: "rejected", reason: "versionUnavailable" };
   }
   if (source.targets.length > maxTargets) {
@@ -12766,11 +13503,11 @@ function readonlySnapshotReader(reader2, revision) {
     getAccess: (boardId, actorId2) => reader2.getAccess(boardId, actorId2),
     getBoardCustomColors: () => [],
     getBoard(boardId) {
-      const version2 = readVersion(reader2, currentBoard(reader2, boardId), revision);
-      if (!version2) {
+      const version3 = readVersion(reader2, currentBoard(reader2, boardId), revision);
+      if (!version3) {
         throw new UnavailableBoardVersion("The saved board version is no longer available");
       }
-      return { boardId, title: version2.title, revision };
+      return { boardId, title: version3.title, revision };
     },
     listObjects: (boardId, limit) => reader2.listVersionObjects(boardId, revision).slice(0, limit),
     getObjects: (boardId, ids) => reader2.listVersionObjects(boardId, revision, ids),
@@ -12821,12 +13558,12 @@ function createBoardHistoryApplication(repository, now, renderPng) {
     getVersionScene(actor, boardId, revision) {
       return repository.read((reader2) => {
         requireAccess3(reader2, actor, boardId);
-        const version2 = readVersion(reader2, currentBoard(reader2, boardId), revision);
-        if (!version2) {
+        const version3 = readVersion(reader2, currentBoard(reader2, boardId), revision);
+        if (!version3) {
           return void 0;
         }
         return {
-          board: { boardId, title: version2.title, revision },
+          board: { boardId, title: version3.title, revision },
           access: { canEdit: false },
           objects: reader2.listVersionObjects(boardId, revision)
         };
@@ -12968,8 +13705,8 @@ function capabilities(role) {
 function permittedInvitations(role) {
   return role === "owner" ? guestRoles : guestRoles.slice(guestRoles.indexOf(role));
 }
-function nextSharingVersion(version2) {
-  return version2 < maximumVersion2 ? version2 + 1n : void 0;
+function nextSharingVersion(version3) {
+  return version3 < maximumVersion2 ? version3 + 1n : void 0;
 }
 function normalizeGuestName(value) {
   const name = value.trim();
@@ -12986,8 +13723,8 @@ function getSettings(reader2, boardId) {
   return reader2.getSettings(boardId) ?? initialSettings;
 }
 function credential(boardId, invitation, services) {
-  const { role, version: version2, seed } = invitation;
-  const identity = JSON.stringify([boardId, role, version2.toString(), seed]);
+  const { role, version: version3, seed } = invitation;
+  const identity = JSON.stringify([boardId, role, version3.toString(), seed]);
   return role + "." + services.digest(identity);
 }
 function memberUrl(origin, boardId) {
@@ -13027,8 +13764,8 @@ function readInvitation(reader2, services, boardId, token2, scope2) {
 function readGuestSession(reader2, services, boardId, actorId2, scope2, now = services.now()) {
   const guest = reader2.getActiveGuest(boardId, actorId2, now);
   if (guest && (scope2 === "local" || guest.scope === "lan")) {
-    const { role, name, version: version2, lastSeenAtMillis } = guest;
-    return { boardId, actorId: actorId2, role, name, version: version2, lastSeenAtMillis, ...capabilities(role) };
+    const { role, name, version: version3, lastSeenAtMillis } = guest;
+    return { boardId, actorId: actorId2, role, name, version: version3, lastSeenAtMillis, ...capabilities(role) };
   }
 }
 function guestSession(boardId, member, settings) {
@@ -13091,16 +13828,16 @@ function previousOrRejected(reader2, services, actorId2, command) {
   }
   return getSettings(reader2, boardId).version === expectedVersion ? void 0 : rejected5(command, "versionChanged");
 }
-function rotateInvitation(writer2, services, boardId, version2, role) {
+function rotateInvitation(writer2, services, boardId, version3, role) {
   const enabled = writer2.getInvitation(boardId, role)?.enabled ?? true;
-  writer2.saveInvitation(boardId, { role, enabled, version: version2, seed: services.newInvitationSeed() });
+  writer2.saveInvitation(boardId, { role, enabled, version: version3, seed: services.newInvitationSeed() });
 }
-function updateInvitations(writer2, services, command, version2, operation) {
+function updateInvitations(writer2, services, command, version3, operation) {
   const { boardId } = command;
   if (operation.kind === "resetInvitation") {
     const roles2 = operation.role === void 0 ? guestRoles : [operation.role];
     for (const role of roles2) {
-      rotateInvitation(writer2, services, boardId, version2, role);
+      rotateInvitation(writer2, services, boardId, version3, role);
     }
     return;
   }
@@ -13151,7 +13888,7 @@ function startSharing(writer2, services, boardId, current, next) {
     }
   }
 }
-function perform(writer2, services, command, current, version2) {
+function perform(writer2, services, command, current, version3) {
   const { boardId, operation } = command;
   if (operation.kind === "setScope") {
     if (!services.inviteOrigin(operation.scope)) {
@@ -13160,7 +13897,7 @@ function perform(writer2, services, command, current, version2) {
     startSharing(writer2, services, boardId, current, {
       enabled: true,
       scope: operation.scope,
-      version: version2
+      version: version3
     });
     return;
   }
@@ -13168,14 +13905,14 @@ function perform(writer2, services, command, current, version2) {
     return "invalidCommand";
   }
   if (operation.kind === "stop") {
-    writer2.saveSettings(boardId, { enabled: false, scope: "local", version: version2 });
+    writer2.saveSettings(boardId, { enabled: false, scope: "local", version: version3 });
     return;
   }
-  const problem = operation.kind === "setInvitation" || operation.kind === "resetInvitation" ? updateInvitations(writer2, services, command, version2, operation) : updateMember(writer2, boardId, operation);
+  const problem = operation.kind === "setInvitation" || operation.kind === "resetInvitation" ? updateInvitations(writer2, services, command, version3, operation) : updateMember(writer2, boardId, operation);
   if (problem) {
     return problem;
   }
-  writer2.saveSettings(boardId, { ...current, version: version2 });
+  writer2.saveSettings(boardId, { ...current, version: version3 });
 }
 function applySharing(writer2, services, actorId2, command) {
   const prior = previousOrRejected(writer2, services, actorId2, command);
@@ -13184,15 +13921,15 @@ function applySharing(writer2, services, actorId2, command) {
   }
   const { boardId, commandId } = command;
   const current = getSettings(writer2, boardId);
-  const version2 = nextSharingVersion(current.version);
-  if (version2 === void 0) {
+  const version3 = nextSharingVersion(current.version);
+  if (version3 === void 0) {
     return rejected5(command, "invalidCommand");
   }
-  const problem = perform(writer2, services, command, current, version2);
+  const problem = perform(writer2, services, command, current, version3);
   if (problem) {
     return rejected5(command, problem);
   }
-  const receipt = { boardId, commandId, outcome: { kind: "applied", version: version2 } };
+  const receipt = { boardId, commandId, outcome: { kind: "applied", version: version3 } };
   writer2.saveReceipt(actorId2, { signature: commandSignature3(command, services), receipt });
   return receipt;
 }
@@ -13301,9 +14038,6 @@ function createSharingApplication(repository, services) {
     }
   };
 }
-
-// src/entrypoints/http/archive-routes.ts
-import { Buffer as Buffer3 } from "node:buffer";
 
 // ../../../../node_modules/.pnpm/@bufbuild+protobuf@2.17.0/node_modules/@bufbuild/protobuf/dist/esm/is-message.js
 function isMessage(arg, schema2) {
@@ -17059,7 +17793,7 @@ function compileMapFieldReader(field) {
     }
   }
   return (message, reader2, ctx) => {
-    const record7 = message[localName];
+    const record8 = message[localName];
     let key;
     let val;
     const len = reader2.uint32();
@@ -17083,7 +17817,7 @@ function compileMapFieldReader(field) {
     if (val === void 0) {
       val = valueDefault();
     }
-    setOwn(record7, key, val);
+    setOwn(record8, key, val);
   };
 }
 function compileScalarReader(type, utf8Validation, longAsString) {
@@ -17353,14 +18087,14 @@ function compileMapField(field) {
     const { toMessage } = localMessageMapper(field);
     const writeMessage = compiledWriter(field.message);
     return (writer2, opts, message) => {
-      const record7 = message[localName];
-      const keys = Object.keys(record7);
+      const record8 = message[localName];
+      const keys = Object.keys(record8);
       for (let i = 0; i < keys.length; i++) {
         const key = keys[i];
         writer2.tag(fieldNo, WireType.LengthDelimited).fork();
         writeKey(writer2, key);
         writer2.tag(2, WireType.LengthDelimited).fork();
-        writeMessage(writer2, opts, toMessage(record7[key]));
+        writeMessage(writer2, opts, toMessage(record8[key]));
         writer2.join();
         writer2.join();
       }
@@ -17370,14 +18104,14 @@ function compileMapField(field) {
   const valueWireType = writeTypeOfScalar(scalarType);
   const writeScalar = compileScalarValue(scalarType, field.parent.typeName, field.name);
   return (writer2, opts, message) => {
-    const record7 = message[localName];
-    const keys = Object.keys(record7);
+    const record8 = message[localName];
+    const keys = Object.keys(record8);
     for (let i = 0; i < keys.length; i++) {
       const key = keys[i];
       writer2.tag(fieldNo, WireType.LengthDelimited).fork();
       writeKey(writer2, key);
       writer2.tag(2, valueWireType);
-      writeScalar(writer2, record7[key]);
+      writeScalar(writer2, record8[key]);
       writer2.join();
     }
   };
@@ -17884,15 +18618,15 @@ function compileListItemValue(field) {
 function compileMapValue(field) {
   const writeMapValue = compileMapEntryValue(field);
   return (opts, value) => {
-    const record7 = value;
-    const keys = Object.keys(record7);
+    const record8 = value;
+    const keys = Object.keys(record8);
     if (keys.length == 0 && !opts.alwaysEmitImplicit) {
       return void 0;
     }
     const jsonObject = {};
     for (let i = 0; i < keys.length; i++) {
       const key = keys[i];
-      setOwn(jsonObject, key, writeMapValue(opts, record7[key]));
+      setOwn(jsonObject, key, writeMapValue(opts, record8[key]));
     }
     return jsonObject;
   };
@@ -18525,7 +19259,7 @@ function compileMapFieldReader2(field) {
     if (typeof json != "object" || Array.isArray(json)) {
       throw new FieldError(field, "expected object, got " + formatVal(json));
     }
-    const record7 = message[localName];
+    const record8 = message[localName];
     const seen = /* @__PURE__ */ new Set();
     const jsonMapKeys = Object.keys(json);
     for (let i = 0; i < jsonMapKeys.length; i++) {
@@ -18553,7 +19287,7 @@ function compileMapFieldReader2(field) {
           throw new FieldError(field, `map entry ${formatVal(key)}: ${reasonSingular(field, value, check)}`);
         }
       }
-      setOwn(record7, key, toLocalValue(value));
+      setOwn(record8, key, toLocalValue(value));
     }
   };
 }
@@ -18977,384 +19711,6 @@ function serviceDesc(file, path3, ...paths2) {
   return file.services[path3];
 }
 
-// ../../packages/contracts/dist/proto/luming/studio/v1/board_archive_service_pb.js
-var file_luming_studio_v1_board_archive_service = /* @__PURE__ */ fileDesc("CixsdW1pbmcvc3R1ZGlvL3YxL2JvYXJkX2FyY2hpdmVfc2VydmljZS5wcm90bxIQbHVtaW5nLnN0dWRpby52MSJVChpJbXBvcnRCb2FyZEFyY2hpdmVSZXNwb25zZRI3CgdyZWNlaXB0GAEgASgLMiYubHVtaW5nLnN0dWRpby52MS5BcmNoaXZlSW1wb3J0UmVjZWlwdCKoAQoUQXJjaGl2ZUltcG9ydFJlY2VpcHQSEgoKY29tbWFuZF9pZBgBIAEoCRIzCghpbXBvcnRlZBgCIAEoCzIfLmx1bWluZy5zdHVkaW8udjEuSW1wb3J0ZWRCb2FyZEgAEjwKCHJlamVjdGVkGAMgASgLMigubHVtaW5nLnN0dWRpby52MS5BcmNoaXZlSW1wb3J0UmVqZWN0aW9uSABCCQoHb3V0Y29tZSIwCg1JbXBvcnRlZEJvYXJkEhAKCGJvYXJkX2lkGAEgASgJEg0KBXRpdGxlGAIgASgJImkKFkFyY2hpdmVJbXBvcnRSZWplY3Rpb24SPgoGcmVhc29uGAEgASgOMi4ubHVtaW5nLnN0dWRpby52MS5BcmNoaXZlSW1wb3J0UmVqZWN0aW9uUmVhc29uEg8KB21lc3NhZ2UYAiABKAkiNAoeR2V0QXJjaGl2ZUltcG9ydFJlY2VpcHRSZXF1ZXN0EhIKCmNvbW1hbmRfaWQYASABKAkiNQofQXJjaGl2ZUltcG9ydFJlY2VpcHROb3RSZWNvcmRlZBISCgpjb21tYW5kX2lkGAEgASgJIrEBCh9HZXRBcmNoaXZlSW1wb3J0UmVjZWlwdFJlc3BvbnNlEjkKB3JlY2VpcHQYASABKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkFyY2hpdmVJbXBvcnRSZWNlaXB0SAASSQoMbm90X3JlY29yZGVkGAIgASgLMjEubHVtaW5nLnN0dWRpby52MS5BcmNoaXZlSW1wb3J0UmVjZWlwdE5vdFJlY29yZGVkSABCCAoGcmVzdWx0Kq0CChxBcmNoaXZlSW1wb3J0UmVqZWN0aW9uUmVhc29uEi8KK0FSQ0hJVkVfSU1QT1JUX1JFSkVDVElPTl9SRUFTT05fVU5TUEVDSUZJRUQQABIzCi9BUkNISVZFX0lNUE9SVF9SRUpFQ1RJT05fUkVBU09OX0lOVkFMSURfQVJDSElWRRABEjcKM0FSQ0hJVkVfSU1QT1JUX1JFSkVDVElPTl9SRUFTT05fVU5TVVBQT1JURURfVkVSU0lPThACEjgKNEFSQ0hJVkVfSU1QT1JUX1JFSkVDVElPTl9SRUFTT05fSU5DT01QQVRJQkxFX0NPTlRFTlQQAxI0CjBBUkNISVZFX0lNUE9SVF9SRUpFQ1RJT05fUkVBU09OX0NPTU1BTkRfSURfUkVVU0UQBDKVAQoTQm9hcmRBcmNoaXZlU2VydmljZRJ+ChdHZXRBcmNoaXZlSW1wb3J0UmVjZWlwdBIwLmx1bWluZy5zdHVkaW8udjEuR2V0QXJjaGl2ZUltcG9ydFJlY2VpcHRSZXF1ZXN0GjEubHVtaW5nLnN0dWRpby52MS5HZXRBcmNoaXZlSW1wb3J0UmVjZWlwdFJlc3BvbnNlYgZwcm90bzM");
-var ImportBoardArchiveResponseSchema = /* @__PURE__ */ messageDesc(file_luming_studio_v1_board_archive_service, 0);
-var ArchiveImportRejectionReasonSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_board_archive_service, 0);
-var ArchiveImportRejectionReason = /* @__PURE__ */ tsEnum(ArchiveImportRejectionReasonSchema);
-var BoardArchiveService = /* @__PURE__ */ serviceDesc(file_luming_studio_v1_board_archive_service, 0);
-
-// src/entrypoints/http/request.ts
-import { Buffer as Buffer2 } from "node:buffer";
-var MAX_REQUEST_BYTES = 1024 * 1024;
-var HttpRequestError = class extends Error {
-  constructor(status, message, options) {
-    super(message, options);
-    this.status = status;
-  }
-  status;
-};
-function mediaType(request) {
-  return request.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase();
-}
-function requireBodySize(bytes, limit) {
-  if (bytes > limit) {
-    throw new HttpRequestError(413, "Protobuf request exceeds the size limit");
-  }
-}
-async function readBody(request, limit = MAX_REQUEST_BYTES) {
-  requireBodySize(Number(request.headers["content-length"] ?? 0), limit);
-  const chunks = [];
-  let bytes = 0;
-  for await (const value of request.iterator({ destroyOnReturn: false })) {
-    const chunk = value;
-    if (!Buffer2.isBuffer(chunk)) {
-      throw new TypeError("Expected binary HTTP request chunks");
-    }
-    bytes += chunk.byteLength;
-    requireBodySize(bytes, limit);
-    chunks.push(chunk);
-  }
-  return Buffer2.concat(chunks, bytes);
-}
-function decodeRequest(schema2, body) {
-  try {
-    return fromBinary(schema2, body, { readUnknownFields: false });
-  } catch (error) {
-    throw new HttpRequestError(400, "Malformed Protobuf request", { cause: error });
-  }
-}
-function requireId(value) {
-  if (!value.trim()) {
-    throw new HttpRequestError(400, "Request identifier is required");
-  }
-  return value;
-}
-
-// src/entrypoints/http/response.ts
-var protobufContentType = "application/protobuf";
-function sendStatus(response, status) {
-  if (status === 413) {
-    response.setHeader("connection", "close");
-  }
-  response.writeHead(status, { "cache-control": "no-store", "content-length": 0 }).end();
-}
-function sendProtobuf(response, result) {
-  response.writeHead(200, {
-    "content-type": protobufContentType,
-    "content-length": result.byteLength,
-    "cache-control": "no-store"
-  });
-  response.end(result);
-}
-
-// src/entrypoints/http/unary-route.ts
-function canReadTrashedBoard(actor) {
-  return actor.kind !== "agent" && actor.guestScope === void 0;
-}
-function unaryRoute(method4, handle) {
-  const path3 = `/${method4.parent.typeName}/${method4.name}`;
-  return [
-    path3,
-    (actor, body) => {
-      const request = decodeRequest(method4.input, body);
-      actor.authorize?.(request);
-      const response = handle(actor, request);
-      return toBinary(method4.output, create(method4.output, response));
-    }
-  ];
-}
-function asyncUnaryRoute(method4, handle) {
-  const path3 = `/${method4.parent.typeName}/${method4.name}`;
-  return [
-    path3,
-    async (actor, body) => {
-      const request = decodeRequest(method4.input, body);
-      actor.authorize?.(request);
-      const response = await handle(actor, request);
-      return toBinary(method4.output, create(method4.output, response));
-    }
-  ];
-}
-
-// src/entrypoints/http/archive-routes.ts
-var archiveImportPath = "/" + BoardArchiveService.typeName + "/ImportBoardArchive";
-var archiveAssetPrefix = "/studio-archive-assets/";
-var archiveContentType = "application/zip";
-var commandHeader = "x-studio-command-id";
-var rejectionCodes = {
-  invalidArchive: ArchiveImportRejectionReason.INVALID_ARCHIVE,
-  unsupportedVersion: ArchiveImportRejectionReason.UNSUPPORTED_VERSION,
-  incompatibleContent: ArchiveImportRejectionReason.INCOMPATIBLE_CONTENT,
-  commandIdReuse: ArchiveImportRejectionReason.COMMAND_ID_REUSE,
-  tooLarge: ArchiveImportRejectionReason.INVALID_ARCHIVE
-};
-function receiptMessage({
-  commandId,
-  outcome
-}) {
-  if (outcome.kind === "rejected") {
-    return {
-      commandId,
-      outcome: { case: "rejected", value: { reason: rejectionCodes[outcome.reason] } }
-    };
-  }
-  const { boardId, title } = outcome;
-  return { commandId, outcome: { case: "imported", value: { boardId, title } } };
-}
-function createArchiveReceiptRoute(application) {
-  return unaryRoute(BoardArchiveService.method.getArchiveImportReceipt, ({ id }, { commandId }) => {
-    const receipt = application.getReceipt(id, commandId);
-    return {
-      result: receipt ? { case: "receipt", value: receiptMessage(receipt) } : { case: "notRecorded", value: { commandId } }
-    };
-  });
-}
-async function* archiveChunks(request) {
-  for await (const value of request.iterator({ destroyOnReturn: false })) {
-    const chunk = value;
-    if (!Buffer3.isBuffer(chunk)) {
-      throw new TypeError("Expected a binary archive request.");
-    }
-    yield chunk;
-  }
-}
-async function importArchive(application, actor, request, response) {
-  if (mediaType(request) !== archiveContentType) {
-    sendStatus(response, 415);
-    return;
-  }
-  if (Number(request.headers["content-length"]) > MAX_ARCHIVE_IMPORT_BYTES) {
-    throw new HttpRequestError(413, "Archive exceeds the size limit.");
-  }
-  const commandId = request.headers[commandHeader];
-  if (typeof commandId !== "string") {
-    throw new HttpRequestError(400, "Archive command identifier is required.");
-  }
-  const receipt = await application.importCurrent(actor.id, commandId, archiveChunks(request));
-  if (receipt.outcome.kind === "rejected" && receipt.outcome.reason === "tooLarge") {
-    sendStatus(response, 413);
-    return;
-  }
-  const schema2 = ImportBoardArchiveResponseSchema;
-  sendProtobuf(response, toBinary(schema2, create(schema2, { receipt: receiptMessage(receipt) })));
-}
-function serveArchiveAsset(application, actor, path3, response) {
-  const [boardId, assetId, extra] = path3.slice(archiveAssetPrefix.length).split("/");
-  if (!boardId || !assetId || extra !== void 0) {
-    sendStatus(response, 404);
-    return;
-  }
-  actor.authorize?.({ boardId });
-  const asset = application.getAsset(actor.id, boardId, assetId, canReadTrashedBoard(actor));
-  if (!asset) {
-    sendStatus(response, 404);
-    return;
-  }
-  const bytes = asset.mimeType === "image/svg+xml" ? readArchivedSvgImage(asset.bytes) : asset.bytes;
-  if (!bytes) {
-    sendStatus(response, 404);
-    return;
-  }
-  response.writeHead(200, {
-    "content-type": asset.mimeType,
-    "content-length": bytes.byteLength,
-    "cache-control": "private, no-store",
-    "content-security-policy": "default-src 'none'; sandbox",
-    "x-content-type-options": "nosniff"
-  });
-  response.end(bytes);
-}
-function archiveRoute(path3, application) {
-  if (path3 === archiveImportPath) {
-    return {
-      method: "POST",
-      run: (actor, request, response) => importArchive(application, actor, request, response)
-    };
-  }
-  if (path3.startsWith(archiveAssetPrefix)) {
-    return {
-      method: "GET",
-      run: (actor, _request, response) => serveArchiveAsset(application, actor, path3, response)
-    };
-  }
-  return void 0;
-}
-
-// ../../packages/contracts/dist/proto/luming/studio/v1/board_catalog_service_pb.js
-var file_luming_studio_v1_board_catalog_service = /* @__PURE__ */ fileDesc("CixsdW1pbmcvc3R1ZGlvL3YxL2JvYXJkX2NhdGFsb2dfc2VydmljZS5wcm90bxIQbHVtaW5nLnN0dWRpby52MSLrAQoMQm9hcmRTdW1tYXJ5EhAKCGJvYXJkX2lkGAEgASgJEg0KBXRpdGxlGAIgASgJEh4KEXVwZGF0ZWRfYXRfbWlsbGlzGAMgASgESACIAQESDgoGcGlubmVkGAQgASgIEhoKDWVudHJ5X3ZlcnNpb24YBSABKARIAYgBARISCgpjYW5fbWFuYWdlGAYgASgIEh0KEHByZXZpZXdfcmV2aXNpb24YByABKARIAogBAUIUChJfdXBkYXRlZF9hdF9taWxsaXNCEAoOX2VudHJ5X3ZlcnNpb25CEwoRX3ByZXZpZXdfcmV2aXNpb24imwEKEUxpc3RCb2FyZHNSZXF1ZXN0Eg0KBXF1ZXJ5GAEgASgJEi8KBW9yZGVyGAIgASgOMiAubHVtaW5nLnN0dWRpby52MS5Cb2FyZFNvcnRPcmRlchIRCglwYWdlX3NpemUYAyABKA0SEwoGY3Vyc29yGAQgASgJSACIAQESEwoLcGlubmVkX29ubHkYBSABKAhCCQoHX2N1cnNvciJuChJMaXN0Qm9hcmRzUmVzcG9uc2USLgoGYm9hcmRzGAEgAygLMh4ubHVtaW5nLnN0dWRpby52MS5Cb2FyZFN1bW1hcnkSGAoLbmV4dF9jdXJzb3IYAiABKAlIAIgBAUIOCgxfbmV4dF9jdXJzb3IiXwoTVHJhc2hlZEJvYXJkU3VtbWFyeRItCgVib2FyZBgBIAEoCzIeLmx1bWluZy5zdHVkaW8udjEuQm9hcmRTdW1tYXJ5EhkKEXRyYXNoZWRfYXRfbWlsbGlzGAIgASgEIo0BChhMaXN0VHJhc2hlZEJvYXJkc1JlcXVlc3QSDQoFcXVlcnkYASABKAkSLwoFb3JkZXIYAiABKA4yIC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU29ydE9yZGVyEhEKCXBhZ2Vfc2l6ZRgDIAEoDRITCgZjdXJzb3IYBCABKAlIAIgBAUIJCgdfY3Vyc29yInwKGUxpc3RUcmFzaGVkQm9hcmRzUmVzcG9uc2USNQoGYm9hcmRzGAEgAygLMiUubHVtaW5nLnN0dWRpby52MS5UcmFzaGVkQm9hcmRTdW1tYXJ5EhgKC25leHRfY3Vyc29yGAIgASgJSACIAQFCDgoMX25leHRfY3Vyc29yImEKGEdldEJvYXJkVGh1bWJuYWlsUmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRIVCghyZXZpc2lvbhgCIAEoBEgAiAEBEg8KB3RyYXNoZWQYAyABKAhCCwoJX3JldmlzaW9uIlAKGUdldEJvYXJkVGh1bWJuYWlsUmVzcG9uc2USMwoJdGh1bWJuYWlsGAEgASgLMiAubHVtaW5nLnN0dWRpby52MS5Cb2FyZFRodW1ibmFpbCJYCg5Cb2FyZFRodW1ibmFpbBIVCghyZXZpc2lvbhgBIAEoBEgAiAEBEhEKCW1pbWVfdHlwZRgCIAEoCRIPCgdjb250ZW50GAMgASgMQgsKCV9yZXZpc2lvbiI3ChJDcmVhdGVCb2FyZFJlcXVlc3QSEgoKY29tbWFuZF9pZBgBIAEoCRINCgV0aXRsZRgCIAEoCSJPChNDcmVhdGVCb2FyZFJlc3BvbnNlEjgKB3JlY2VpcHQYASABKAsyJy5sdW1pbmcuc3R1ZGlvLnYxLkNhdGFsb2dDb21tYW5kUmVjZWlwdCJEChVEdXBsaWNhdGVCb2FyZFJlcXVlc3QSEgoKY29tbWFuZF9pZBgBIAEoCRIXCg9zb3VyY2VfYm9hcmRfaWQYAiABKAkiUgoWRHVwbGljYXRlQm9hcmRSZXNwb25zZRI4CgdyZWNlaXB0GAEgASgLMicubHVtaW5nLnN0dWRpby52MS5DYXRhbG9nQ29tbWFuZFJlY2VpcHQi5wEKEk1hbmFnZUJvYXJkUmVxdWVzdBISCgpjb21tYW5kX2lkGAEgASgJEhAKCGJvYXJkX2lkGAIgASgJEiMKFmV4cGVjdGVkX2VudHJ5X3ZlcnNpb24YAyABKARIAYgBARIPCgV0aXRsZRgEIAEoCUgAEhAKBnBpbm5lZBgFIAEoCEgAEjsKCWxpZmVjeWNsZRgGIAEoDjImLmx1bWluZy5zdHVkaW8udjEuQm9hcmRMaWZlY3ljbGVBY3Rpb25IAEILCglvcGVyYXRpb25CGQoXX2V4cGVjdGVkX2VudHJ5X3ZlcnNpb24iTwoTTWFuYWdlQm9hcmRSZXNwb25zZRI4CgdyZWNlaXB0GAEgASgLMicubHVtaW5nLnN0dWRpby52MS5DYXRhbG9nQ29tbWFuZFJlY2VpcHQiZAoQUHVyZ2VCb2FyZFRhcmdldBIQCghib2FyZF9pZBgBIAEoCRIjChZleHBlY3RlZF9lbnRyeV92ZXJzaW9uGAIgASgESACIAQFCGQoXX2V4cGVjdGVkX2VudHJ5X3ZlcnNpb24iXQoSUHVyZ2VCb2FyZHNSZXF1ZXN0EhIKCmNvbW1hbmRfaWQYASABKAkSMwoHdGFyZ2V0cxgCIAMoCzIiLmx1bWluZy5zdHVkaW8udjEuUHVyZ2VCb2FyZFRhcmdldCJPChNQdXJnZUJvYXJkc1Jlc3BvbnNlEjgKB3JlY2VpcHQYASABKAsyJy5sdW1pbmcuc3R1ZGlvLnYxLkNhdGFsb2dDb21tYW5kUmVjZWlwdCKAAQoWQ2F0YWxvZ1B1cmdlSXRlbVJlc3VsdBIQCghib2FyZF9pZBgBIAEoCRIRCgdkZWxldGVkGAIgASgISAASNgoIcmVqZWN0ZWQYAyABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkNhdGFsb2dSZWplY3Rpb25IAEIJCgdvdXRjb21lIk0KEkNhdGFsb2dQdXJnZVJlc3VsdBI3CgVpdGVtcxgBIAMoCzIoLmx1bWluZy5zdHVkaW8udjEuQ2F0YWxvZ1B1cmdlSXRlbVJlc3VsdCKMAgoVQ2F0YWxvZ0NvbW1hbmRSZWNlaXB0EhIKCmNvbW1hbmRfaWQYASABKAkSMQoHY3JlYXRlZBgCIAEoCzIeLmx1bWluZy5zdHVkaW8udjEuQm9hcmRTdW1tYXJ5SAASNgoIcmVqZWN0ZWQYAyABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkNhdGFsb2dSZWplY3Rpb25IABIxCgdjaGFuZ2VkGAQgASgLMh4ubHVtaW5nLnN0dWRpby52MS5Cb2FyZFN1bW1hcnlIABI2CgZwdXJnZWQYBSABKAsyJC5sdW1pbmcuc3R1ZGlvLnYxLkNhdGFsb2dQdXJnZVJlc3VsdEgAQgkKB291dGNvbWUiTAoQQ2F0YWxvZ1JlamVjdGlvbhI4CgZyZWFzb24YASABKA4yKC5sdW1pbmcuc3R1ZGlvLnYxLkNhdGFsb2dSZWplY3Rpb25SZWFzb24iNQofR2V0Q2F0YWxvZ0NvbW1hbmRSZWNlaXB0UmVxdWVzdBISCgpjb21tYW5kX2lkGAEgASgJIi8KGUNhdGFsb2dSZWNlaXB0Tm90UmVjb3JkZWQSEgoKY29tbWFuZF9pZBgBIAEoCSKtAQogR2V0Q2F0YWxvZ0NvbW1hbmRSZWNlaXB0UmVzcG9uc2USOgoHcmVjZWlwdBgBIAEoCzInLmx1bWluZy5zdHVkaW8udjEuQ2F0YWxvZ0NvbW1hbmRSZWNlaXB0SAASQwoMbm90X3JlY29yZGVkGAIgASgLMisubHVtaW5nLnN0dWRpby52MS5DYXRhbG9nUmVjZWlwdE5vdFJlY29yZGVkSABCCAoGcmVzdWx0KmsKDkJvYXJkU29ydE9yZGVyEiAKHEJPQVJEX1NPUlRfT1JERVJfVU5TUEVDSUZJRUQQABIbChdCT0FSRF9TT1JUX09SREVSX1JFQ0VOVBABEhoKFkJPQVJEX1NPUlRfT1JERVJfVElUTEUQAiqEAQoUQm9hcmRMaWZlY3ljbGVBY3Rpb24SJgoiQk9BUkRfTElGRUNZQ0xFX0FDVElPTl9VTlNQRUNJRklFRBAAEiAKHEJPQVJEX0xJRkVDWUNMRV9BQ1RJT05fVFJBU0gQARIiCh5CT0FSRF9MSUZFQ1lDTEVfQUNUSU9OX1JFU1RPUkUQAirTAgoWQ2F0YWxvZ1JlamVjdGlvblJlYXNvbhIoCiRDQVRBTE9HX1JFSkVDVElPTl9SRUFTT05fVU5TUEVDSUZJRUQQABIqCiZDQVRBTE9HX1JFSkVDVElPTl9SRUFTT05fSU5WQUxJRF9USVRMRRABEi0KKUNBVEFMT0dfUkVKRUNUSU9OX1JFQVNPTl9DT01NQU5EX0lEX1JFVVNFEAISJgoiQ0FUQUxPR19SRUpFQ1RJT05fUkVBU09OX0ZPUkJJRERFThADEjIKLkNBVEFMT0dfUkVKRUNUSU9OX1JFQVNPTl9FTlRSWV9WRVJTSU9OX0NIQU5HRUQQBBIqCiZDQVRBTE9HX1JFSkVDVElPTl9SRUFTT05fU1RBVEVfQ0hBTkdFRBAFEiwKKENBVEFMT0dfUkVKRUNUSU9OX1JFQVNPTl9JTlZBTElEX0NPTU1BTkQQBjLHBgoTQm9hcmRDYXRhbG9nU2VydmljZRJXCgpMaXN0Qm9hcmRzEiMubHVtaW5nLnN0dWRpby52MS5MaXN0Qm9hcmRzUmVxdWVzdBokLmx1bWluZy5zdHVkaW8udjEuTGlzdEJvYXJkc1Jlc3BvbnNlEmwKEUxpc3RUcmFzaGVkQm9hcmRzEioubHVtaW5nLnN0dWRpby52MS5MaXN0VHJhc2hlZEJvYXJkc1JlcXVlc3QaKy5sdW1pbmcuc3R1ZGlvLnYxLkxpc3RUcmFzaGVkQm9hcmRzUmVzcG9uc2USbAoRR2V0Qm9hcmRUaHVtYm5haWwSKi5sdW1pbmcuc3R1ZGlvLnYxLkdldEJvYXJkVGh1bWJuYWlsUmVxdWVzdBorLmx1bWluZy5zdHVkaW8udjEuR2V0Qm9hcmRUaHVtYm5haWxSZXNwb25zZRJaCgtDcmVhdGVCb2FyZBIkLmx1bWluZy5zdHVkaW8udjEuQ3JlYXRlQm9hcmRSZXF1ZXN0GiUubHVtaW5nLnN0dWRpby52MS5DcmVhdGVCb2FyZFJlc3BvbnNlEmMKDkR1cGxpY2F0ZUJvYXJkEicubHVtaW5nLnN0dWRpby52MS5EdXBsaWNhdGVCb2FyZFJlcXVlc3QaKC5sdW1pbmcuc3R1ZGlvLnYxLkR1cGxpY2F0ZUJvYXJkUmVzcG9uc2USWgoLTWFuYWdlQm9hcmQSJC5sdW1pbmcuc3R1ZGlvLnYxLk1hbmFnZUJvYXJkUmVxdWVzdBolLmx1bWluZy5zdHVkaW8udjEuTWFuYWdlQm9hcmRSZXNwb25zZRJaCgtQdXJnZUJvYXJkcxIkLmx1bWluZy5zdHVkaW8udjEuUHVyZ2VCb2FyZHNSZXF1ZXN0GiUubHVtaW5nLnN0dWRpby52MS5QdXJnZUJvYXJkc1Jlc3BvbnNlEoEBChhHZXRDYXRhbG9nQ29tbWFuZFJlY2VpcHQSMS5sdW1pbmcuc3R1ZGlvLnYxLkdldENhdGFsb2dDb21tYW5kUmVjZWlwdFJlcXVlc3QaMi5sdW1pbmcuc3R1ZGlvLnYxLkdldENhdGFsb2dDb21tYW5kUmVjZWlwdFJlc3BvbnNlYgZwcm90bzM");
-var CatalogCommandReceiptSchema = /* @__PURE__ */ messageDesc(file_luming_studio_v1_board_catalog_service, 20);
-var BoardSortOrderSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_board_catalog_service, 0);
-var BoardSortOrder = /* @__PURE__ */ tsEnum(BoardSortOrderSchema);
-var BoardLifecycleActionSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_board_catalog_service, 1);
-var BoardLifecycleAction = /* @__PURE__ */ tsEnum(BoardLifecycleActionSchema);
-var CatalogRejectionReasonSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_board_catalog_service, 2);
-var CatalogRejectionReason = /* @__PURE__ */ tsEnum(CatalogRejectionReasonSchema);
-var BoardCatalogService = /* @__PURE__ */ serviceDesc(file_luming_studio_v1_board_catalog_service, 0);
-
-// src/entrypoints/http/catalog-routes.ts
-var catalogRejections = {
-  invalidTitle: CatalogRejectionReason.INVALID_TITLE,
-  commandIdReuse: CatalogRejectionReason.COMMAND_ID_REUSE,
-  forbidden: CatalogRejectionReason.FORBIDDEN,
-  entryVersionChanged: CatalogRejectionReason.ENTRY_VERSION_CHANGED,
-  stateChanged: CatalogRejectionReason.STATE_CHANGED,
-  invalidCommand: CatalogRejectionReason.INVALID_COMMAND
-};
-function toSortOrder(order) {
-  switch (order) {
-    case BoardSortOrder.UNSPECIFIED:
-    case BoardSortOrder.RECENT:
-      return "recent";
-    case BoardSortOrder.TITLE:
-      return "title";
-    default:
-      throw new HttpRequestError(400, "Unsupported board sort order");
-  }
-}
-function toReceiptOutcome(receipt) {
-  switch (receipt.kind) {
-    case "created":
-      return { case: "created", value: receipt.board };
-    case "changed":
-      return { case: "changed", value: receipt.board };
-    case "purged":
-      return {
-        case: "purged",
-        value: {
-          items: receipt.items.map((item) => ({
-            boardId: item.boardId,
-            outcome: item.deleted ? { case: "deleted", value: true } : { case: "rejected", value: { reason: catalogRejections[item.reason] } }
-          }))
-        }
-      };
-    case "rejected":
-      return { case: "rejected", value: { reason: catalogRejections[receipt.reason] } };
-  }
-}
-function toCatalogReceipt(receipt) {
-  return create(CatalogCommandReceiptSchema, {
-    commandId: receipt.commandId,
-    outcome: toReceiptOutcome(receipt)
-  });
-}
-function requireEntryVersion(value) {
-  if (value === void 0) {
-    throw new HttpRequestError(400, "Catalogue entry version is required");
-  }
-  return value;
-}
-function requireThumbnailRevision(revision) {
-  if (revision === void 0) {
-    throw new HttpRequestError(400, "The saved preview revision is required.");
-  }
-  return revision;
-}
-function toManageOperation(operation) {
-  switch (operation.case) {
-    case "title":
-      return { kind: "rename", title: operation.value };
-    case "pinned":
-      return { kind: "pin", pinned: operation.value };
-    case "lifecycle":
-      if (operation.value === BoardLifecycleAction.TRASH) {
-        return { kind: "trash" };
-      }
-      if (operation.value === BoardLifecycleAction.RESTORE) {
-        return { kind: "restore" };
-      }
-      throw new HttpRequestError(400, "Unsupported catalogue lifecycle action");
-    case void 0:
-      throw new HttpRequestError(400, "Catalogue operation is required");
-  }
-}
-function createCatalogRoutes(application) {
-  const {
-    listBoards: listBoards3,
-    listTrashedBoards: listTrashedBoards3,
-    getBoardThumbnail,
-    createBoard: createBoard2,
-    duplicateBoard: duplicateBoard3,
-    manageBoard: manageBoard2,
-    purgeBoards: purgeBoards2,
-    getCatalogCommandReceipt
-  } = BoardCatalogService.method;
-  return [
-    unaryRoute(listBoards3, (actor, request) => {
-      const { query, order, pageSize, cursor, pinnedOnly } = request;
-      const result = application.listBoards(actor, {
-        query,
-        order: toSortOrder(order),
-        pageSize,
-        cursor,
-        pinnedOnly
-      });
-      return { boards: [...result.boards], nextCursor: result.nextCursor };
-    }),
-    unaryRoute(listTrashedBoards3, (actor, request) => {
-      const { query, order, pageSize, cursor } = request;
-      const result = application.listTrashedBoards(actor, {
-        query,
-        order: toSortOrder(order),
-        pageSize,
-        cursor
-      });
-      return { boards: [...result.boards], nextCursor: result.nextCursor };
-    }),
-    unaryRoute(getBoardThumbnail, (actor, { boardId, revision, trashed }) => {
-      const result = application.getBoardThumbnail(actor, {
-        boardId: requireId(boardId),
-        revision: requireThumbnailRevision(revision),
-        trashed
-      });
-      if (result.kind === "forbidden") {
-        throw new WhiteboardAccessError();
-      }
-      return { thumbnail: result.kind === "thumbnail" ? result.thumbnail : void 0 };
-    }),
-    unaryRoute(createBoard2, (actor, request) => {
-      const receipt = application.createBoard(actor, {
-        commandId: requireId(request.commandId),
-        title: request.title
-      });
-      return { receipt: toCatalogReceipt(receipt) };
-    }),
-    unaryRoute(duplicateBoard3, (actor, request) => {
-      const receipt = application.duplicateBoard(actor, {
-        commandId: requireId(request.commandId),
-        sourceBoardId: requireId(request.sourceBoardId)
-      });
-      return { receipt: toCatalogReceipt(receipt) };
-    }),
-    unaryRoute(manageBoard2, (actor, request) => {
-      const receipt = application.manageBoard(actor, {
-        commandId: requireId(request.commandId),
-        boardId: requireId(request.boardId),
-        expectedEntryVersion: requireEntryVersion(request.expectedEntryVersion),
-        operation: toManageOperation(request.operation)
-      });
-      return { receipt: toCatalogReceipt(receipt) };
-    }),
-    unaryRoute(purgeBoards2, (actor, request) => {
-      const receipt = application.purgeBoards(actor, {
-        commandId: requireId(request.commandId),
-        targets: request.targets.map(({ boardId, expectedEntryVersion }) => ({
-          boardId: requireId(boardId),
-          expectedEntryVersion: requireEntryVersion(expectedEntryVersion)
-        }))
-      });
-      return { receipt: toCatalogReceipt(receipt) };
-    }),
-    unaryRoute(getCatalogCommandReceipt, (actor, request) => {
-      const commandId = requireId(request.commandId);
-      const receipt = application.getReceipt(actor, commandId);
-      return {
-        result: receipt ? { case: "receipt", value: toCatalogReceipt(receipt) } : { case: "notRecorded", value: { commandId } }
-      };
-    })
-  ];
-}
-
 // ../../packages/contracts/dist/proto/luming/studio/v1/whiteboard_scene_pb.js
 var file_luming_studio_v1_whiteboard_scene = /* @__PURE__ */ fileDesc("CidsdW1pbmcvc3R1ZGlvL3YxL3doaXRlYm9hcmRfc2NlbmUucHJvdG8SEGx1bWluZy5zdHVkaW8udjEi+wEKCkJvYXJkU2NlbmUSEAoIYm9hcmRfaWQYASABKAkSDQoFdGl0bGUYAiABKAkSGwoOYm9hcmRfcmV2aXNpb24YAyABKARIAIgBARIxCgdvYmplY3RzGAQgAygLMiAubHVtaW5nLnN0dWRpby52MS5PYmplY3RNZXRhZGF0YRItCgZhY2Nlc3MYBSABKAsyHS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkQWNjZXNzEjoKDWN1c3RvbV9jb2xvcnMYBiABKAsyIy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkQ3VzdG9tQ29sb3JzQhEKD19ib2FyZF9yZXZpc2lvbiIjChFCb2FyZEN1c3RvbUNvbG9ycxIOCgZjb2xvcnMYASADKAkiMAoLQm9hcmRBY2Nlc3MSEAoIY2FuX2VkaXQYASABKAgSDwoHdHJhc2hlZBgCIAEoCCLJBAoOT2JqZWN0TWV0YWRhdGESEQoJb2JqZWN0X2lkGAEgASgJEgwKBGtpbmQYAiABKAkSDQoFbGFiZWwYAyABKAkSLAoIZ2VvbWV0cnkYBCABKAsyGi5sdW1pbmcuc3R1ZGlvLnYxLkdlb21ldHJ5Eh0KEGdlb21ldHJ5X3ZlcnNpb24YBSABKARIAYgBARIcCg9wYXlsb2FkX3ZlcnNpb24YBiABKARIAogBARIOCgZsb2NrZWQYByABKAgSFgoJcGFyZW50X2lkGAggASgJSAOIAQESFQoIZ3JvdXBfaWQYCSABKAlIBIgBARI2CgphcHBlYXJhbmNlGAogASgLMiIubHVtaW5nLnN0dWRpby52MS5PYmplY3RBcHBlYXJhbmNlEjAKBXNoYXBlGAsgASgLMh8ubHVtaW5nLnN0dWRpby52MS5TaGFwZUdlb21ldHJ5SAASNAoHc2VjdGlvbhgMIAEoCzIhLmx1bWluZy5zdHVkaW8udjEuU2VjdGlvbkdlb21ldHJ5SAASLAoDaW5rGA0gASgLMh0ubHVtaW5nLnN0dWRpby52MS5JbmtHZW9tZXRyeUgAEjgKCWNvbm5lY3RvchgOIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQ29ubmVjdG9yR2VvbWV0cnlIAEIRCg9nZW9tZXRyeV9kZXRhaWxCEwoRX2dlb21ldHJ5X3ZlcnNpb25CEgoQX3BheWxvYWRfdmVyc2lvbkIMCgpfcGFyZW50X2lkQgsKCV9ncm91cF9pZCJRCghHZW9tZXRyeRIJCgF4GAEgASgBEgkKAXkYAiABKAESDQoFd2lkdGgYAyABKAESDgoGaGVpZ2h0GAQgASgBEhAKCHJvdGF0aW9uGAUgASgBIh0KBVBvaW50EgkKAXgYASABKAESCQoBeRgCIAEoASKaAQoQT2JqZWN0QXBwZWFyYW5jZRIRCgRmaWxsGAEgASgJSACIAQESEwoGc3Ryb2tlGAIgASgJSAGIAQESGQoMc3Ryb2tlX3dpZHRoGAMgASgBSAKIAQESDgoGZGFzaGVkGAQgASgIEg4KBmhvbGxvdxgFIAEoCEIHCgVfZmlsbEIJCgdfc3Ryb2tlQg8KDV9zdHJva2Vfd2lkdGgiIAoNU2hhcGVHZW9tZXRyeRIPCgdvdXRsaW5lGAEgASgJIiYKD1NlY3Rpb25HZW9tZXRyeRITCgt0cmFuc3BhcmVudBgBIAEoCCIcCgtJbmtHZW9tZXRyeRINCgV3aWR0aBgBIAEoASLxAgoRQ29ubmVjdG9yR2VvbWV0cnkSMgoFc3RhcnQYASABKAsyIy5sdW1pbmcuc3R1ZGlvLnYxLkNvbm5lY3RvckVuZHBvaW50EjAKA2VuZBgCIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQ29ubmVjdG9yRW5kcG9pbnQSJgoFYmVuZHMYAyADKAsyFy5sdW1pbmcuc3R1ZGlvLnYxLlBvaW50EjcKDnJlbGF0aXZlX2JlbmRzGAQgASgLMh8ubHVtaW5nLnN0dWRpby52MS5SZWxhdGl2ZUJlbmRzEi0KDGxhYmVsX29mZnNldBgFIAEoCzIXLmx1bWluZy5zdHVkaW8udjEuUG9pbnQSMwoKc3RhcnRfaGVhZBgGIAEoDjIfLmx1bWluZy5zdHVkaW8udjEuQ29ubmVjdG9ySGVhZBIxCghlbmRfaGVhZBgHIAEoDjIfLmx1bWluZy5zdHVkaW8udjEuQ29ubmVjdG9ySGVhZCJ2ChFDb25uZWN0b3JFbmRwb2ludBImCgVwb2ludBgBIAEoCzIXLmx1bWluZy5zdHVkaW8udjEuUG9pbnQSOQoKYXR0YWNobWVudBgCIAEoCzIlLmx1bWluZy5zdHVkaW8udjEuQ29ubmVjdG9yQXR0YWNobWVudCJXChNDb25uZWN0b3JBdHRhY2htZW50EhEKCW9iamVjdF9pZBgBIAEoCRItCgRwb3J0GAIgASgOMh8ubHVtaW5nLnN0dWRpby52MS5Db25uZWN0b3JQb3J0IlAKDVJlbGF0aXZlQmVuZHMSLgoKZmlyc3RfYXhpcxgBIAEoDjIaLmx1bWluZy5zdHVkaW8udjEuQmVuZEF4aXMSDwoHb2Zmc2V0cxgCIAMoASqVAQoNQ29ubmVjdG9yUG9ydBIeChpDT05ORUNUT1JfUE9SVF9VTlNQRUNJRklFRBAAEhYKEkNPTk5FQ1RPUl9QT1JUX1RPUBABEhkKFUNPTk5FQ1RPUl9QT1JUX0JPVFRPTRACEhcKE0NPTk5FQ1RPUl9QT1JUX0xFRlQQAxIYChRDT05ORUNUT1JfUE9SVF9SSUdIVBAEKn0KDUNvbm5lY3RvckhlYWQSHgoaQ09OTkVDVE9SX0hFQURfVU5TUEVDSUZJRUQQABIXChNDT05ORUNUT1JfSEVBRF9OT05FEAESGAoUQ09OTkVDVE9SX0hFQURfQVJST1cQAhIZChVDT05ORUNUT1JfSEVBRF9DSVJDTEUQAypXCghCZW5kQXhpcxIZChVCRU5EX0FYSVNfVU5TUEVDSUZJRUQQABIYChRCRU5EX0FYSVNfSE9SSVpPTlRBTBABEhYKEkJFTkRfQVhJU19WRVJUSUNBTBACYgZwcm90bzM");
 var BoardSceneSchema = /* @__PURE__ */ messageDesc(file_luming_studio_v1_whiteboard_scene, 0);
@@ -19376,9 +19732,9 @@ var TextAlignmentSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_whitebo
 var TextAlignment = /* @__PURE__ */ tsEnum(TextAlignmentSchema);
 
 // ../../packages/contracts/dist/proto/luming/studio/v1/whiteboard_service_pb.js
-var file_luming_studio_v1_whiteboard_service = /* @__PURE__ */ fileDesc("CilsdW1pbmcvc3R1ZGlvL3YxL3doaXRlYm9hcmRfc2VydmljZS5wcm90bxIQbHVtaW5nLnN0dWRpby52MSKMAgoSRXhwb3J0Qm9hcmRSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEh4KEWV4cGVjdGVkX3JldmlzaW9uGAIgASgESAGIAQESMwoFd2hvbGUYAyABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkV4cG9ydFdob2xlQm9hcmRIABI7CglzZWxlY3Rpb24YBCABKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkV4cG9ydEJvYXJkU2VsZWN0aW9uSAASMwoGZm9ybWF0GAUgASgOMiMubHVtaW5nLnN0dWRpby52MS5Cb2FyZEV4cG9ydEZvcm1hdEIHCgVzY29wZUIUChJfZXhwZWN0ZWRfcmV2aXNpb24iEgoQRXhwb3J0V2hvbGVCb2FyZCIqChRFeHBvcnRCb2FyZFNlbGVjdGlvbhISCgpvYmplY3RfaWRzGAEgAygJIoICChNFeHBvcnRCb2FyZFJlc3BvbnNlEjEKBGZpbGUYASABKAsyIS5sdW1pbmcuc3R1ZGlvLnYxLkV4cG9ydEJvYXJkRmlsZUgAEjMKBXN0YWxlGAIgASgLMiIubHVtaW5nLnN0dWRpby52MS5FeHBvcnRCb2FyZFN0YWxlSAASOQoIcmVqZWN0ZWQYAyABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLkV4cG9ydEJvYXJkUmVqZWN0ZWRIABI+Cgticm93c2VyX3BuZxgEIAEoCzInLmx1bWluZy5zdHVkaW8udjEuRXhwb3J0Qm9hcmRCcm93c2VyUG5nSABCCAoGcmVzdWx0IqQBChVFeHBvcnRCb2FyZEJyb3dzZXJQbmcSEAoIZmlsZW5hbWUYASABKAkSEAoIcmV2aXNpb24YAiABKAQSDQoFd2lkdGgYAyABKAESDgoGaGVpZ2h0GAQgASgBEhQKDHN2Z190ZW1wbGF0ZRgFIAEoCRIyCgdyZWdpb25zGAYgAygLMiEubHVtaW5nLnN0dWRpby52MS5FeHBvcnRQbmdSZWdpb24icQoPRXhwb3J0UG5nUmVnaW9uEg0KBWluZGV4GAEgASgNEgwKBGh0bWwYAiABKAkSDQoFd2lkdGgYAyABKAESDgoGaGVpZ2h0GAQgASgBEhUKCHNjcmlwdGVkGAUgASgISACIAQFCCwoJX3NjcmlwdGVkIlkKD0V4cG9ydEJvYXJkRmlsZRIQCghmaWxlbmFtZRgBIAEoCRIRCgltaW1lX3R5cGUYAiABKAkSEAoIcmV2aXNpb24YAyABKAQSDwoHY29udGVudBgEIAEoDCIkChBFeHBvcnRCb2FyZFN0YWxlEhAKCHJldmlzaW9uGAEgASgEIlMKE0V4cG9ydEJvYXJkUmVqZWN0ZWQSPAoGcmVhc29uGAEgASgOMiwubHVtaW5nLnN0dWRpby52MS5Cb2FyZEV4cG9ydFJlamVjdGlvblJlYXNvbiIoChRHZXRCb2FyZFNjZW5lUmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCSJEChVHZXRCb2FyZFNjZW5lUmVzcG9uc2USKwoFc2NlbmUYASABKAsyHC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU2NlbmUiQAoYR2V0T2JqZWN0UGF5bG9hZHNSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhIKCm9iamVjdF9pZHMYAiADKAkiZQoZR2V0T2JqZWN0UGF5bG9hZHNSZXNwb25zZRIQCghib2FyZF9pZBgBIAEoCRI2CgdyZXN1bHRzGAIgAygLMiUubHVtaW5nLnN0dWRpby52MS5PYmplY3RQYXlsb2FkUmVzdWx0IqkBChNPYmplY3RQYXlsb2FkUmVzdWx0EhEKCW9iamVjdF9pZBgBIAEoCRIyCgdwYXlsb2FkGAIgASgLMh8ubHVtaW5nLnN0dWRpby52MS5PYmplY3RQYXlsb2FkSAASQQoLdW5hdmFpbGFibGUYAyABKAsyKi5sdW1pbmcuc3R1ZGlvLnYxLk9iamVjdFBheWxvYWRVbmF2YWlsYWJsZUgAQggKBnJlc3VsdCJcChhPYmplY3RQYXlsb2FkVW5hdmFpbGFibGUSQAoGcmVhc29uGAEgASgOMjAubHVtaW5nLnN0dWRpby52MS5PYmplY3RQYXlsb2FkVW5hdmFpbGFibGVSZWFzb24ilQEKEk1vdmVPYmplY3RzUmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJEioKBWRlbHRhGAMgASgLMhsubHVtaW5nLnN0dWRpby52MS5Nb3ZlRGVsdGESLQoHdGFyZ2V0cxgEIAMoCzIcLmx1bWluZy5zdHVkaW8udjEuTW92ZVRhcmdldCIjCglNb3ZlRGVsdGESCgoCZHgYASABKAESCgoCZHkYAiABKAEiZQoKTW92ZVRhcmdldBIRCglvYmplY3RfaWQYASABKAkSJgoZZXhwZWN0ZWRfZ2VvbWV0cnlfdmVyc2lvbhgCIAEoBEgAiAEBQhwKGl9leHBlY3RlZF9nZW9tZXRyeV92ZXJzaW9uIkgKE01vdmVPYmplY3RzUmVzcG9uc2USMQoHcmVjZWlwdBgBIAEoCzIgLmx1bWluZy5zdHVkaW8udjEuQ29tbWFuZFJlY2VpcHQi2wEKDkNvbW1hbmRSZWNlaXB0EhAKCGJvYXJkX2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkSMAoHYXBwbGllZBgDIAEoCzIdLmx1bWluZy5zdHVkaW8udjEuTW92ZUFwcGxpZWRIABIyCghjb25mbGljdBgEIAEoCzIeLmx1bWluZy5zdHVkaW8udjEuTW92ZUNvbmZsaWN0SAASMgoIcmVqZWN0ZWQYBSABKAsyHi5sdW1pbmcuc3R1ZGlvLnYxLk1vdmVSZWplY3RlZEgAQgkKB291dGNvbWUicAoLTW92ZUFwcGxpZWQSGwoOYm9hcmRfcmV2aXNpb24YASABKARIAIgBARIxCgdvYmplY3RzGAIgAygLMiAubHVtaW5nLnN0dWRpby52MS5PYmplY3RNZXRhZGF0YUIRCg9fYm9hcmRfcmV2aXNpb24iywEKDE1vdmVDb25mbGljdBI0CgZyZWFzb24YASABKA4yJC5sdW1pbmcuc3R1ZGlvLnYxLk1vdmVDb25mbGljdFJlYXNvbhIbCg5ib2FyZF9yZXZpc2lvbhgCIAEoBEgAiAEBEjkKD2N1cnJlbnRfb2JqZWN0cxgDIAMoCzIgLmx1bWluZy5zdHVkaW8udjEuT2JqZWN0TWV0YWRhdGESGgoSbWlzc2luZ19vYmplY3RfaWRzGAQgAygJQhEKD19ib2FyZF9yZXZpc2lvbiJFCgxNb3ZlUmVqZWN0ZWQSNQoGcmVhc29uGAEgASgOMiUubHVtaW5nLnN0dWRpby52MS5Nb3ZlUmVqZWN0aW9uUmVhc29uIkAKGEdldENvbW1hbmRSZWNlaXB0UmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJIp8BChlHZXRDb21tYW5kUmVjZWlwdFJlc3BvbnNlEjMKB3JlY2VpcHQYASABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkNvbW1hbmRSZWNlaXB0SAASQwoMbm90X3JlY29yZGVkGAIgASgLMisubHVtaW5nLnN0dWRpby52MS5Db21tYW5kUmVjZWlwdE5vdFJlY29yZGVkSABCCAoGcmVzdWx0IkEKGUNvbW1hbmRSZWNlaXB0Tm90UmVjb3JkZWQSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCSrwAQoRQm9hcmRFeHBvcnRGb3JtYXQSIwofQk9BUkRfRVhQT1JUX0ZPUk1BVF9VTlNQRUNJRklFRBAAEhwKGEJPQVJEX0VYUE9SVF9GT1JNQVRfSlNPThABEhsKF0JPQVJEX0VYUE9SVF9GT1JNQVRfU1ZHEAISGwoXQk9BUkRfRVhQT1JUX0ZPUk1BVF9QTkcQAxIcChhCT0FSRF9FWFBPUlRfRk9STUFUX0hUTUwQBBIbChdCT0FSRF9FWFBPUlRfRk9STUFUX1pJUBAFEiMKH0JPQVJEX0VYUE9SVF9GT1JNQVRfSFRNTF9TT1VSQ0UQBiqRAgoaQm9hcmRFeHBvcnRSZWplY3Rpb25SZWFzb24SLQopQk9BUkRfRVhQT1JUX1JFSkVDVElPTl9SRUFTT05fVU5TUEVDSUZJRUQQABIzCi9CT0FSRF9FWFBPUlRfUkVKRUNUSU9OX1JFQVNPTl9JTlZBTElEX1NFTEVDVElPThABEi0KKUJPQVJEX0VYUE9SVF9SRUpFQ1RJT05fUkVBU09OX1VOU1VQUE9SVEVEEAISMwovQk9BUkRfRVhQT1JUX1JFSkVDVElPTl9SRUFTT05fQVNTRVRfVU5BVkFJTEFCTEUQAxIrCidCT0FSRF9FWFBPUlRfUkVKRUNUSU9OX1JFQVNPTl9UT09fTEFSR0UQBCq8AQoeT2JqZWN0UGF5bG9hZFVuYXZhaWxhYmxlUmVhc29uEjEKLU9CSkVDVF9QQVlMT0FEX1VOQVZBSUxBQkxFX1JFQVNPTl9VTlNQRUNJRklFRBAAEi8KK09CSkVDVF9QQVlMT0FEX1VOQVZBSUxBQkxFX1JFQVNPTl9OT1RfRk9VTkQQARI2CjJPQkpFQ1RfUEFZTE9BRF9VTkFWQUlMQUJMRV9SRUFTT05fVU5TVVBQT1JURURfS0lORBACKpcBChJNb3ZlQ29uZmxpY3RSZWFzb24SJAogTU9WRV9DT05GTElDVF9SRUFTT05fVU5TUEVDSUZJRUQQABIxCi1NT1ZFX0NPTkZMSUNUX1JFQVNPTl9HRU9NRVRSWV9WRVJTSU9OX0NIQU5HRUQQARIoCiRNT1ZFX0NPTkZMSUNUX1JFQVNPTl9UQVJHRVRTX0NIQU5HRUQQAirgAQoTTW92ZVJlamVjdGlvblJlYXNvbhIlCiFNT1ZFX1JFSkVDVElPTl9SRUFTT05fVU5TUEVDSUZJRUQQABIjCh9NT1ZFX1JFSkVDVElPTl9SRUFTT05fRk9SQklEREVOEAESKQolTU9WRV9SRUpFQ1RJT05fUkVBU09OX0dFT01FVFJZX0xPQ0tFRBACEiYKIk1PVkVfUkVKRUNUSU9OX1JFQVNPTl9JTlZBTElEX01PVkUQAxIqCiZNT1ZFX1JFSkVDVElPTl9SRUFTT05fQ09NTUFORF9JRF9SRVVTRRAEMokEChFXaGl0ZWJvYXJkU2VydmljZRJgCg1HZXRCb2FyZFNjZW5lEiYubHVtaW5nLnN0dWRpby52MS5HZXRCb2FyZFNjZW5lUmVxdWVzdBonLmx1bWluZy5zdHVkaW8udjEuR2V0Qm9hcmRTY2VuZVJlc3BvbnNlEmwKEUdldE9iamVjdFBheWxvYWRzEioubHVtaW5nLnN0dWRpby52MS5HZXRPYmplY3RQYXlsb2Fkc1JlcXVlc3QaKy5sdW1pbmcuc3R1ZGlvLnYxLkdldE9iamVjdFBheWxvYWRzUmVzcG9uc2USWgoLTW92ZU9iamVjdHMSJC5sdW1pbmcuc3R1ZGlvLnYxLk1vdmVPYmplY3RzUmVxdWVzdBolLmx1bWluZy5zdHVkaW8udjEuTW92ZU9iamVjdHNSZXNwb25zZRJsChFHZXRDb21tYW5kUmVjZWlwdBIqLmx1bWluZy5zdHVkaW8udjEuR2V0Q29tbWFuZFJlY2VpcHRSZXF1ZXN0GisubHVtaW5nLnN0dWRpby52MS5HZXRDb21tYW5kUmVjZWlwdFJlc3BvbnNlEloKC0V4cG9ydEJvYXJkEiQubHVtaW5nLnN0dWRpby52MS5FeHBvcnRCb2FyZFJlcXVlc3QaJS5sdW1pbmcuc3R1ZGlvLnYxLkV4cG9ydEJvYXJkUmVzcG9uc2ViBnByb3RvMw", [file_luming_studio_v1_whiteboard_payload, file_luming_studio_v1_whiteboard_scene]);
-var ObjectPayloadResultSchema = /* @__PURE__ */ messageDesc(file_luming_studio_v1_whiteboard_service, 13);
-var CommandReceiptSchema = /* @__PURE__ */ messageDesc(file_luming_studio_v1_whiteboard_service, 19);
+var file_luming_studio_v1_whiteboard_service = /* @__PURE__ */ fileDesc("CilsdW1pbmcvc3R1ZGlvL3YxL3doaXRlYm9hcmRfc2VydmljZS5wcm90bxIQbHVtaW5nLnN0dWRpby52MSLlAgoSRXhwb3J0Qm9hcmRSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEh4KEWV4cGVjdGVkX3JldmlzaW9uGAIgASgESAGIAQESMwoFd2hvbGUYAyABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkV4cG9ydFdob2xlQm9hcmRIABI7CglzZWxlY3Rpb24YBCABKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkV4cG9ydEJvYXJkU2VsZWN0aW9uSAASMwoGZm9ybWF0GAUgASgOMiMubHVtaW5nLnN0dWRpby52MS5Cb2FyZEV4cG9ydEZvcm1hdBI5CglyZWN0YW5nbGUYBiABKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkV4cG9ydEJvYXJkUmVjdGFuZ2xlEhIKBXNjYWxlGAcgASgBSAKIAQFCBwoFc2NvcGVCFAoSX2V4cGVjdGVkX3JldmlzaW9uQggKBl9zY2FsZSISChBFeHBvcnRXaG9sZUJvYXJkIioKFEV4cG9ydEJvYXJkU2VsZWN0aW9uEhIKCm9iamVjdF9pZHMYASADKAkiSwoURXhwb3J0Qm9hcmRSZWN0YW5nbGUSCQoBeBgBIAEoARIJCgF5GAIgASgBEg0KBXdpZHRoGAMgASgBEg4KBmhlaWdodBgEIAEoASKCAgoTRXhwb3J0Qm9hcmRSZXNwb25zZRIxCgRmaWxlGAEgASgLMiEubHVtaW5nLnN0dWRpby52MS5FeHBvcnRCb2FyZEZpbGVIABIzCgVzdGFsZRgCIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuRXhwb3J0Qm9hcmRTdGFsZUgAEjkKCHJlamVjdGVkGAMgASgLMiUubHVtaW5nLnN0dWRpby52MS5FeHBvcnRCb2FyZFJlamVjdGVkSAASPgoLYnJvd3Nlcl9wbmcYBCABKAsyJy5sdW1pbmcuc3R1ZGlvLnYxLkV4cG9ydEJvYXJkQnJvd3NlclBuZ0gAQggKBnJlc3VsdCKkAQoVRXhwb3J0Qm9hcmRCcm93c2VyUG5nEhAKCGZpbGVuYW1lGAEgASgJEhAKCHJldmlzaW9uGAIgASgEEg0KBXdpZHRoGAMgASgBEg4KBmhlaWdodBgEIAEoARIUCgxzdmdfdGVtcGxhdGUYBSABKAkSMgoHcmVnaW9ucxgGIAMoCzIhLmx1bWluZy5zdHVkaW8udjEuRXhwb3J0UG5nUmVnaW9uInEKD0V4cG9ydFBuZ1JlZ2lvbhINCgVpbmRleBgBIAEoDRIMCgRodG1sGAIgASgJEg0KBXdpZHRoGAMgASgBEg4KBmhlaWdodBgEIAEoARIVCghzY3JpcHRlZBgFIAEoCEgAiAEBQgsKCV9zY3JpcHRlZCJZCg9FeHBvcnRCb2FyZEZpbGUSEAoIZmlsZW5hbWUYASABKAkSEQoJbWltZV90eXBlGAIgASgJEhAKCHJldmlzaW9uGAMgASgEEg8KB2NvbnRlbnQYBCABKAwiJAoQRXhwb3J0Qm9hcmRTdGFsZRIQCghyZXZpc2lvbhgBIAEoBCJTChNFeHBvcnRCb2FyZFJlamVjdGVkEjwKBnJlYXNvbhgBIAEoDjIsLmx1bWluZy5zdHVkaW8udjEuQm9hcmRFeHBvcnRSZWplY3Rpb25SZWFzb24iKAoUR2V0Qm9hcmRTY2VuZVJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkiRAoVR2V0Qm9hcmRTY2VuZVJlc3BvbnNlEisKBXNjZW5lGAEgASgLMhwubHVtaW5nLnN0dWRpby52MS5Cb2FyZFNjZW5lIkAKGEdldE9iamVjdFBheWxvYWRzUmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRISCgpvYmplY3RfaWRzGAIgAygJImUKGUdldE9iamVjdFBheWxvYWRzUmVzcG9uc2USEAoIYm9hcmRfaWQYASABKAkSNgoHcmVzdWx0cxgCIAMoCzIlLmx1bWluZy5zdHVkaW8udjEuT2JqZWN0UGF5bG9hZFJlc3VsdCKpAQoTT2JqZWN0UGF5bG9hZFJlc3VsdBIRCglvYmplY3RfaWQYASABKAkSMgoHcGF5bG9hZBgCIAEoCzIfLmx1bWluZy5zdHVkaW8udjEuT2JqZWN0UGF5bG9hZEgAEkEKC3VuYXZhaWxhYmxlGAMgASgLMioubHVtaW5nLnN0dWRpby52MS5PYmplY3RQYXlsb2FkVW5hdmFpbGFibGVIAEIICgZyZXN1bHQiXAoYT2JqZWN0UGF5bG9hZFVuYXZhaWxhYmxlEkAKBnJlYXNvbhgBIAEoDjIwLmx1bWluZy5zdHVkaW8udjEuT2JqZWN0UGF5bG9hZFVuYXZhaWxhYmxlUmVhc29uIpUBChJNb3ZlT2JqZWN0c1JlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCRIqCgVkZWx0YRgDIAEoCzIbLmx1bWluZy5zdHVkaW8udjEuTW92ZURlbHRhEi0KB3RhcmdldHMYBCADKAsyHC5sdW1pbmcuc3R1ZGlvLnYxLk1vdmVUYXJnZXQiIwoJTW92ZURlbHRhEgoKAmR4GAEgASgBEgoKAmR5GAIgASgBImUKCk1vdmVUYXJnZXQSEQoJb2JqZWN0X2lkGAEgASgJEiYKGWV4cGVjdGVkX2dlb21ldHJ5X3ZlcnNpb24YAiABKARIAIgBAUIcChpfZXhwZWN0ZWRfZ2VvbWV0cnlfdmVyc2lvbiJIChNNb3ZlT2JqZWN0c1Jlc3BvbnNlEjEKB3JlY2VpcHQYASABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkNvbW1hbmRSZWNlaXB0ItsBCg5Db21tYW5kUmVjZWlwdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJEjAKB2FwcGxpZWQYAyABKAsyHS5sdW1pbmcuc3R1ZGlvLnYxLk1vdmVBcHBsaWVkSAASMgoIY29uZmxpY3QYBCABKAsyHi5sdW1pbmcuc3R1ZGlvLnYxLk1vdmVDb25mbGljdEgAEjIKCHJlamVjdGVkGAUgASgLMh4ubHVtaW5nLnN0dWRpby52MS5Nb3ZlUmVqZWN0ZWRIAEIJCgdvdXRjb21lInAKC01vdmVBcHBsaWVkEhsKDmJvYXJkX3JldmlzaW9uGAEgASgESACIAQESMQoHb2JqZWN0cxgCIAMoCzIgLmx1bWluZy5zdHVkaW8udjEuT2JqZWN0TWV0YWRhdGFCEQoPX2JvYXJkX3JldmlzaW9uIssBCgxNb3ZlQ29uZmxpY3QSNAoGcmVhc29uGAEgASgOMiQubHVtaW5nLnN0dWRpby52MS5Nb3ZlQ29uZmxpY3RSZWFzb24SGwoOYm9hcmRfcmV2aXNpb24YAiABKARIAIgBARI5Cg9jdXJyZW50X29iamVjdHMYAyADKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLk9iamVjdE1ldGFkYXRhEhoKEm1pc3Npbmdfb2JqZWN0X2lkcxgEIAMoCUIRCg9fYm9hcmRfcmV2aXNpb24iRQoMTW92ZVJlamVjdGVkEjUKBnJlYXNvbhgBIAEoDjIlLmx1bWluZy5zdHVkaW8udjEuTW92ZVJlamVjdGlvblJlYXNvbiJAChhHZXRDb21tYW5kUmVjZWlwdFJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCSKfAQoZR2V0Q29tbWFuZFJlY2VpcHRSZXNwb25zZRIzCgdyZWNlaXB0GAEgASgLMiAubHVtaW5nLnN0dWRpby52MS5Db21tYW5kUmVjZWlwdEgAEkMKDG5vdF9yZWNvcmRlZBgCIAEoCzIrLmx1bWluZy5zdHVkaW8udjEuQ29tbWFuZFJlY2VpcHROb3RSZWNvcmRlZEgAQggKBnJlc3VsdCJBChlDb21tYW5kUmVjZWlwdE5vdFJlY29yZGVkEhAKCGJvYXJkX2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkq8AEKEUJvYXJkRXhwb3J0Rm9ybWF0EiMKH0JPQVJEX0VYUE9SVF9GT1JNQVRfVU5TUEVDSUZJRUQQABIcChhCT0FSRF9FWFBPUlRfRk9STUFUX0pTT04QARIbChdCT0FSRF9FWFBPUlRfRk9STUFUX1NWRxACEhsKF0JPQVJEX0VYUE9SVF9GT1JNQVRfUE5HEAMSHAoYQk9BUkRfRVhQT1JUX0ZPUk1BVF9IVE1MEAQSGwoXQk9BUkRfRVhQT1JUX0ZPUk1BVF9aSVAQBRIjCh9CT0FSRF9FWFBPUlRfRk9STUFUX0hUTUxfU09VUkNFEAYqkQIKGkJvYXJkRXhwb3J0UmVqZWN0aW9uUmVhc29uEi0KKUJPQVJEX0VYUE9SVF9SRUpFQ1RJT05fUkVBU09OX1VOU1BFQ0lGSUVEEAASMwovQk9BUkRfRVhQT1JUX1JFSkVDVElPTl9SRUFTT05fSU5WQUxJRF9TRUxFQ1RJT04QARItCilCT0FSRF9FWFBPUlRfUkVKRUNUSU9OX1JFQVNPTl9VTlNVUFBPUlRFRBACEjMKL0JPQVJEX0VYUE9SVF9SRUpFQ1RJT05fUkVBU09OX0FTU0VUX1VOQVZBSUxBQkxFEAMSKwonQk9BUkRfRVhQT1JUX1JFSkVDVElPTl9SRUFTT05fVE9PX0xBUkdFEAQqvAEKHk9iamVjdFBheWxvYWRVbmF2YWlsYWJsZVJlYXNvbhIxCi1PQkpFQ1RfUEFZTE9BRF9VTkFWQUlMQUJMRV9SRUFTT05fVU5TUEVDSUZJRUQQABIvCitPQkpFQ1RfUEFZTE9BRF9VTkFWQUlMQUJMRV9SRUFTT05fTk9UX0ZPVU5EEAESNgoyT0JKRUNUX1BBWUxPQURfVU5BVkFJTEFCTEVfUkVBU09OX1VOU1VQUE9SVEVEX0tJTkQQAiqXAQoSTW92ZUNvbmZsaWN0UmVhc29uEiQKIE1PVkVfQ09ORkxJQ1RfUkVBU09OX1VOU1BFQ0lGSUVEEAASMQotTU9WRV9DT05GTElDVF9SRUFTT05fR0VPTUVUUllfVkVSU0lPTl9DSEFOR0VEEAESKAokTU9WRV9DT05GTElDVF9SRUFTT05fVEFSR0VUU19DSEFOR0VEEAIq4AEKE01vdmVSZWplY3Rpb25SZWFzb24SJQohTU9WRV9SRUpFQ1RJT05fUkVBU09OX1VOU1BFQ0lGSUVEEAASIwofTU9WRV9SRUpFQ1RJT05fUkVBU09OX0ZPUkJJRERFThABEikKJU1PVkVfUkVKRUNUSU9OX1JFQVNPTl9HRU9NRVRSWV9MT0NLRUQQAhImCiJNT1ZFX1JFSkVDVElPTl9SRUFTT05fSU5WQUxJRF9NT1ZFEAMSKgomTU9WRV9SRUpFQ1RJT05fUkVBU09OX0NPTU1BTkRfSURfUkVVU0UQBDKJBAoRV2hpdGVib2FyZFNlcnZpY2USYAoNR2V0Qm9hcmRTY2VuZRImLmx1bWluZy5zdHVkaW8udjEuR2V0Qm9hcmRTY2VuZVJlcXVlc3QaJy5sdW1pbmcuc3R1ZGlvLnYxLkdldEJvYXJkU2NlbmVSZXNwb25zZRJsChFHZXRPYmplY3RQYXlsb2FkcxIqLmx1bWluZy5zdHVkaW8udjEuR2V0T2JqZWN0UGF5bG9hZHNSZXF1ZXN0GisubHVtaW5nLnN0dWRpby52MS5HZXRPYmplY3RQYXlsb2Fkc1Jlc3BvbnNlEloKC01vdmVPYmplY3RzEiQubHVtaW5nLnN0dWRpby52MS5Nb3ZlT2JqZWN0c1JlcXVlc3QaJS5sdW1pbmcuc3R1ZGlvLnYxLk1vdmVPYmplY3RzUmVzcG9uc2USbAoRR2V0Q29tbWFuZFJlY2VpcHQSKi5sdW1pbmcuc3R1ZGlvLnYxLkdldENvbW1hbmRSZWNlaXB0UmVxdWVzdBorLmx1bWluZy5zdHVkaW8udjEuR2V0Q29tbWFuZFJlY2VpcHRSZXNwb25zZRJaCgtFeHBvcnRCb2FyZBIkLmx1bWluZy5zdHVkaW8udjEuRXhwb3J0Qm9hcmRSZXF1ZXN0GiUubHVtaW5nLnN0dWRpby52MS5FeHBvcnRCb2FyZFJlc3BvbnNlYgZwcm90bzM", [file_luming_studio_v1_whiteboard_payload, file_luming_studio_v1_whiteboard_scene]);
+var ObjectPayloadResultSchema = /* @__PURE__ */ messageDesc(file_luming_studio_v1_whiteboard_service, 14);
+var CommandReceiptSchema = /* @__PURE__ */ messageDesc(file_luming_studio_v1_whiteboard_service, 20);
 var BoardExportFormatSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_whiteboard_service, 0);
 var BoardExportFormat = /* @__PURE__ */ tsEnum(BoardExportFormatSchema);
 var BoardExportRejectionReasonSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_whiteboard_service, 1);
@@ -19403,6 +19759,14 @@ var BoardArrangePreset = /* @__PURE__ */ tsEnum(BoardArrangePresetSchema);
 var BoardEditRejectionReasonSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_whiteboard_edits, 3);
 var BoardEditRejectionReason = /* @__PURE__ */ tsEnum(BoardEditRejectionReasonSchema);
 var BoardEditService = /* @__PURE__ */ serviceDesc(file_luming_studio_v1_whiteboard_edits, 0);
+
+// ../../packages/contracts/dist/proto/luming/studio/v1/board_suggestion_service_pb.js
+var file_luming_studio_v1_board_suggestion_service = /* @__PURE__ */ fileDesc("Ci9sdW1pbmcvc3R1ZGlvL3YxL2JvYXJkX3N1Z2dlc3Rpb25fc2VydmljZS5wcm90bxIQbHVtaW5nLnN0dWRpby52MSIqChRCb2FyZFJldmlld1NlbGVjdGlvbhISCgpvYmplY3RfaWRzGAEgAygJIu0BCh5DcmVhdGVCb2FyZFJldmlld1NvdXJjZVJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCRI7CglzZWxlY3Rpb24YAyABKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUmV2aWV3U2VsZWN0aW9uSAASHAoSZmVlZGJhY2tfdGhyZWFkX2lkGAQgASgJSAASJAoXZXhwZWN0ZWRfYm9hcmRfcmV2aXNpb24YBSABKARIAYgBAUIICgZvcmlnaW5CGgoYX2V4cGVjdGVkX2JvYXJkX3JldmlzaW9uIrwCChFCb2FyZFJldmlld1NvdXJjZRIRCglzb3VyY2VfaWQYASABKAkSEAoIYm9hcmRfaWQYAiABKAkSJAoXY2FwdHVyZWRfYm9hcmRfcmV2aXNpb24YAyABKARIAIgBARISCgpvYmplY3RfaWRzGAQgAygJEh8KEmZlZWRiYWNrX3RocmVhZF9pZBgFIAEoCUgBiAEBEjQKB3RhcmdldHMYBiADKAsyIy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUmV2aWV3VGFyZ2V0EiMKFnRhcmdldHNfYm9hcmRfcmV2aXNpb24YByABKARIAogBAUIaChhfY2FwdHVyZWRfYm9hcmRfcmV2aXNpb25CFQoTX2ZlZWRiYWNrX3RocmVhZF9pZEIZChdfdGFyZ2V0c19ib2FyZF9yZXZpc2lvbiLIAQoRQm9hcmRSZXZpZXdUYXJnZXQSEQoJb2JqZWN0X2lkGAEgASgJEgwKBGtpbmQYAiABKAkSHQoQZ2VvbWV0cnlfdmVyc2lvbhgDIAEoBEgAiAEBEhwKD3BheWxvYWRfdmVyc2lvbhgEIAEoBEgBiAEBEiwKCGdlb21ldHJ5GAUgASgLMhoubHVtaW5nLnN0dWRpby52MS5HZW9tZXRyeUITChFfZ2VvbWV0cnlfdmVyc2lvbkISChBfcGF5bG9hZF92ZXJzaW9uIlYKH0NyZWF0ZUJvYXJkUmV2aWV3U291cmNlUmVzcG9uc2USMwoGc291cmNlGAEgASgLMiMubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJldmlld1NvdXJjZSKvAgoaQm9hcmRTdWdnZXN0aW9uT3B0aW9uSW5wdXQSEQoJb3B0aW9uX2lkGAEgASgJEg0KBWxhYmVsGAIgASgJEhgKC2Rlc2NyaXB0aW9uGAMgASgJSAGIAQESPgoIZ2VvbWV0cnkYBCABKAsyKi5sdW1pbmcuc3R1ZGlvLnYxLkVkaXRCb2FyZEdlb21ldHJ5UmVxdWVzdEgAEj0KB2NvbnRlbnQYBSABKAsyKi5sdW1pbmcuc3R1ZGlvLnYxLkVkaXRPYmplY3RDb250ZW50UmVxdWVzdEgAEj4KCm9wZXJhdGlvbnMYBiADKAsyKi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU3VnZ2VzdGlvbkVkaXRJbnB1dEIGCgRlZGl0Qg4KDF9kZXNjcmlwdGlvbiKhAQoYQm9hcmRTdWdnZXN0aW9uRWRpdElucHV0Ej4KCGdlb21ldHJ5GAEgASgLMioubHVtaW5nLnN0dWRpby52MS5FZGl0Qm9hcmRHZW9tZXRyeVJlcXVlc3RIABI9Cgdjb250ZW50GAIgASgLMioubHVtaW5nLnN0dWRpby52MS5FZGl0T2JqZWN0Q29udGVudFJlcXVlc3RIAEIGCgRlZGl0IqsBChxTdWJtaXRCb2FyZFN1Z2dlc3Rpb25SZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkSEQoJc291cmNlX2lkGAMgASgJEhMKC29ic2VydmF0aW9uGAQgASgJEj0KB29wdGlvbnMYBSADKAsyLC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU3VnZ2VzdGlvbk9wdGlvbklucHV0ImMKFUJvYXJkU3VnZ2VzdGlvbk9wdGlvbhIRCglvcHRpb25faWQYASABKAkSDQoFbGFiZWwYAiABKAkSGAoLZGVzY3JpcHRpb24YAyABKAlIAIgBAUIOCgxfZGVzY3JpcHRpb24i/gIKD0JvYXJkU3VnZ2VzdGlvbhITCgtwcm9wb3NhbF9pZBgBIAEoCRIRCglzb3VyY2VfaWQYAiABKAkSEwoLb2JzZXJ2YXRpb24YAyABKAkSHQoQcHJvcG9zYWxfdmVyc2lvbhgEIAEoBEgAiAEBEhkKEWV4cGlyZXNfYXRfbWlsbGlzGAUgASgEEjgKB29wdGlvbnMYBiADKAsyJy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU3VnZ2VzdGlvbk9wdGlvbhIfChJhY2NlcHRlZF9vcHRpb25faWQYByABKAlIAYgBARIkChdhY2NlcHRlZF9ib2FyZF9yZXZpc2lvbhgIIAEoBEgCiAEBEhAKCHJlamVjdGVkGAkgASgIEhkKEWFjdGl2ZV9vcHRpb25faWRzGAogAygJQhMKEV9wcm9wb3NhbF92ZXJzaW9uQhUKE19hY2NlcHRlZF9vcHRpb25faWRCGgoYX2FjY2VwdGVkX2JvYXJkX3JldmlzaW9uIlYKHVN1Ym1pdEJvYXJkU3VnZ2VzdGlvblJlc3BvbnNlEjUKCnN1Z2dlc3Rpb24YASABKAsyIS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU3VnZ2VzdGlvbiJ2ChtMaXN0Qm9hcmRTdWdnZXN0aW9uc1JlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSDQoFbGltaXQYAiABKA0SHwoSYmVmb3JlX3Byb3Bvc2FsX2lkGAMgASgJSACIAQFCFQoTX2JlZm9yZV9wcm9wb3NhbF9pZCKWAQocTGlzdEJvYXJkU3VnZ2VzdGlvbnNSZXNwb25zZRI0Cglwcm9wb3NhbHMYASADKAsyIS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU3VnZ2VzdGlvbhIkChduZXh0X2JlZm9yZV9wcm9wb3NhbF9pZBgCIAEoCUgAiAEBQhoKGF9uZXh0X2JlZm9yZV9wcm9wb3NhbF9pZCKfAQodUHJldmlld0JvYXJkU3VnZ2VzdGlvblJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEwoLcHJvcG9zYWxfaWQYAiABKAkSEQoJb3B0aW9uX2lkGAMgASgJEiYKGWV4cGVjdGVkX3Byb3Bvc2FsX3ZlcnNpb24YBCABKARIAIgBAUIcChpfZXhwZWN0ZWRfcHJvcG9zYWxfdmVyc2lvbiL2AQoWQm9hcmRTdWdnZXN0aW9uUHJldmlldxIbCg5ib2FyZF9yZXZpc2lvbhgBIAEoBEgAiAEBEjkKD2NoYW5nZWRfb2JqZWN0cxgCIAMoCzIgLmx1bWluZy5zdHVkaW8udjEuT2JqZWN0TWV0YWRhdGESGgoScmVtb3ZlZF9vYmplY3RfaWRzGAMgAygJEhQKDG9iamVjdF9vcmRlchgEIAMoCRI/ChBjaGFuZ2VkX3BheWxvYWRzGAUgAygLMiUubHVtaW5nLnN0dWRpby52MS5PYmplY3RQYXlsb2FkUmVzdWx0QhEKD19ib2FyZF9yZXZpc2lvbiLZAQoeUHJldmlld0JvYXJkU3VnZ2VzdGlvblJlc3BvbnNlEjsKB3ByZXZpZXcYASABKAsyKC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU3VnZ2VzdGlvblByZXZpZXdIABI3Cghjb25mbGljdBgCIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQm9hcmRFZGl0Q29uZmxpY3RIABI3CghyZWplY3RlZBgDIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQm9hcmRFZGl0UmVqZWN0ZWRIAEIICgZyZXN1bHQisgEKHEFjY2VwdEJvYXJkU3VnZ2VzdGlvblJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEwoLcHJvcG9zYWxfaWQYAiABKAkSEQoJb3B0aW9uX2lkGAMgASgJEiYKGWV4cGVjdGVkX3Byb3Bvc2FsX3ZlcnNpb24YBCABKARIAIgBARISCgpjb21tYW5kX2lkGAUgASgJQhwKGl9leHBlY3RlZF9wcm9wb3NhbF92ZXJzaW9uIlQKHUFjY2VwdEJvYXJkU3VnZ2VzdGlvblJlc3BvbnNlEjMKB3JlY2VpcHQYASABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkRWRpdFJlY2VpcHQi7gEKIUNob29zZUFnZW50Qm9hcmRTdWdnZXN0aW9uUmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRIQCghhZ2VudF9pZBgCIAEoCRIPCgd0YXNrX2lkGAMgASgJEhIKCmdlbmVyYXRpb24YBCABKAkSEgoKY29tbWFuZF9pZBgFIAEoCRITCgtwcm9wb3NhbF9pZBgGIAEoCRIRCglvcHRpb25faWQYByABKAkSJgoZZXhwZWN0ZWRfcHJvcG9zYWxfdmVyc2lvbhgIIAEoBEgAiAEBQhwKGl9leHBlY3RlZF9wcm9wb3NhbF92ZXJzaW9uIlkKIkNob29zZUFnZW50Qm9hcmRTdWdnZXN0aW9uUmVzcG9uc2USMwoHcmVjZWlwdBgBIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuQm9hcmRFZGl0UmVjZWlwdCKfAQocUmVqZWN0Qm9hcmRTdWdnZXN0aW9uUmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRITCgtwcm9wb3NhbF9pZBgCIAEoCRImChlleHBlY3RlZF9wcm9wb3NhbF92ZXJzaW9uGAMgASgESACIAQESEgoKY29tbWFuZF9pZBgEIAEoCUIcChpfZXhwZWN0ZWRfcHJvcG9zYWxfdmVyc2lvbiJWCh1SZWplY3RCb2FyZFN1Z2dlc3Rpb25SZXNwb25zZRI1CgpzdWdnZXN0aW9uGAEgASgLMiEubHVtaW5nLnN0dWRpby52MS5Cb2FyZFN1Z2dlc3Rpb24yhAcKFkJvYXJkU3VnZ2VzdGlvblNlcnZpY2USfgoXQ3JlYXRlQm9hcmRSZXZpZXdTb3VyY2USMC5sdW1pbmcuc3R1ZGlvLnYxLkNyZWF0ZUJvYXJkUmV2aWV3U291cmNlUmVxdWVzdBoxLmx1bWluZy5zdHVkaW8udjEuQ3JlYXRlQm9hcmRSZXZpZXdTb3VyY2VSZXNwb25zZRJ4ChVTdWJtaXRCb2FyZFN1Z2dlc3Rpb24SLi5sdW1pbmcuc3R1ZGlvLnYxLlN1Ym1pdEJvYXJkU3VnZ2VzdGlvblJlcXVlc3QaLy5sdW1pbmcuc3R1ZGlvLnYxLlN1Ym1pdEJvYXJkU3VnZ2VzdGlvblJlc3BvbnNlEnUKFExpc3RCb2FyZFN1Z2dlc3Rpb25zEi0ubHVtaW5nLnN0dWRpby52MS5MaXN0Qm9hcmRTdWdnZXN0aW9uc1JlcXVlc3QaLi5sdW1pbmcuc3R1ZGlvLnYxLkxpc3RCb2FyZFN1Z2dlc3Rpb25zUmVzcG9uc2USewoWUHJldmlld0JvYXJkU3VnZ2VzdGlvbhIvLmx1bWluZy5zdHVkaW8udjEuUHJldmlld0JvYXJkU3VnZ2VzdGlvblJlcXVlc3QaMC5sdW1pbmcuc3R1ZGlvLnYxLlByZXZpZXdCb2FyZFN1Z2dlc3Rpb25SZXNwb25zZRJ4ChVBY2NlcHRCb2FyZFN1Z2dlc3Rpb24SLi5sdW1pbmcuc3R1ZGlvLnYxLkFjY2VwdEJvYXJkU3VnZ2VzdGlvblJlcXVlc3QaLy5sdW1pbmcuc3R1ZGlvLnYxLkFjY2VwdEJvYXJkU3VnZ2VzdGlvblJlc3BvbnNlEocBChpDaG9vc2VBZ2VudEJvYXJkU3VnZ2VzdGlvbhIzLmx1bWluZy5zdHVkaW8udjEuQ2hvb3NlQWdlbnRCb2FyZFN1Z2dlc3Rpb25SZXF1ZXN0GjQubHVtaW5nLnN0dWRpby52MS5DaG9vc2VBZ2VudEJvYXJkU3VnZ2VzdGlvblJlc3BvbnNlEngKFVJlamVjdEJvYXJkU3VnZ2VzdGlvbhIuLmx1bWluZy5zdHVkaW8udjEuUmVqZWN0Qm9hcmRTdWdnZXN0aW9uUmVxdWVzdBovLmx1bWluZy5zdHVkaW8udjEuUmVqZWN0Qm9hcmRTdWdnZXN0aW9uUmVzcG9uc2ViBnByb3RvMw", [file_luming_studio_v1_whiteboard_edits, file_luming_studio_v1_whiteboard_scene, file_luming_studio_v1_whiteboard_service]);
+var BoardSuggestionService = /* @__PURE__ */ serviceDesc(file_luming_studio_v1_board_suggestion_service, 0);
+
+// ../../packages/contracts/dist/proto/luming/studio/v1/board_agent_write_service_pb.js
+var file_luming_studio_v1_board_agent_write_service = /* @__PURE__ */ fileDesc("CjBsdW1pbmcvc3R1ZGlvL3YxL2JvYXJkX2FnZW50X3dyaXRlX3NlcnZpY2UucHJvdG8SEGx1bWluZy5zdHVkaW8udjEiuQEKGkFwcGx5QWdlbnRCb2FyZEVkaXRSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJEg8KB3Rhc2tfaWQYAyABKAkSEgoKZ2VuZXJhdGlvbhgEIAEoCRISCgpjb21tYW5kX2lkGAUgASgJEj4KCm9wZXJhdGlvbnMYBiADKAsyKi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU3VnZ2VzdGlvbkVkaXRJbnB1dCJrChtBcHBseUFnZW50Qm9hcmRFZGl0UmVzcG9uc2USMwoHcmVjZWlwdBgBIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuQm9hcmRFZGl0UmVjZWlwdBIXCg9kZXRhaWxzX29taXR0ZWQYAiABKAgiYQofR2V0QWdlbnRCb2FyZEVkaXRSZWNlaXB0UmVxdWVzdBI+CghvcmlnaW5hbBgBIAEoCzIsLmx1bWluZy5zdHVkaW8udjEuQXBwbHlBZ2VudEJvYXJkRWRpdFJlcXVlc3QicAogR2V0QWdlbnRCb2FyZEVkaXRSZWNlaXB0UmVzcG9uc2USMwoHcmVjZWlwdBgBIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuQm9hcmRFZGl0UmVjZWlwdBIXCg9kZXRhaWxzX29taXR0ZWQYAiABKAgykAIKFkJvYXJkQWdlbnRXcml0ZVNlcnZpY2UScgoTQXBwbHlBZ2VudEJvYXJkRWRpdBIsLmx1bWluZy5zdHVkaW8udjEuQXBwbHlBZ2VudEJvYXJkRWRpdFJlcXVlc3QaLS5sdW1pbmcuc3R1ZGlvLnYxLkFwcGx5QWdlbnRCb2FyZEVkaXRSZXNwb25zZRKBAQoYR2V0QWdlbnRCb2FyZEVkaXRSZWNlaXB0EjEubHVtaW5nLnN0dWRpby52MS5HZXRBZ2VudEJvYXJkRWRpdFJlY2VpcHRSZXF1ZXN0GjIubHVtaW5nLnN0dWRpby52MS5HZXRBZ2VudEJvYXJkRWRpdFJlY2VpcHRSZXNwb25zZWIGcHJvdG8z", [file_luming_studio_v1_board_suggestion_service, file_luming_studio_v1_whiteboard_edits]);
+var BoardAgentWriteService = /* @__PURE__ */ serviceDesc(file_luming_studio_v1_board_agent_write_service, 0);
 
 // src/entrypoints/http/payload.ts
 function toPayloadResult(result) {
@@ -19440,13 +19804,13 @@ var CONNECTOR_HEADS = {
   circle: ConnectorHead.CIRCLE
 };
 function toEndpoint(endpoint2) {
-  const { point: point2, attachment } = endpoint2;
+  const { point: point3, attachment } = endpoint2;
   if (!attachment) {
-    return { point: point2 };
+    return { point: point3 };
   }
   const { objectId, port } = attachment;
   return {
-    point: point2,
+    point: point3,
     attachment: { objectId, port: port ? CONNECTOR_PORTS[port] : ConnectorPort.UNSPECIFIED }
   };
 }
@@ -19568,26 +19932,51 @@ function toBoardEditReceipt({
   };
 }
 
-// src/entrypoints/http/document-image-route.ts
-var upload = BoardEditService.method.uploadBoardDocumentImage;
-var assetPrefix4 = "document-image-";
-var boardDocumentImageRoutePath = "/" + BoardEditService.typeName + "/" + upload.name;
-function createDocumentImageRoute(application, digest2) {
-  return asyncUnaryRoute(upload, async (actor, request) => {
-    const boardId = requireId(request.boardId);
-    const commandId = requireId(request.commandId);
-    const objectId = requireId(request.objectId);
-    const identity = new TextEncoder().encode(JSON.stringify([boardId, actor.id, commandId]));
-    const assetId = assetPrefix4 + digest2(identity);
-    const signature = assetPrefix4 + digest2(toBinary(upload.input, request));
-    const { receipt, assetUrl } = await application.uploadDocumentImage(actor, {
-      boardId,
-      commandId,
-      operation: { objectId, assetId, content: request.content },
-      signature
-    });
-    return { receipt: toBoardEditReceipt(receipt), assetUrl };
-  });
+// src/entrypoints/http/request.ts
+import { Buffer as Buffer2 } from "node:buffer";
+var MAX_REQUEST_BYTES = 1024 * 1024;
+var HttpRequestError = class extends Error {
+  constructor(status, message, options) {
+    super(message, options);
+    this.status = status;
+  }
+  status;
+};
+function mediaType(request) {
+  return request.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase();
+}
+function requireBodySize(bytes, limit) {
+  if (bytes > limit) {
+    throw new HttpRequestError(413, "Protobuf request exceeds the size limit");
+  }
+}
+async function readBody(request, limit = MAX_REQUEST_BYTES) {
+  requireBodySize(Number(request.headers["content-length"] ?? 0), limit);
+  const chunks = [];
+  let bytes = 0;
+  for await (const value of request.iterator({ destroyOnReturn: false })) {
+    const chunk = value;
+    if (!Buffer2.isBuffer(chunk)) {
+      throw new TypeError("Expected binary HTTP request chunks");
+    }
+    bytes += chunk.byteLength;
+    requireBodySize(bytes, limit);
+    chunks.push(chunk);
+  }
+  return Buffer2.concat(chunks, bytes);
+}
+function decodeRequest(schema2, body) {
+  try {
+    return fromBinary(schema2, body, { readUnknownFields: false });
+  } catch (error) {
+    throw new HttpRequestError(400, "Malformed Protobuf request", { cause: error });
+  }
+}
+function requireId(value) {
+  if (!value.trim()) {
+    throw new HttpRequestError(400, "Request identifier is required");
+  }
+  return value;
 }
 
 // src/entrypoints/http/content-edits.ts
@@ -19837,8 +20226,8 @@ function readPoint({ x, y }) {
   return { x, y };
 }
 function readEndpoint(value) {
-  const { point: point2, attachment } = requireField(value, "Connector endpoint");
-  const origin = readPoint(requireField(point2, "Connector point"));
+  const { point: point3, attachment } = requireField(value, "Connector endpoint");
+  const origin = readPoint(requireField(point3, "Connector point"));
   if (!attachment) {
     return { point: origin };
   }
@@ -20074,6 +20463,542 @@ function readGeometryOperation({ operation }) {
   }
 }
 
+// src/entrypoints/http/unary-route.ts
+function canReadTrashedBoard(actor) {
+  return actor.kind !== "agent" && actor.guestScope === void 0;
+}
+function unaryRoute(method4, handle) {
+  const path3 = `/${method4.parent.typeName}/${method4.name}`;
+  return [
+    path3,
+    (actor, body) => {
+      const request = decodeRequest(method4.input, body);
+      actor.authorize?.(request);
+      const response = handle(actor, request);
+      return toBinary(method4.output, create(method4.output, response));
+    }
+  ];
+}
+function asyncUnaryRoute(method4, handle) {
+  const path3 = `/${method4.parent.typeName}/${method4.name}`;
+  return [
+    path3,
+    async (actor, body) => {
+      const request = decodeRequest(method4.input, body);
+      actor.authorize?.(request);
+      const response = await handle(actor, request);
+      return toBinary(method4.output, create(method4.output, response));
+    }
+  ];
+}
+
+// src/entrypoints/http/agent-board-write.ts
+var { applyAgentBoardEdit, getAgentBoardEditReceipt } = BoardAgentWriteService.method;
+var identifier2 = /^[A-Za-z0-9_.:-]{1,160}$/u;
+var maximumReceiptDetails = 64;
+var agentBoardPath = "/" + BoardAgentWriteService.typeName + "/";
+var agentBoardWritePath = agentBoardPath + applyAgentBoardEdit.name;
+var agentBoardReceiptPath = agentBoardPath + getAgentBoardEditReceipt.name;
+var agentBoardWriteRequestLimit = 256 * 1024;
+function readIdentity(request, ownerId) {
+  const { boardId, commandId, agentId, taskId, generation } = request;
+  const validValues = [boardId, commandId, agentId, taskId, generation].every(
+    (id) => identifier2.test(id)
+  );
+  const agentSession = agentId.startsWith("agent-") && agentId !== ownerId;
+  if (!validValues || !agentSession) {
+    throw new HttpRequestError(
+      400,
+      "A board, an Agent session and a current workspace generation are required."
+    );
+  }
+  return { boardId, commandId, agentId, taskId, generation };
+}
+function readOperation({
+  edit
+}) {
+  if (!edit.case || edit.value.boardId || edit.value.commandId) {
+    throw new HttpRequestError(
+      400,
+      "Each Agent edit must use the outer board and command identifiers."
+    );
+  }
+  return edit.case === "geometry" ? { kind: "geometry", operation: readGeometryOperation(edit.value) } : { kind: "content", operation: readContentOperation(edit.value) };
+}
+function modelReceipt(receipt) {
+  const { outcome } = receipt;
+  if (outcome.kind === "rejected") {
+    return { receipt, detailsOmitted: false };
+  }
+  const objects = outcome.objects?.slice(0, maximumReceiptDetails);
+  if (outcome.kind === "conflict") {
+    const omittedObjects2 = (outcome.objects?.length ?? 0) > maximumReceiptDetails;
+    return {
+      receipt: { ...receipt, outcome: { ...outcome, objects, payloads: void 0 } },
+      detailsOmitted: omittedObjects2 || Boolean(outcome.payloads?.length)
+    };
+  }
+  const removals = outcome.removedObjectIds.slice(0, maximumReceiptDetails);
+  const omittedObjects = outcome.objects.length > maximumReceiptDetails;
+  const omittedRemovals = outcome.removedObjectIds.length > maximumReceiptDetails;
+  const omittedContent = Boolean(
+    outcome.payloads.length || outcome.removedPayloadObjectIds?.length
+  );
+  const omittedGeometry = omittedObjects || omittedRemovals || Boolean(outcome.order);
+  return {
+    receipt: {
+      ...receipt,
+      outcome: {
+        ...outcome,
+        objects: objects ?? [],
+        removedObjectIds: removals,
+        payloads: [],
+        removedPayloadObjectIds: void 0,
+        order: void 0
+      }
+    },
+    detailsOmitted: omittedGeometry || omittedContent
+  };
+}
+function createAgentBoardWriteRoutes(application, digest2, observe) {
+  function command(actor, request) {
+    if (actor.kind !== "agent" || actor.guestScope) {
+      throw new WhiteboardAccessError();
+    }
+    const identity = readIdentity(request, actor.id);
+    if (!request.operations.length || request.operations.length > maximumAgentBoardWriteOperations) {
+      throw new HttpRequestError(
+        400,
+        "A scoped Agent edit requires between one and sixty operations."
+      );
+    }
+    return {
+      ...identity,
+      signature: "agent-write:" + digest2(toBinary(applyAgentBoardEdit.input, request))
+    };
+  }
+  function response(receipt) {
+    const bounded2 = modelReceipt(receipt);
+    return { receipt: toBoardEditReceipt(bounded2.receipt), detailsOmitted: bounded2.detailsOmitted };
+  }
+  return [
+    unaryRoute(applyAgentBoardEdit, (actor, request) => {
+      const receipt = application.apply(actor.id, {
+        ...command(actor, request),
+        operations: request.operations.map(readOperation)
+      });
+      observe?.(receipt);
+      return response(receipt);
+    }),
+    unaryRoute(getAgentBoardEditReceipt, (actor, { original }) => {
+      if (!original) {
+        throw new HttpRequestError(400, "The original Agent edit is required.");
+      }
+      const receipt = application.getReceipt(actor.id, command(actor, original));
+      if (receipt?.outcome.kind === "rejected") {
+        if (receipt.outcome.reason === "forbidden") {
+          throw new WhiteboardAccessError();
+        }
+        throw new HttpRequestError(409, "The command does not match the original Agent edit.");
+      }
+      return receipt ? response(receipt) : {};
+    })
+  ];
+}
+
+// src/entrypoints/http/archive-routes.ts
+import { Buffer as Buffer3 } from "node:buffer";
+
+// ../../packages/contracts/dist/proto/luming/studio/v1/board_archive_service_pb.js
+var file_luming_studio_v1_board_archive_service = /* @__PURE__ */ fileDesc("CixsdW1pbmcvc3R1ZGlvL3YxL2JvYXJkX2FyY2hpdmVfc2VydmljZS5wcm90bxIQbHVtaW5nLnN0dWRpby52MSJdChNCb2FyZEFzc2V0UmVmZXJlbmNlEhAKCGFzc2V0X2lkGAEgASgJEgsKA3NyYxgCIAEoCRISCgptZWRpYV90eXBlGAMgASgJEhMKC2J5dGVfbGVuZ3RoGAQgASgNImgKFkxpc3RCb2FyZEFzc2V0c1JlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEwoGY3Vyc29yGAIgASgJSACIAQESEgoFbGltaXQYAyABKA1IAYgBAUIJCgdfY3Vyc29yQggKBl9saW1pdCJ6ChdMaXN0Qm9hcmRBc3NldHNSZXNwb25zZRI1CgZhc3NldHMYASADKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkQXNzZXRSZWZlcmVuY2USGAoLbmV4dF9jdXJzb3IYAiABKAlIAIgBAUIOCgxfbmV4dF9jdXJzb3IiUAoXSW1wb3J0Qm9hcmRBc3NldFJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCRIPCgdjb250ZW50GAMgASgMIpcBChhJbXBvcnRCb2FyZEFzc2V0UmVzcG9uc2USNgoFYXNzZXQYASABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkQXNzZXRSZWZlcmVuY2VIABI5CghyZWplY3RlZBgCIAEoDjIlLmx1bWluZy5zdHVkaW8udjEuQm9hcmRBc3NldFJlamVjdGlvbkgAQggKBnJlc3VsdCI9ChdEZWxldGVCb2FyZEFzc2V0UmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRIQCghhc3NldF9pZBgCIAEoCSJyChhEZWxldGVCb2FyZEFzc2V0UmVzcG9uc2USEQoHcmVtb3ZlZBgBIAEoCUgAEjkKCHJlamVjdGVkGAIgASgOMiUubHVtaW5nLnN0dWRpby52MS5Cb2FyZEFzc2V0UmVqZWN0aW9uSABCCAoGcmVzdWx0IlUKGkltcG9ydEJvYXJkQXJjaGl2ZVJlc3BvbnNlEjcKB3JlY2VpcHQYASABKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkFyY2hpdmVJbXBvcnRSZWNlaXB0IqgBChRBcmNoaXZlSW1wb3J0UmVjZWlwdBISCgpjb21tYW5kX2lkGAEgASgJEjMKCGltcG9ydGVkGAIgASgLMh8ubHVtaW5nLnN0dWRpby52MS5JbXBvcnRlZEJvYXJkSAASPAoIcmVqZWN0ZWQYAyABKAsyKC5sdW1pbmcuc3R1ZGlvLnYxLkFyY2hpdmVJbXBvcnRSZWplY3Rpb25IAEIJCgdvdXRjb21lIjAKDUltcG9ydGVkQm9hcmQSEAoIYm9hcmRfaWQYASABKAkSDQoFdGl0bGUYAiABKAkiaQoWQXJjaGl2ZUltcG9ydFJlamVjdGlvbhI+CgZyZWFzb24YASABKA4yLi5sdW1pbmcuc3R1ZGlvLnYxLkFyY2hpdmVJbXBvcnRSZWplY3Rpb25SZWFzb24SDwoHbWVzc2FnZRgCIAEoCSI0Ch5HZXRBcmNoaXZlSW1wb3J0UmVjZWlwdFJlcXVlc3QSEgoKY29tbWFuZF9pZBgBIAEoCSI1Ch9BcmNoaXZlSW1wb3J0UmVjZWlwdE5vdFJlY29yZGVkEhIKCmNvbW1hbmRfaWQYASABKAkisQEKH0dldEFyY2hpdmVJbXBvcnRSZWNlaXB0UmVzcG9uc2USOQoHcmVjZWlwdBgBIAEoCzImLmx1bWluZy5zdHVkaW8udjEuQXJjaGl2ZUltcG9ydFJlY2VpcHRIABJJCgxub3RfcmVjb3JkZWQYAiABKAsyMS5sdW1pbmcuc3R1ZGlvLnYxLkFyY2hpdmVJbXBvcnRSZWNlaXB0Tm90UmVjb3JkZWRIAEIICgZyZXN1bHQqhwIKE0JvYXJkQXNzZXRSZWplY3Rpb24SJQohQk9BUkRfQVNTRVRfUkVKRUNUSU9OX1VOU1BFQ0lGSUVEEAASJwojQk9BUkRfQVNTRVRfUkVKRUNUSU9OX0lOVkFMSURfTUVESUEQARIjCh9CT0FSRF9BU1NFVF9SRUpFQ1RJT05fVE9PX0xBUkdFEAISKgomQk9BUkRfQVNTRVRfUkVKRUNUSU9OX0NPTU1BTkRfSURfUkVVU0UQAxIjCh9CT0FSRF9BU1NFVF9SRUpFQ1RJT05fTk9UX0ZPVU5EEAQSKgomQk9BUkRfQVNTRVRfUkVKRUNUSU9OX1JFRkVSRU5DRV9JTl9VU0UQBSqtAgocQXJjaGl2ZUltcG9ydFJlamVjdGlvblJlYXNvbhIvCitBUkNISVZFX0lNUE9SVF9SRUpFQ1RJT05fUkVBU09OX1VOU1BFQ0lGSUVEEAASMwovQVJDSElWRV9JTVBPUlRfUkVKRUNUSU9OX1JFQVNPTl9JTlZBTElEX0FSQ0hJVkUQARI3CjNBUkNISVZFX0lNUE9SVF9SRUpFQ1RJT05fUkVBU09OX1VOU1VQUE9SVEVEX1ZFUlNJT04QAhI4CjRBUkNISVZFX0lNUE9SVF9SRUpFQ1RJT05fUkVBU09OX0lOQ09NUEFUSUJMRV9DT05URU5UEAMSNAowQVJDSElWRV9JTVBPUlRfUkVKRUNUSU9OX1JFQVNPTl9DT01NQU5EX0lEX1JFVVNFEAQy0wMKE0JvYXJkQXJjaGl2ZVNlcnZpY2USfgoXR2V0QXJjaGl2ZUltcG9ydFJlY2VpcHQSMC5sdW1pbmcuc3R1ZGlvLnYxLkdldEFyY2hpdmVJbXBvcnRSZWNlaXB0UmVxdWVzdBoxLmx1bWluZy5zdHVkaW8udjEuR2V0QXJjaGl2ZUltcG9ydFJlY2VpcHRSZXNwb25zZRJmCg9MaXN0Qm9hcmRBc3NldHMSKC5sdW1pbmcuc3R1ZGlvLnYxLkxpc3RCb2FyZEFzc2V0c1JlcXVlc3QaKS5sdW1pbmcuc3R1ZGlvLnYxLkxpc3RCb2FyZEFzc2V0c1Jlc3BvbnNlEmkKEEltcG9ydEJvYXJkQXNzZXQSKS5sdW1pbmcuc3R1ZGlvLnYxLkltcG9ydEJvYXJkQXNzZXRSZXF1ZXN0GioubHVtaW5nLnN0dWRpby52MS5JbXBvcnRCb2FyZEFzc2V0UmVzcG9uc2USaQoQRGVsZXRlQm9hcmRBc3NldBIpLmx1bWluZy5zdHVkaW8udjEuRGVsZXRlQm9hcmRBc3NldFJlcXVlc3QaKi5sdW1pbmcuc3R1ZGlvLnYxLkRlbGV0ZUJvYXJkQXNzZXRSZXNwb25zZWIGcHJvdG8z");
+var ImportBoardArchiveResponseSchema = /* @__PURE__ */ messageDesc(file_luming_studio_v1_board_archive_service, 7);
+var BoardAssetRejectionSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_board_archive_service, 0);
+var BoardAssetRejection = /* @__PURE__ */ tsEnum(BoardAssetRejectionSchema);
+var ArchiveImportRejectionReasonSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_board_archive_service, 1);
+var ArchiveImportRejectionReason = /* @__PURE__ */ tsEnum(ArchiveImportRejectionReasonSchema);
+var BoardArchiveService = /* @__PURE__ */ serviceDesc(file_luming_studio_v1_board_archive_service, 0);
+
+// src/entrypoints/http/response.ts
+var protobufContentType = "application/protobuf";
+function sendStatus(response, status) {
+  if (status === 413) {
+    response.setHeader("connection", "close");
+  }
+  response.writeHead(status, { "cache-control": "no-store", "content-length": 0 }).end();
+}
+function sendProtobuf(response, result) {
+  response.writeHead(200, {
+    "content-type": protobufContentType,
+    "content-length": result.byteLength,
+    "cache-control": "no-store"
+  });
+  response.end(result);
+}
+
+// src/entrypoints/http/archive-routes.ts
+var archiveImportPath = "/" + BoardArchiveService.typeName + "/ImportBoardArchive";
+var archiveAssetPrefix = "/studio-archive-assets/";
+var archiveContentType = "application/zip";
+var commandHeader = "x-studio-command-id";
+var rejectionCodes = {
+  invalidArchive: ArchiveImportRejectionReason.INVALID_ARCHIVE,
+  unsupportedVersion: ArchiveImportRejectionReason.UNSUPPORTED_VERSION,
+  incompatibleContent: ArchiveImportRejectionReason.INCOMPATIBLE_CONTENT,
+  commandIdReuse: ArchiveImportRejectionReason.COMMAND_ID_REUSE,
+  tooLarge: ArchiveImportRejectionReason.INVALID_ARCHIVE
+};
+var assetRejectionCodes = {
+  invalidMedia: BoardAssetRejection.INVALID_MEDIA,
+  tooLarge: BoardAssetRejection.TOO_LARGE,
+  commandIdReuse: BoardAssetRejection.COMMAND_ID_REUSE,
+  notFound: BoardAssetRejection.NOT_FOUND,
+  referenceInUse: BoardAssetRejection.REFERENCE_IN_USE
+};
+function receiptMessage({
+  commandId,
+  outcome
+}) {
+  if (outcome.kind === "rejected") {
+    return {
+      commandId,
+      outcome: { case: "rejected", value: { reason: rejectionCodes[outcome.reason] } }
+    };
+  }
+  const { boardId, title } = outcome;
+  return { commandId, outcome: { case: "imported", value: { boardId, title } } };
+}
+function createArchiveReceiptRoute(application) {
+  return unaryRoute(BoardArchiveService.method.getArchiveImportReceipt, ({ id }, { commandId }) => {
+    const receipt = application.getReceipt(id, commandId);
+    return {
+      result: receipt ? { case: "receipt", value: receiptMessage(receipt) } : { case: "notRecorded", value: { commandId } }
+    };
+  });
+}
+function createBoardAssetRoutes(application) {
+  const { listBoardAssets: listBoardAssets2, importBoardAsset: importBoardAsset2, deleteBoardAsset: deleteBoardAsset2 } = BoardArchiveService.method;
+  return [
+    unaryRoute(listBoardAssets2, ({ id }, { boardId, cursor, limit }) => {
+      const { assets, nextCursor } = application.listBoardAssets(id, boardId, cursor, limit);
+      return { assets: [...assets], nextCursor };
+    }),
+    asyncUnaryRoute(importBoardAsset2, async ({ id }, { boardId, commandId, content }) => {
+      const outcome = await application.importBoardAsset(id, boardId, commandId, content);
+      const result = outcome.kind === "asset" ? { case: "asset", value: outcome.asset } : { case: "rejected", value: assetRejectionCodes[outcome.reason] };
+      return { result };
+    }),
+    unaryRoute(deleteBoardAsset2, ({ id }, { boardId, assetId }) => {
+      const outcome = application.deleteBoardAsset(id, boardId, assetId);
+      const result = outcome.kind === "removed" ? { case: "removed", value: outcome.assetId } : { case: "rejected", value: assetRejectionCodes[outcome.reason] };
+      return { result };
+    })
+  ];
+}
+async function* archiveChunks(request) {
+  for await (const value of request.iterator({ destroyOnReturn: false })) {
+    const chunk = value;
+    if (!Buffer3.isBuffer(chunk)) {
+      throw new TypeError("Expected a binary archive request.");
+    }
+    yield chunk;
+  }
+}
+async function importArchive(application, actor, request, response) {
+  if (mediaType(request) !== archiveContentType) {
+    sendStatus(response, 415);
+    return;
+  }
+  if (Number(request.headers["content-length"]) > MAX_ARCHIVE_IMPORT_BYTES) {
+    throw new HttpRequestError(413, "Archive exceeds the size limit.");
+  }
+  const commandId = request.headers[commandHeader];
+  if (typeof commandId !== "string") {
+    throw new HttpRequestError(400, "Archive command identifier is required.");
+  }
+  const receipt = await application.importCurrent(actor.id, commandId, archiveChunks(request));
+  if (receipt.outcome.kind === "rejected" && receipt.outcome.reason === "tooLarge") {
+    sendStatus(response, 413);
+    return;
+  }
+  const schema2 = ImportBoardArchiveResponseSchema;
+  sendProtobuf(response, toBinary(schema2, create(schema2, { receipt: receiptMessage(receipt) })));
+}
+function serveArchiveAsset(application, actor, path3, response) {
+  const [boardId, assetId, extra] = path3.slice(archiveAssetPrefix.length).split("/");
+  if (!boardId || !assetId || extra !== void 0) {
+    sendStatus(response, 404);
+    return;
+  }
+  actor.authorize?.({ boardId });
+  const asset = application.getAsset(actor.id, boardId, assetId, canReadTrashedBoard(actor));
+  if (!asset) {
+    sendStatus(response, 404);
+    return;
+  }
+  const bytes = asset.mimeType === "image/svg+xml" ? readArchivedSvgImage(asset.bytes) : asset.bytes;
+  if (!bytes) {
+    sendStatus(response, 404);
+    return;
+  }
+  response.writeHead(200, {
+    "content-type": asset.mimeType,
+    "content-length": bytes.byteLength,
+    "cache-control": "private, no-store",
+    "content-security-policy": "default-src 'none'; sandbox",
+    "x-content-type-options": "nosniff"
+  });
+  response.end(bytes);
+}
+function archiveRoute(path3, application) {
+  if (path3 === archiveImportPath) {
+    return {
+      method: "POST",
+      run: (actor, request, response) => importArchive(application, actor, request, response)
+    };
+  }
+  if (path3.startsWith(archiveAssetPrefix)) {
+    return {
+      method: "GET",
+      run: (actor, _request, response) => serveArchiveAsset(application, actor, path3, response)
+    };
+  }
+  return void 0;
+}
+
+// ../../packages/contracts/dist/proto/luming/studio/v1/board_catalog_service_pb.js
+var file_luming_studio_v1_board_catalog_service = /* @__PURE__ */ fileDesc("CixsdW1pbmcvc3R1ZGlvL3YxL2JvYXJkX2NhdGFsb2dfc2VydmljZS5wcm90bxIQbHVtaW5nLnN0dWRpby52MSJ+ChRXb3JrYmVuY2hQcmVmZXJlbmNlcxITCgZsYXlvdXQYASABKAlIAIgBARISCgV0aGVtZRgCIAEoCUgBiAEBEhgKC3Bpbm5lZF9vbmx5GAMgASgISAKIAQFCCQoHX2xheW91dEIICgZfdGhlbWVCDgoMX3Bpbm5lZF9vbmx5IiAKHkdldFdvcmtiZW5jaFByZWZlcmVuY2VzUmVxdWVzdCJeCh9HZXRXb3JrYmVuY2hQcmVmZXJlbmNlc1Jlc3BvbnNlEjsKC3ByZWZlcmVuY2VzGAEgASgLMiYubHVtaW5nLnN0dWRpby52MS5Xb3JrYmVuY2hQcmVmZXJlbmNlcyJcCiFVcGRhdGVXb3JrYmVuY2hQcmVmZXJlbmNlc1JlcXVlc3QSNwoHY2hhbmdlcxgBIAEoCzImLmx1bWluZy5zdHVkaW8udjEuV29ya2JlbmNoUHJlZmVyZW5jZXMiJAoiVXBkYXRlV29ya2JlbmNoUHJlZmVyZW5jZXNSZXNwb25zZSLrAQoMQm9hcmRTdW1tYXJ5EhAKCGJvYXJkX2lkGAEgASgJEg0KBXRpdGxlGAIgASgJEh4KEXVwZGF0ZWRfYXRfbWlsbGlzGAMgASgESACIAQESDgoGcGlubmVkGAQgASgIEhoKDWVudHJ5X3ZlcnNpb24YBSABKARIAYgBARISCgpjYW5fbWFuYWdlGAYgASgIEh0KEHByZXZpZXdfcmV2aXNpb24YByABKARIAogBAUIUChJfdXBkYXRlZF9hdF9taWxsaXNCEAoOX2VudHJ5X3ZlcnNpb25CEwoRX3ByZXZpZXdfcmV2aXNpb24iuwEKEUxpc3RCb2FyZHNSZXF1ZXN0Eg0KBXF1ZXJ5GAEgASgJEi8KBW9yZGVyGAIgASgOMiAubHVtaW5nLnN0dWRpby52MS5Cb2FyZFNvcnRPcmRlchIRCglwYWdlX3NpemUYAyABKA0SEwoGY3Vyc29yGAQgASgJSACIAQESEwoLcGlubmVkX29ubHkYBSABKAgSEwoGb2Zmc2V0GAYgASgNSAGIAQFCCQoHX2N1cnNvckIJCgdfb2Zmc2V0Im4KEkxpc3RCb2FyZHNSZXNwb25zZRIuCgZib2FyZHMYASADKAsyHi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU3VtbWFyeRIYCgtuZXh0X2N1cnNvchgCIAEoCUgAiAEBQg4KDF9uZXh0X2N1cnNvciJfChNUcmFzaGVkQm9hcmRTdW1tYXJ5Ei0KBWJvYXJkGAEgASgLMh4ubHVtaW5nLnN0dWRpby52MS5Cb2FyZFN1bW1hcnkSGQoRdHJhc2hlZF9hdF9taWxsaXMYAiABKAQiwgEKGExpc3RUcmFzaGVkQm9hcmRzUmVxdWVzdBINCgVxdWVyeRgBIAEoCRIvCgVvcmRlchgCIAEoDjIgLmx1bWluZy5zdHVkaW8udjEuQm9hcmRTb3J0T3JkZXISEQoJcGFnZV9zaXplGAMgASgNEhMKBmN1cnNvchgEIAEoCUgAiAEBEhMKC3Bpbm5lZF9vbmx5GAUgASgIEhMKBm9mZnNldBgGIAEoDUgBiAEBQgkKB19jdXJzb3JCCQoHX29mZnNldCJ8ChlMaXN0VHJhc2hlZEJvYXJkc1Jlc3BvbnNlEjUKBmJvYXJkcxgBIAMoCzIlLmx1bWluZy5zdHVkaW8udjEuVHJhc2hlZEJvYXJkU3VtbWFyeRIYCgtuZXh0X2N1cnNvchgCIAEoCUgAiAEBQg4KDF9uZXh0X2N1cnNvciJhChhHZXRCb2FyZFRodW1ibmFpbFJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSFQoIcmV2aXNpb24YAiABKARIAIgBARIPCgd0cmFzaGVkGAMgASgIQgsKCV9yZXZpc2lvbiJQChlHZXRCb2FyZFRodW1ibmFpbFJlc3BvbnNlEjMKCXRodW1ibmFpbBgBIAEoCzIgLmx1bWluZy5zdHVkaW8udjEuQm9hcmRUaHVtYm5haWwiWAoOQm9hcmRUaHVtYm5haWwSFQoIcmV2aXNpb24YASABKARIAIgBARIRCgltaW1lX3R5cGUYAiABKAkSDwoHY29udGVudBgDIAEoDEILCglfcmV2aXNpb24iNwoSQ3JlYXRlQm9hcmRSZXF1ZXN0EhIKCmNvbW1hbmRfaWQYASABKAkSDQoFdGl0bGUYAiABKAkiTwoTQ3JlYXRlQm9hcmRSZXNwb25zZRI4CgdyZWNlaXB0GAEgASgLMicubHVtaW5nLnN0dWRpby52MS5DYXRhbG9nQ29tbWFuZFJlY2VpcHQiRAoVRHVwbGljYXRlQm9hcmRSZXF1ZXN0EhIKCmNvbW1hbmRfaWQYASABKAkSFwoPc291cmNlX2JvYXJkX2lkGAIgASgJIlIKFkR1cGxpY2F0ZUJvYXJkUmVzcG9uc2USOAoHcmVjZWlwdBgBIAEoCzInLmx1bWluZy5zdHVkaW8udjEuQ2F0YWxvZ0NvbW1hbmRSZWNlaXB0IucBChJNYW5hZ2VCb2FyZFJlcXVlc3QSEgoKY29tbWFuZF9pZBgBIAEoCRIQCghib2FyZF9pZBgCIAEoCRIjChZleHBlY3RlZF9lbnRyeV92ZXJzaW9uGAMgASgESAGIAQESDwoFdGl0bGUYBCABKAlIABIQCgZwaW5uZWQYBSABKAhIABI7CglsaWZlY3ljbGUYBiABKA4yJi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkTGlmZWN5Y2xlQWN0aW9uSABCCwoJb3BlcmF0aW9uQhkKF19leHBlY3RlZF9lbnRyeV92ZXJzaW9uIk8KE01hbmFnZUJvYXJkUmVzcG9uc2USOAoHcmVjZWlwdBgBIAEoCzInLmx1bWluZy5zdHVkaW8udjEuQ2F0YWxvZ0NvbW1hbmRSZWNlaXB0ImQKEFB1cmdlQm9hcmRUYXJnZXQSEAoIYm9hcmRfaWQYASABKAkSIwoWZXhwZWN0ZWRfZW50cnlfdmVyc2lvbhgCIAEoBEgAiAEBQhkKF19leHBlY3RlZF9lbnRyeV92ZXJzaW9uIl0KElB1cmdlQm9hcmRzUmVxdWVzdBISCgpjb21tYW5kX2lkGAEgASgJEjMKB3RhcmdldHMYAiADKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLlB1cmdlQm9hcmRUYXJnZXQiTwoTUHVyZ2VCb2FyZHNSZXNwb25zZRI4CgdyZWNlaXB0GAEgASgLMicubHVtaW5nLnN0dWRpby52MS5DYXRhbG9nQ29tbWFuZFJlY2VpcHQigAEKFkNhdGFsb2dQdXJnZUl0ZW1SZXN1bHQSEAoIYm9hcmRfaWQYASABKAkSEQoHZGVsZXRlZBgCIAEoCEgAEjYKCHJlamVjdGVkGAMgASgLMiIubHVtaW5nLnN0dWRpby52MS5DYXRhbG9nUmVqZWN0aW9uSABCCQoHb3V0Y29tZSJNChJDYXRhbG9nUHVyZ2VSZXN1bHQSNwoFaXRlbXMYASADKAsyKC5sdW1pbmcuc3R1ZGlvLnYxLkNhdGFsb2dQdXJnZUl0ZW1SZXN1bHQijAIKFUNhdGFsb2dDb21tYW5kUmVjZWlwdBISCgpjb21tYW5kX2lkGAEgASgJEjEKB2NyZWF0ZWQYAiABKAsyHi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU3VtbWFyeUgAEjYKCHJlamVjdGVkGAMgASgLMiIubHVtaW5nLnN0dWRpby52MS5DYXRhbG9nUmVqZWN0aW9uSAASMQoHY2hhbmdlZBgEIAEoCzIeLmx1bWluZy5zdHVkaW8udjEuQm9hcmRTdW1tYXJ5SAASNgoGcHVyZ2VkGAUgASgLMiQubHVtaW5nLnN0dWRpby52MS5DYXRhbG9nUHVyZ2VSZXN1bHRIAEIJCgdvdXRjb21lIkwKEENhdGFsb2dSZWplY3Rpb24SOAoGcmVhc29uGAEgASgOMigubHVtaW5nLnN0dWRpby52MS5DYXRhbG9nUmVqZWN0aW9uUmVhc29uIjUKH0dldENhdGFsb2dDb21tYW5kUmVjZWlwdFJlcXVlc3QSEgoKY29tbWFuZF9pZBgBIAEoCSIvChlDYXRhbG9nUmVjZWlwdE5vdFJlY29yZGVkEhIKCmNvbW1hbmRfaWQYASABKAkirQEKIEdldENhdGFsb2dDb21tYW5kUmVjZWlwdFJlc3BvbnNlEjoKB3JlY2VpcHQYASABKAsyJy5sdW1pbmcuc3R1ZGlvLnYxLkNhdGFsb2dDb21tYW5kUmVjZWlwdEgAEkMKDG5vdF9yZWNvcmRlZBgCIAEoCzIrLmx1bWluZy5zdHVkaW8udjEuQ2F0YWxvZ1JlY2VpcHROb3RSZWNvcmRlZEgAQggKBnJlc3VsdCprCg5Cb2FyZFNvcnRPcmRlchIgChxCT0FSRF9TT1JUX09SREVSX1VOU1BFQ0lGSUVEEAASGwoXQk9BUkRfU09SVF9PUkRFUl9SRUNFTlQQARIaChZCT0FSRF9TT1JUX09SREVSX1RJVExFEAIqhAEKFEJvYXJkTGlmZWN5Y2xlQWN0aW9uEiYKIkJPQVJEX0xJRkVDWUNMRV9BQ1RJT05fVU5TUEVDSUZJRUQQABIgChxCT0FSRF9MSUZFQ1lDTEVfQUNUSU9OX1RSQVNIEAESIgoeQk9BUkRfTElGRUNZQ0xFX0FDVElPTl9SRVNUT1JFEAIq0wIKFkNhdGFsb2dSZWplY3Rpb25SZWFzb24SKAokQ0FUQUxPR19SRUpFQ1RJT05fUkVBU09OX1VOU1BFQ0lGSUVEEAASKgomQ0FUQUxPR19SRUpFQ1RJT05fUkVBU09OX0lOVkFMSURfVElUTEUQARItCilDQVRBTE9HX1JFSkVDVElPTl9SRUFTT05fQ09NTUFORF9JRF9SRVVTRRACEiYKIkNBVEFMT0dfUkVKRUNUSU9OX1JFQVNPTl9GT1JCSURERU4QAxIyCi5DQVRBTE9HX1JFSkVDVElPTl9SRUFTT05fRU5UUllfVkVSU0lPTl9DSEFOR0VEEAQSKgomQ0FUQUxPR19SRUpFQ1RJT05fUkVBU09OX1NUQVRFX0NIQU5HRUQQBRIsCihDQVRBTE9HX1JFSkVDVElPTl9SRUFTT05fSU5WQUxJRF9DT01NQU5EEAYy0QgKE0JvYXJkQ2F0YWxvZ1NlcnZpY2USVwoKTGlzdEJvYXJkcxIjLmx1bWluZy5zdHVkaW8udjEuTGlzdEJvYXJkc1JlcXVlc3QaJC5sdW1pbmcuc3R1ZGlvLnYxLkxpc3RCb2FyZHNSZXNwb25zZRJsChFMaXN0VHJhc2hlZEJvYXJkcxIqLmx1bWluZy5zdHVkaW8udjEuTGlzdFRyYXNoZWRCb2FyZHNSZXF1ZXN0GisubHVtaW5nLnN0dWRpby52MS5MaXN0VHJhc2hlZEJvYXJkc1Jlc3BvbnNlEmwKEUdldEJvYXJkVGh1bWJuYWlsEioubHVtaW5nLnN0dWRpby52MS5HZXRCb2FyZFRodW1ibmFpbFJlcXVlc3QaKy5sdW1pbmcuc3R1ZGlvLnYxLkdldEJvYXJkVGh1bWJuYWlsUmVzcG9uc2USWgoLQ3JlYXRlQm9hcmQSJC5sdW1pbmcuc3R1ZGlvLnYxLkNyZWF0ZUJvYXJkUmVxdWVzdBolLmx1bWluZy5zdHVkaW8udjEuQ3JlYXRlQm9hcmRSZXNwb25zZRJjCg5EdXBsaWNhdGVCb2FyZBInLmx1bWluZy5zdHVkaW8udjEuRHVwbGljYXRlQm9hcmRSZXF1ZXN0GigubHVtaW5nLnN0dWRpby52MS5EdXBsaWNhdGVCb2FyZFJlc3BvbnNlEloKC01hbmFnZUJvYXJkEiQubHVtaW5nLnN0dWRpby52MS5NYW5hZ2VCb2FyZFJlcXVlc3QaJS5sdW1pbmcuc3R1ZGlvLnYxLk1hbmFnZUJvYXJkUmVzcG9uc2USWgoLUHVyZ2VCb2FyZHMSJC5sdW1pbmcuc3R1ZGlvLnYxLlB1cmdlQm9hcmRzUmVxdWVzdBolLmx1bWluZy5zdHVkaW8udjEuUHVyZ2VCb2FyZHNSZXNwb25zZRKBAQoYR2V0Q2F0YWxvZ0NvbW1hbmRSZWNlaXB0EjEubHVtaW5nLnN0dWRpby52MS5HZXRDYXRhbG9nQ29tbWFuZFJlY2VpcHRSZXF1ZXN0GjIubHVtaW5nLnN0dWRpby52MS5HZXRDYXRhbG9nQ29tbWFuZFJlY2VpcHRSZXNwb25zZRJ+ChdHZXRXb3JrYmVuY2hQcmVmZXJlbmNlcxIwLmx1bWluZy5zdHVkaW8udjEuR2V0V29ya2JlbmNoUHJlZmVyZW5jZXNSZXF1ZXN0GjEubHVtaW5nLnN0dWRpby52MS5HZXRXb3JrYmVuY2hQcmVmZXJlbmNlc1Jlc3BvbnNlEocBChpVcGRhdGVXb3JrYmVuY2hQcmVmZXJlbmNlcxIzLmx1bWluZy5zdHVkaW8udjEuVXBkYXRlV29ya2JlbmNoUHJlZmVyZW5jZXNSZXF1ZXN0GjQubHVtaW5nLnN0dWRpby52MS5VcGRhdGVXb3JrYmVuY2hQcmVmZXJlbmNlc1Jlc3BvbnNlYgZwcm90bzM");
+var CatalogCommandReceiptSchema = /* @__PURE__ */ messageDesc(file_luming_studio_v1_board_catalog_service, 25);
+var BoardSortOrderSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_board_catalog_service, 0);
+var BoardSortOrder = /* @__PURE__ */ tsEnum(BoardSortOrderSchema);
+var BoardLifecycleActionSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_board_catalog_service, 1);
+var BoardLifecycleAction = /* @__PURE__ */ tsEnum(BoardLifecycleActionSchema);
+var CatalogRejectionReasonSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_board_catalog_service, 2);
+var CatalogRejectionReason = /* @__PURE__ */ tsEnum(CatalogRejectionReasonSchema);
+var BoardCatalogService = /* @__PURE__ */ serviceDesc(file_luming_studio_v1_board_catalog_service, 0);
+
+// src/entrypoints/http/catalog-preferences.ts
+function requireLocalActor(actor) {
+  if (!canReadTrashedBoard(actor)) {
+    throw new WhiteboardAccessError();
+  }
+}
+function readChanges(changes) {
+  const { layout, theme, pinnedOnly } = changes ?? {};
+  if (layout !== void 0 && layout !== "grid" && layout !== "list") {
+    throw new HttpRequestError(400, "Unsupported workbench layout.");
+  }
+  if (theme !== void 0 && theme !== "light" && theme !== "dark") {
+    throw new HttpRequestError(400, "Unsupported workbench theme.");
+  }
+  if (layout === void 0 && theme === void 0 && pinnedOnly === void 0) {
+    throw new HttpRequestError(400, "Workbench preferences changes are required.");
+  }
+  return { layout, theme, pinnedOnly };
+}
+function createCatalogPreferenceRoutes(application) {
+  const { getWorkbenchPreferences, updateWorkbenchPreferences: updateWorkbenchPreferences2 } = BoardCatalogService.method;
+  return [
+    unaryRoute(getWorkbenchPreferences, (actor) => {
+      requireLocalActor(actor);
+      return { preferences: application.readPreferences(actor) };
+    }),
+    unaryRoute(updateWorkbenchPreferences2, (actor, { changes }) => {
+      requireLocalActor(actor);
+      application.updatePreferences(actor, readChanges(changes));
+      return {};
+    })
+  ];
+}
+
+// src/entrypoints/http/catalog-routes.ts
+var catalogRejections = {
+  invalidTitle: CatalogRejectionReason.INVALID_TITLE,
+  commandIdReuse: CatalogRejectionReason.COMMAND_ID_REUSE,
+  forbidden: CatalogRejectionReason.FORBIDDEN,
+  entryVersionChanged: CatalogRejectionReason.ENTRY_VERSION_CHANGED,
+  stateChanged: CatalogRejectionReason.STATE_CHANGED,
+  invalidCommand: CatalogRejectionReason.INVALID_COMMAND
+};
+function toSortOrder(order) {
+  switch (order) {
+    case BoardSortOrder.UNSPECIFIED:
+    case BoardSortOrder.RECENT:
+      return "recent";
+    case BoardSortOrder.TITLE:
+      return "title";
+    default:
+      throw new HttpRequestError(400, "Unsupported board sort order");
+  }
+}
+function toReceiptOutcome(receipt) {
+  switch (receipt.kind) {
+    case "created":
+      return { case: "created", value: receipt.board };
+    case "changed":
+      return { case: "changed", value: receipt.board };
+    case "purged":
+      return {
+        case: "purged",
+        value: {
+          items: receipt.items.map((item) => ({
+            boardId: item.boardId,
+            outcome: item.deleted ? { case: "deleted", value: true } : { case: "rejected", value: { reason: catalogRejections[item.reason] } }
+          }))
+        }
+      };
+    case "rejected":
+      return { case: "rejected", value: { reason: catalogRejections[receipt.reason] } };
+  }
+}
+function toCatalogReceipt(receipt) {
+  return create(CatalogCommandReceiptSchema, {
+    commandId: receipt.commandId,
+    outcome: toReceiptOutcome(receipt)
+  });
+}
+function requireEntryVersion(value) {
+  if (value === void 0) {
+    throw new HttpRequestError(400, "Catalogue entry version is required");
+  }
+  return value;
+}
+function requireThumbnailRevision(revision) {
+  if (revision === void 0) {
+    throw new HttpRequestError(400, "The saved preview revision is required.");
+  }
+  return revision;
+}
+function toManageOperation(operation) {
+  switch (operation.case) {
+    case "title":
+      return { kind: "rename", title: operation.value };
+    case "pinned":
+      return { kind: "pin", pinned: operation.value };
+    case "lifecycle":
+      if (operation.value === BoardLifecycleAction.TRASH) {
+        return { kind: "trash" };
+      }
+      if (operation.value === BoardLifecycleAction.RESTORE) {
+        return { kind: "restore" };
+      }
+      throw new HttpRequestError(400, "Unsupported catalogue lifecycle action");
+    case void 0:
+      throw new HttpRequestError(400, "Catalogue operation is required");
+  }
+}
+function createCatalogRoutes(application) {
+  const {
+    listBoards: listBoards3,
+    listTrashedBoards: listTrashedBoards3,
+    getBoardThumbnail,
+    createBoard: createBoard2,
+    duplicateBoard: duplicateBoard3,
+    manageBoard: manageBoard2,
+    purgeBoards: purgeBoards2,
+    getCatalogCommandReceipt
+  } = BoardCatalogService.method;
+  return [
+    ...createCatalogPreferenceRoutes(application),
+    unaryRoute(listBoards3, (actor, request) => {
+      const { query, order, pageSize, cursor, pinnedOnly, offset: offset2 } = request;
+      const result = application.listBoards(actor, {
+        query,
+        order: toSortOrder(order),
+        pageSize,
+        cursor,
+        pinnedOnly,
+        offset: offset2
+      });
+      return { boards: [...result.boards], nextCursor: result.nextCursor };
+    }),
+    unaryRoute(listTrashedBoards3, (actor, request) => {
+      const { query, order, pageSize, cursor, pinnedOnly, offset: offset2 } = request;
+      const result = application.listTrashedBoards(actor, {
+        query,
+        order: toSortOrder(order),
+        pageSize,
+        cursor,
+        pinnedOnly,
+        offset: offset2
+      });
+      return { boards: [...result.boards], nextCursor: result.nextCursor };
+    }),
+    unaryRoute(getBoardThumbnail, (actor, { boardId, revision, trashed }) => {
+      const result = application.getBoardThumbnail(actor, {
+        boardId: requireId(boardId),
+        revision: requireThumbnailRevision(revision),
+        trashed
+      });
+      if (result.kind === "forbidden") {
+        throw new WhiteboardAccessError();
+      }
+      return { thumbnail: result.kind === "thumbnail" ? result.thumbnail : void 0 };
+    }),
+    unaryRoute(createBoard2, (actor, request) => {
+      const receipt = application.createBoard(actor, {
+        commandId: requireId(request.commandId),
+        title: request.title
+      });
+      return { receipt: toCatalogReceipt(receipt) };
+    }),
+    unaryRoute(duplicateBoard3, (actor, request) => {
+      const receipt = application.duplicateBoard(actor, {
+        commandId: requireId(request.commandId),
+        sourceBoardId: requireId(request.sourceBoardId)
+      });
+      return { receipt: toCatalogReceipt(receipt) };
+    }),
+    unaryRoute(manageBoard2, (actor, request) => {
+      const receipt = application.manageBoard(actor, {
+        commandId: requireId(request.commandId),
+        boardId: requireId(request.boardId),
+        expectedEntryVersion: requireEntryVersion(request.expectedEntryVersion),
+        operation: toManageOperation(request.operation)
+      });
+      return { receipt: toCatalogReceipt(receipt) };
+    }),
+    unaryRoute(purgeBoards2, (actor, request) => {
+      const receipt = application.purgeBoards(actor, {
+        commandId: requireId(request.commandId),
+        targets: request.targets.map(({ boardId, expectedEntryVersion }) => ({
+          boardId: requireId(boardId),
+          expectedEntryVersion: requireEntryVersion(expectedEntryVersion)
+        }))
+      });
+      return { receipt: toCatalogReceipt(receipt) };
+    }),
+    unaryRoute(getCatalogCommandReceipt, (actor, request) => {
+      const commandId = requireId(request.commandId);
+      const receipt = application.getReceipt(actor, commandId);
+      return {
+        result: receipt ? { case: "receipt", value: toCatalogReceipt(receipt) } : { case: "notRecorded", value: { commandId } }
+      };
+    })
+  ];
+}
+
+// src/entrypoints/http/document-image-route.ts
+var upload = BoardEditService.method.uploadBoardDocumentImage;
+var assetPrefix4 = "document-image-";
+var boardDocumentImageRoutePath = "/" + BoardEditService.typeName + "/" + upload.name;
+function createDocumentImageRoute(application, digest2) {
+  return asyncUnaryRoute(upload, async (actor, request) => {
+    const boardId = requireId(request.boardId);
+    const commandId = requireId(request.commandId);
+    const objectId = requireId(request.objectId);
+    const identity = new TextEncoder().encode(JSON.stringify([boardId, actor.id, commandId]));
+    const assetId = assetPrefix4 + digest2(identity);
+    const signature = assetPrefix4 + digest2(toBinary(upload.input, request));
+    const { receipt, assetUrl } = await application.uploadDocumentImage(actor, {
+      boardId,
+      commandId,
+      operation: { objectId, assetId, content: request.content },
+      signature
+    });
+    return { receipt: toBoardEditReceipt(receipt), assetUrl };
+  });
+}
+
 // src/entrypoints/http/image-edits.ts
 function readImageOperation({
   objectId,
@@ -20165,14 +21090,35 @@ function createBoardEditRoutes(application, digest2, observe) {
 }
 
 // ../../packages/contracts/dist/proto/luming/studio/v1/feedback_service_pb.js
-var file_luming_studio_v1_feedback_service = /* @__PURE__ */ fileDesc("CidsdW1pbmcvc3R1ZGlvL3YxL2ZlZWRiYWNrX3NlcnZpY2UucHJvdG8SEGx1bWluZy5zdHVkaW8udjEiJQoNRmVlZGJhY2tQb2ludBIJCgF4GAEgASgBEgkKAXkYAiABKAEicgoTRmVlZGJhY2tPYmplY3RQb2ludBIRCglvYmplY3RfaWQYASABKAkSCQoBdRgCIAEoARIJCgF2GAMgASgBEh0KEGdlb21ldHJ5X3ZlcnNpb24YBCABKARIAIgBAUITChFfZ2VvbWV0cnlfdmVyc2lvbiIrChZGZWVkYmFja0RvY3VtZW50QW5jaG9yEhEKCWJsb2NrX2lkcxgBIAMoCSJYChJGZWVkYmFja0h0bWxBbmNob3ISEAoIbm9kZV9pZHMYASADKAkSHAoPc291cmNlX3JldmlzaW9uGAIgASgESACIAQFCEgoQX3NvdXJjZV9yZXZpc2lvbiK8AgoURmVlZGJhY2tDb250ZW50UG9pbnQSEQoJb2JqZWN0X2lkGAEgASgJEgkKAXUYAiABKAESCQoBdhgDIAEoARIdChBnZW9tZXRyeV92ZXJzaW9uGAQgASgESAGIAQESHAoPcGF5bG9hZF92ZXJzaW9uGAUgASgESAKIAQESPAoIZG9jdW1lbnQYBiABKAsyKC5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrRG9jdW1lbnRBbmNob3JIABIWCgx0b2RvX2l0ZW1faWQYByABKAlIABI0CgRodG1sGAggASgLMiQubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja0h0bWxBbmNob3JIAEIJCgdjb250ZW50QhMKEV9nZW9tZXRyeV92ZXJzaW9uQhIKEF9wYXlsb2FkX3ZlcnNpb24i2AEKFEZlZWRiYWNrQW5jaG9yVGFyZ2V0EjYKC2JvYXJkX3BvaW50GAEgASgLMh8ubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1BvaW50SAASPQoMb2JqZWN0X3BvaW50GAIgASgLMiUubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja09iamVjdFBvaW50SAASPwoNY29udGVudF9wb2ludBgDIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tDb250ZW50UG9pbnRIAEIICgZ0YXJnZXQiegoURmVlZGJhY2tGcm96ZW5PYmplY3QSDAoEa2luZBgBIAEoCRINCgVsYWJlbBgCIAEoCRIJCgF4GAMgASgBEgkKAXkYBCABKAESDQoFd2lkdGgYBSABKAESDgoGaGVpZ2h0GAYgASgBEhAKCHJvdGF0aW9uGAcgASgBIqUCCg5GZWVkYmFja0FuY2hvchI2CgZ0YXJnZXQYASABKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrQW5jaG9yVGFyZ2V0Eh0KFXNvdXJjZV9ib2FyZF9yZXZpc2lvbhgCIAEoBBI1Cgxmcm96ZW5fcG9pbnQYAyABKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrUG9pbnQSPQoNZnJvemVuX29iamVjdBgEIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tGcm96ZW5PYmplY3QSFgoOdGFyZ2V0X21pc3NpbmcYBSABKAgSGwoOZnJvemVuX2V4Y2VycHQYBiABKAlIAIgBAUIRCg9fZnJvemVuX2V4Y2VycHQi6wEKD0ZlZWRiYWNrTWVzc2FnZRISCgptZXNzYWdlX2lkGAEgASgJEhcKD2F1dGhvcl9hY3Rvcl9pZBgCIAEoCRIaChJhdXRob3JlZF9ieV92aWV3ZXIYAyABKAgSDAoEdGV4dBgEIAEoCRIZChFjcmVhdGVkX2F0X21pbGxpcxgFIAEoBBIZChF1cGRhdGVkX2F0X21pbGxpcxgGIAEoBBIPCgd2ZXJzaW9uGAcgASgEEhAKCGNhbl9lZGl0GAggASgIEhgKC2F1dGhvcl9uYW1lGAkgASgJSACIAQFCDgoMX2F1dGhvcl9uYW1lIqkCCg5GZWVkYmFja1RocmVhZBIRCgl0aHJlYWRfaWQYASABKAkSNgoGc3RhdHVzGAIgASgOMiYubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1RocmVhZFN0YXR1cxIwCgZhbmNob3IYAyABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrQW5jaG9yEjAKBWZpcnN0GAQgASgLMiEubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja01lc3NhZ2USDwoHdmVyc2lvbhgFIAEoBBIZChF1cGRhdGVkX2F0X21pbGxpcxgGIAEoBBITCgtyZXBseV9jb3VudBgHIAEoDRITCgtjYW5fcmVzb2x2ZRgIIAEoCBISCgpjYW5fZGVsZXRlGAkgASgIIt8BChJMaXN0VGhyZWFkc1JlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEQoJcGFnZV9zaXplGAIgASgNEhMKBmN1cnNvchgDIAEoCUgAiAEBEjYKBnN0YXR1cxgEIAEoDjImLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tUaHJlYWRTdGF0dXMSHAoPYXV0aG9yX2FjdG9yX2lkGAUgASgJSAGIAQESGgoSYXV0aG9yZWRfYnlfdmlld2VyGAYgASgIQgkKB19jdXJzb3JCEgoQX2F1dGhvcl9hY3Rvcl9pZCKFAQoTTGlzdFRocmVhZHNSZXNwb25zZRIxCgd0aHJlYWRzGAEgAygLMiAubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1RocmVhZBIYCgtuZXh0X2N1cnNvchgCIAEoCUgAiAEBEhEKCWNhbl93cml0ZRgDIAEoCEIOCgxfbmV4dF9jdXJzb3IiagoQR2V0VGhyZWFkUmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRIRCgl0aHJlYWRfaWQYAiABKAkSEQoJcGFnZV9zaXplGAMgASgNEhMKBmN1cnNvchgEIAEoCUgAiAEBQgkKB19jdXJzb3IitgEKEUdldFRocmVhZFJlc3BvbnNlEjAKBnRocmVhZBgBIAEoCzIgLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tUaHJlYWQSMgoHcmVwbGllcxgCIAMoCzIhLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tNZXNzYWdlEhgKC25leHRfY3Vyc29yGAMgASgJSACIAQESEQoJY2FuX3dyaXRlGAQgASgIQg4KDF9uZXh0X2N1cnNvciJWCg5GZWVkYmFja0NyZWF0ZRI2CgZhbmNob3IYASABKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrQW5jaG9yVGFyZ2V0EgwKBHRleHQYAiABKAkiMAoNRmVlZGJhY2tSZXBseRIRCgl0aHJlYWRfaWQYASABKAkSDAoEdGV4dBgCIAEoCSKHAQoMRmVlZGJhY2tFZGl0EhEKCXRocmVhZF9pZBgBIAEoCRISCgptZXNzYWdlX2lkGAIgASgJEiUKGGV4cGVjdGVkX21lc3NhZ2VfdmVyc2lvbhgDIAEoBEgAiAEBEgwKBHRleHQYBCABKAlCGwoZX2V4cGVjdGVkX21lc3NhZ2VfdmVyc2lvbiJrChRGZWVkYmFja1RocmVhZENoYW5nZRIRCgl0aHJlYWRfaWQYASABKAkSJAoXZXhwZWN0ZWRfdGhyZWFkX3ZlcnNpb24YAiABKARIAIgBAUIaChhfZXhwZWN0ZWRfdGhyZWFkX3ZlcnNpb24ijgMKFEFwcGx5RmVlZGJhY2tSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkSMgoGY3JlYXRlGAMgASgLMiAubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja0NyZWF0ZUgAEjAKBXJlcGx5GAQgASgLMh8ubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1JlcGx5SAASLgoEZWRpdBgFIAEoCzIeLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tFZGl0SAASOQoHcmVzb2x2ZRgGIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tUaHJlYWRDaGFuZ2VIABI4CgZyZW9wZW4YByABKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrVGhyZWFkQ2hhbmdlSAASOAoGZGVsZXRlGAggASgLMiYubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1RocmVhZENoYW5nZUgAQgsKCW9wZXJhdGlvbiJLChVBcHBseUZlZWRiYWNrUmVzcG9uc2USMgoHcmVjZWlwdBgBIAEoCzIhLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tSZWNlaXB0IqcBCg9GZWVkYmFja0FwcGxpZWQSEQoJdGhyZWFkX2lkGAEgASgJEhYKDnRocmVhZF92ZXJzaW9uGAIgASgEEhcKCm1lc3NhZ2VfaWQYAyABKAlIAIgBARIcCg9tZXNzYWdlX3ZlcnNpb24YBCABKARIAYgBARIPCgdkZWxldGVkGAUgASgIQg0KC19tZXNzYWdlX2lkQhIKEF9tZXNzYWdlX3ZlcnNpb24ifwoQRmVlZGJhY2tSZWplY3RlZBI5CgZyZWFzb24YASABKA4yKS5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrUmVqZWN0aW9uUmVhc29uEhwKD2N1cnJlbnRfdmVyc2lvbhgCIAEoBEgAiAEBQhIKEF9jdXJyZW50X3ZlcnNpb24isAEKD0ZlZWRiYWNrUmVjZWlwdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJEjQKB2FwcGxpZWQYAyABKAsyIS5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrQXBwbGllZEgAEjYKCHJlamVjdGVkGAQgASgLMiIubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1JlamVjdGVkSABCCQoHb3V0Y29tZSJBChlHZXRGZWVkYmFja1JlY2VpcHRSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkiMAoaRmVlZGJhY2tSZWNlaXB0Tm90UmVjb3JkZWQSEgoKY29tbWFuZF9pZBgBIAEoCSKiAQoaR2V0RmVlZGJhY2tSZWNlaXB0UmVzcG9uc2USNAoHcmVjZWlwdBgBIAEoCzIhLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tSZWNlaXB0SAASRAoMbm90X3JlY29yZGVkGAIgASgLMiwubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1JlY2VpcHROb3RSZWNvcmRlZEgAQggKBnJlc3VsdCqEAQoURmVlZGJhY2tUaHJlYWRTdGF0dXMSJgoiRkVFREJBQ0tfVEhSRUFEX1NUQVRVU19VTlNQRUNJRklFRBAAEh8KG0ZFRURCQUNLX1RIUkVBRF9TVEFUVVNfT1BFThABEiMKH0ZFRURCQUNLX1RIUkVBRF9TVEFUVVNfUkVTT0xWRUQQAir9AgoXRmVlZGJhY2tSZWplY3Rpb25SZWFzb24SKQolRkVFREJBQ0tfUkVKRUNUSU9OX1JFQVNPTl9VTlNQRUNJRklFRBAAEioKJkZFRURCQUNLX1JFSkVDVElPTl9SRUFTT05fSU5WQUxJRF9URVhUEAESLAooRkVFREJBQ0tfUkVKRUNUSU9OX1JFQVNPTl9JTlZBTElEX0FOQ0hPUhACEiwKKEZFRURCQUNLX1JFSkVDVElPTl9SRUFTT05fVEFSR0VUX0NIQU5HRUQQAxInCiNGRUVEQkFDS19SRUpFQ1RJT05fUkVBU09OX05PVF9GT1VORBAEEicKI0ZFRURCQUNLX1JFSkVDVElPTl9SRUFTT05fRk9SQklEREVOEAUSLQopRkVFREJBQ0tfUkVKRUNUSU9OX1JFQVNPTl9WRVJTSU9OX0NIQU5HRUQQBhIuCipGRUVEQkFDS19SRUpFQ1RJT05fUkVBU09OX0NPTU1BTkRfSURfUkVVU0UQBzKWAwoPRmVlZGJhY2tTZXJ2aWNlEloKC0xpc3RUaHJlYWRzEiQubHVtaW5nLnN0dWRpby52MS5MaXN0VGhyZWFkc1JlcXVlc3QaJS5sdW1pbmcuc3R1ZGlvLnYxLkxpc3RUaHJlYWRzUmVzcG9uc2USVAoJR2V0VGhyZWFkEiIubHVtaW5nLnN0dWRpby52MS5HZXRUaHJlYWRSZXF1ZXN0GiMubHVtaW5nLnN0dWRpby52MS5HZXRUaHJlYWRSZXNwb25zZRJgCg1BcHBseUZlZWRiYWNrEiYubHVtaW5nLnN0dWRpby52MS5BcHBseUZlZWRiYWNrUmVxdWVzdBonLmx1bWluZy5zdHVkaW8udjEuQXBwbHlGZWVkYmFja1Jlc3BvbnNlEm8KEkdldEZlZWRiYWNrUmVjZWlwdBIrLmx1bWluZy5zdHVkaW8udjEuR2V0RmVlZGJhY2tSZWNlaXB0UmVxdWVzdBosLmx1bWluZy5zdHVkaW8udjEuR2V0RmVlZGJhY2tSZWNlaXB0UmVzcG9uc2ViBnByb3RvMw");
+var file_luming_studio_v1_feedback_service = /* @__PURE__ */ fileDesc("CidsdW1pbmcvc3R1ZGlvL3YxL2ZlZWRiYWNrX3NlcnZpY2UucHJvdG8SEGx1bWluZy5zdHVkaW8udjEiJQoNRmVlZGJhY2tQb2ludBIJCgF4GAEgASgBEgkKAXkYAiABKAEicgoTRmVlZGJhY2tPYmplY3RQb2ludBIRCglvYmplY3RfaWQYASABKAkSCQoBdRgCIAEoARIJCgF2GAMgASgBEh0KEGdlb21ldHJ5X3ZlcnNpb24YBCABKARIAIgBAUITChFfZ2VvbWV0cnlfdmVyc2lvbiKPAQoURmVlZGJhY2tTb3VyY2VPYmplY3QSEQoJb2JqZWN0X2lkGAEgASgJEh0KEGdlb21ldHJ5X3ZlcnNpb24YAiABKARIAIgBARIcCg9wYXlsb2FkX3ZlcnNpb24YAyABKARIAYgBAUITChFfZ2VvbWV0cnlfdmVyc2lvbkISChBfcGF5bG9hZF92ZXJzaW9uIkUKDkZlZWRiYWNrQm91bmRzEgkKAXgYASABKAESCQoBeRgCIAEoARINCgV3aWR0aBgDIAEoARIOCgZoZWlnaHQYBCABKAEi9QEKFkZlZWRiYWNrU2VsZWN0aW9uUG9pbnQSLgoFcG9pbnQYASABKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrUG9pbnQSMAoGYm91bmRzGAIgASgLMiAubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja0JvdW5kcxI3CgdvYmplY3RzGAMgAygLMiYubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1NvdXJjZU9iamVjdBIkChdleHBlY3RlZF9ib2FyZF9yZXZpc2lvbhgEIAEoBEgAiAEBQhoKGF9leHBlY3RlZF9ib2FyZF9yZXZpc2lvbiIrChZGZWVkYmFja0RvY3VtZW50QW5jaG9yEhEKCWJsb2NrX2lkcxgBIAMoCSJYChJGZWVkYmFja0h0bWxBbmNob3ISEAoIbm9kZV9pZHMYASADKAkSHAoPc291cmNlX3JldmlzaW9uGAIgASgESACIAQFCEgoQX3NvdXJjZV9yZXZpc2lvbiK8AgoURmVlZGJhY2tDb250ZW50UG9pbnQSEQoJb2JqZWN0X2lkGAEgASgJEgkKAXUYAiABKAESCQoBdhgDIAEoARIdChBnZW9tZXRyeV92ZXJzaW9uGAQgASgESAGIAQESHAoPcGF5bG9hZF92ZXJzaW9uGAUgASgESAKIAQESPAoIZG9jdW1lbnQYBiABKAsyKC5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrRG9jdW1lbnRBbmNob3JIABIWCgx0b2RvX2l0ZW1faWQYByABKAlIABI0CgRodG1sGAggASgLMiQubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja0h0bWxBbmNob3JIAEIJCgdjb250ZW50QhMKEV9nZW9tZXRyeV92ZXJzaW9uQhIKEF9wYXlsb2FkX3ZlcnNpb24ilwIKFEZlZWRiYWNrQW5jaG9yVGFyZ2V0EjYKC2JvYXJkX3BvaW50GAEgASgLMh8ubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1BvaW50SAASPQoMb2JqZWN0X3BvaW50GAIgASgLMiUubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja09iamVjdFBvaW50SAASPwoNY29udGVudF9wb2ludBgDIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tDb250ZW50UG9pbnRIABI9CglzZWxlY3Rpb24YBCABKAsyKC5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrU2VsZWN0aW9uUG9pbnRIAEIICgZ0YXJnZXQiegoURmVlZGJhY2tGcm96ZW5PYmplY3QSDAoEa2luZBgBIAEoCRINCgVsYWJlbBgCIAEoCRIJCgF4GAMgASgBEgkKAXkYBCABKAESDQoFd2lkdGgYBSABKAESDgoGaGVpZ2h0GAYgASgBEhAKCHJvdGF0aW9uGAcgASgBIokBChRGZWVkYmFja0Zyb3plblRhcmdldBI5CglyZWZlcmVuY2UYASABKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrU291cmNlT2JqZWN0EjYKBm9iamVjdBgCIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tGcm96ZW5PYmplY3Qi5QIKDkZlZWRiYWNrQW5jaG9yEjYKBnRhcmdldBgBIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tBbmNob3JUYXJnZXQSHQoVc291cmNlX2JvYXJkX3JldmlzaW9uGAIgASgEEjUKDGZyb3plbl9wb2ludBgDIAEoCzIfLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tQb2ludBI9Cg1mcm96ZW5fb2JqZWN0GAQgASgLMiYubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja0Zyb3plbk9iamVjdBIWCg50YXJnZXRfbWlzc2luZxgFIAEoCBIbCg5mcm96ZW5fZXhjZXJwdBgGIAEoCUgAiAEBEj4KDmZyb3plbl90YXJnZXRzGAcgAygLMiYubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja0Zyb3plblRhcmdldEIRCg9fZnJvemVuX2V4Y2VycHQi6wEKD0ZlZWRiYWNrTWVzc2FnZRISCgptZXNzYWdlX2lkGAEgASgJEhcKD2F1dGhvcl9hY3Rvcl9pZBgCIAEoCRIaChJhdXRob3JlZF9ieV92aWV3ZXIYAyABKAgSDAoEdGV4dBgEIAEoCRIZChFjcmVhdGVkX2F0X21pbGxpcxgFIAEoBBIZChF1cGRhdGVkX2F0X21pbGxpcxgGIAEoBBIPCgd2ZXJzaW9uGAcgASgEEhAKCGNhbl9lZGl0GAggASgIEhgKC2F1dGhvcl9uYW1lGAkgASgJSACIAQFCDgoMX2F1dGhvcl9uYW1lIuMCCg5GZWVkYmFja1RocmVhZBIRCgl0aHJlYWRfaWQYASABKAkSNgoGc3RhdHVzGAIgASgOMiYubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1RocmVhZFN0YXR1cxIwCgZhbmNob3IYAyABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrQW5jaG9yEjAKBWZpcnN0GAQgASgLMiEubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja01lc3NhZ2USDwoHdmVyc2lvbhgFIAEoBBIZChF1cGRhdGVkX2F0X21pbGxpcxgGIAEoBBITCgtyZXBseV9jb3VudBgHIAEoDRITCgtjYW5fcmVzb2x2ZRgIIAEoCBISCgpjYW5fZGVsZXRlGAkgASgIEjgKCmF0dGFjaG1lbnQYCiABKAsyJC5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrQXR0YWNobWVudCJ6ChJGZWVkYmFja0F0dGFjaG1lbnQSEgoKcmVxdWVzdF9pZBgBIAEoCRI4CgVzdGF0ZRgCIAEoDjIpLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tBdHRhY2htZW50U3RhdGUSFgoOdGhyZWFkX3ZlcnNpb24YAyABKAQi+wEKEkxpc3RUaHJlYWRzUmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRIRCglwYWdlX3NpemUYAiABKA0SEwoGY3Vyc29yGAMgASgJSACIAQESNgoGc3RhdHVzGAQgASgOMiYubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1RocmVhZFN0YXR1cxIcCg9hdXRob3JfYWN0b3JfaWQYBSABKAlIAYgBARIaChJhdXRob3JlZF9ieV92aWV3ZXIYBiABKAgSGgoScGVuZGluZ19hdHRhY2htZW50GAcgASgIQgkKB19jdXJzb3JCEgoQX2F1dGhvcl9hY3Rvcl9pZCKFAQoTTGlzdFRocmVhZHNSZXNwb25zZRIxCgd0aHJlYWRzGAEgAygLMiAubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1RocmVhZBIYCgtuZXh0X2N1cnNvchgCIAEoCUgAiAEBEhEKCWNhbl93cml0ZRgDIAEoCEIOCgxfbmV4dF9jdXJzb3IiagoQR2V0VGhyZWFkUmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRIRCgl0aHJlYWRfaWQYAiABKAkSEQoJcGFnZV9zaXplGAMgASgNEhMKBmN1cnNvchgEIAEoCUgAiAEBQgkKB19jdXJzb3IitgEKEUdldFRocmVhZFJlc3BvbnNlEjAKBnRocmVhZBgBIAEoCzIgLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tUaHJlYWQSMgoHcmVwbGllcxgCIAMoCzIhLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tNZXNzYWdlEhgKC25leHRfY3Vyc29yGAMgASgJSACIAQESEQoJY2FuX3dyaXRlGAQgASgIQg4KDF9uZXh0X2N1cnNvciJWCg5GZWVkYmFja0NyZWF0ZRI2CgZhbmNob3IYASABKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrQW5jaG9yVGFyZ2V0EgwKBHRleHQYAiABKAkiMAoNRmVlZGJhY2tSZXBseRIRCgl0aHJlYWRfaWQYASABKAkSDAoEdGV4dBgCIAEoCSKHAQoMRmVlZGJhY2tFZGl0EhEKCXRocmVhZF9pZBgBIAEoCRISCgptZXNzYWdlX2lkGAIgASgJEiUKGGV4cGVjdGVkX21lc3NhZ2VfdmVyc2lvbhgDIAEoBEgAiAEBEgwKBHRleHQYBCABKAlCGwoZX2V4cGVjdGVkX21lc3NhZ2VfdmVyc2lvbiJrChRGZWVkYmFja1RocmVhZENoYW5nZRIRCgl0aHJlYWRfaWQYASABKAkSJAoXZXhwZWN0ZWRfdGhyZWFkX3ZlcnNpb24YAiABKARIAIgBAUIaChhfZXhwZWN0ZWRfdGhyZWFkX3ZlcnNpb24icAoZRmVlZGJhY2tSZXF1ZXN0QXR0YWNobWVudBIRCgl0aHJlYWRfaWQYASABKAkSJAoXZXhwZWN0ZWRfdGhyZWFkX3ZlcnNpb24YAiABKARIAIgBAUIaChhfZXhwZWN0ZWRfdGhyZWFkX3ZlcnNpb24iQAoXRmVlZGJhY2tBdHRhY2htZW50Q2xhaW0SEQoJdGhyZWFkX2lkGAEgASgJEhIKCnJlcXVlc3RfaWQYAiABKAkiVAoZRmVlZGJhY2tBdHRhY2htZW50Q29uZmlybRIRCgl0aHJlYWRfaWQYASABKAkSEgoKcmVxdWVzdF9pZBgCIAEoCRIQCghjbGFpbV9pZBgDIAEoCSK4BQoUQXBwbHlGZWVkYmFja1JlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCRIyCgZjcmVhdGUYAyABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrQ3JlYXRlSAASMAoFcmVwbHkYBCABKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrUmVwbHlIABIuCgRlZGl0GAUgASgLMh4ubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja0VkaXRIABI5CgdyZXNvbHZlGAYgASgLMiYubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1RocmVhZENoYW5nZUgAEjgKBnJlb3BlbhgHIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tUaHJlYWRDaGFuZ2VIABI4CgZkZWxldGUYCCABKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrVGhyZWFkQ2hhbmdlSAASSQoScmVxdWVzdF9hdHRhY2htZW50GAkgASgLMisubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1JlcXVlc3RBdHRhY2htZW50SAASRQoQY2xhaW1fYXR0YWNobWVudBgKIAEoCzIpLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tBdHRhY2htZW50Q2xhaW1IABJJChJjb25maXJtX2F0dGFjaG1lbnQYCyABKAsyKy5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrQXR0YWNobWVudENvbmZpcm1IABJLChZyZXNldF9hdHRhY2htZW50X2NsYWltGAwgASgLMikubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja0F0dGFjaG1lbnRDbGFpbUgAQgsKCW9wZXJhdGlvbiJLChVBcHBseUZlZWRiYWNrUmVzcG9uc2USMgoHcmVjZWlwdBgBIAEoCzIhLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tSZWNlaXB0IqcBCg9GZWVkYmFja0FwcGxpZWQSEQoJdGhyZWFkX2lkGAEgASgJEhYKDnRocmVhZF92ZXJzaW9uGAIgASgEEhcKCm1lc3NhZ2VfaWQYAyABKAlIAIgBARIcCg9tZXNzYWdlX3ZlcnNpb24YBCABKARIAYgBARIPCgdkZWxldGVkGAUgASgIQg0KC19tZXNzYWdlX2lkQhIKEF9tZXNzYWdlX3ZlcnNpb24ifwoQRmVlZGJhY2tSZWplY3RlZBI5CgZyZWFzb24YASABKA4yKS5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrUmVqZWN0aW9uUmVhc29uEhwKD2N1cnJlbnRfdmVyc2lvbhgCIAEoBEgAiAEBQhIKEF9jdXJyZW50X3ZlcnNpb24isAEKD0ZlZWRiYWNrUmVjZWlwdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJEjQKB2FwcGxpZWQYAyABKAsyIS5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrQXBwbGllZEgAEjYKCHJlamVjdGVkGAQgASgLMiIubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1JlamVjdGVkSABCCQoHb3V0Y29tZSJBChlHZXRGZWVkYmFja1JlY2VpcHRSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkiMAoaRmVlZGJhY2tSZWNlaXB0Tm90UmVjb3JkZWQSEgoKY29tbWFuZF9pZBgBIAEoCSKiAQoaR2V0RmVlZGJhY2tSZWNlaXB0UmVzcG9uc2USNAoHcmVjZWlwdBgBIAEoCzIhLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tSZWNlaXB0SAASRAoMbm90X3JlY29yZGVkGAIgASgLMiwubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1JlY2VpcHROb3RSZWNvcmRlZEgAQggKBnJlc3VsdCqEAQoURmVlZGJhY2tUaHJlYWRTdGF0dXMSJgoiRkVFREJBQ0tfVEhSRUFEX1NUQVRVU19VTlNQRUNJRklFRBAAEh8KG0ZFRURCQUNLX1RIUkVBRF9TVEFUVVNfT1BFThABEiMKH0ZFRURCQUNLX1RIUkVBRF9TVEFUVVNfUkVTT0xWRUQQAiq6AQoXRmVlZGJhY2tBdHRhY2htZW50U3RhdGUSKQolRkVFREJBQ0tfQVRUQUNITUVOVF9TVEFURV9VTlNQRUNJRklFRBAAEiUKIUZFRURCQUNLX0FUVEFDSE1FTlRfU1RBVEVfUEVORElORxABEiUKIUZFRURCQUNLX0FUVEFDSE1FTlRfU1RBVEVfQ0xBSU1FRBACEiYKIkZFRURCQUNLX0FUVEFDSE1FTlRfU1RBVEVfQVRUQUNIRUQQAyqvAwoXRmVlZGJhY2tSZWplY3Rpb25SZWFzb24SKQolRkVFREJBQ0tfUkVKRUNUSU9OX1JFQVNPTl9VTlNQRUNJRklFRBAAEioKJkZFRURCQUNLX1JFSkVDVElPTl9SRUFTT05fSU5WQUxJRF9URVhUEAESLAooRkVFREJBQ0tfUkVKRUNUSU9OX1JFQVNPTl9JTlZBTElEX0FOQ0hPUhACEiwKKEZFRURCQUNLX1JFSkVDVElPTl9SRUFTT05fVEFSR0VUX0NIQU5HRUQQAxInCiNGRUVEQkFDS19SRUpFQ1RJT05fUkVBU09OX05PVF9GT1VORBAEEicKI0ZFRURCQUNLX1JFSkVDVElPTl9SRUFTT05fRk9SQklEREVOEAUSLQopRkVFREJBQ0tfUkVKRUNUSU9OX1JFQVNPTl9WRVJTSU9OX0NIQU5HRUQQBhIuCipGRUVEQkFDS19SRUpFQ1RJT05fUkVBU09OX0NPTU1BTkRfSURfUkVVU0UQBxIwCixGRUVEQkFDS19SRUpFQ1RJT05fUkVBU09OX0FUVEFDSE1FTlRfQ0xBSU1FRBAIMpYDCg9GZWVkYmFja1NlcnZpY2USWgoLTGlzdFRocmVhZHMSJC5sdW1pbmcuc3R1ZGlvLnYxLkxpc3RUaHJlYWRzUmVxdWVzdBolLmx1bWluZy5zdHVkaW8udjEuTGlzdFRocmVhZHNSZXNwb25zZRJUCglHZXRUaHJlYWQSIi5sdW1pbmcuc3R1ZGlvLnYxLkdldFRocmVhZFJlcXVlc3QaIy5sdW1pbmcuc3R1ZGlvLnYxLkdldFRocmVhZFJlc3BvbnNlEmAKDUFwcGx5RmVlZGJhY2sSJi5sdW1pbmcuc3R1ZGlvLnYxLkFwcGx5RmVlZGJhY2tSZXF1ZXN0GicubHVtaW5nLnN0dWRpby52MS5BcHBseUZlZWRiYWNrUmVzcG9uc2USbwoSR2V0RmVlZGJhY2tSZWNlaXB0EisubHVtaW5nLnN0dWRpby52MS5HZXRGZWVkYmFja1JlY2VpcHRSZXF1ZXN0GiwubHVtaW5nLnN0dWRpby52MS5HZXRGZWVkYmFja1JlY2VpcHRSZXNwb25zZWIGcHJvdG8z");
 var FeedbackThreadStatusSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_feedback_service, 0);
 var FeedbackThreadStatus = /* @__PURE__ */ tsEnum(FeedbackThreadStatusSchema);
-var FeedbackRejectionReasonSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_feedback_service, 1);
+var FeedbackAttachmentStateSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_feedback_service, 1);
+var FeedbackAttachmentState = /* @__PURE__ */ tsEnum(FeedbackAttachmentStateSchema);
+var FeedbackRejectionReasonSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_feedback_service, 2);
 var FeedbackRejectionReason = /* @__PURE__ */ tsEnum(FeedbackRejectionReasonSchema);
 var FeedbackService = /* @__PURE__ */ serviceDesc(file_luming_studio_v1_feedback_service, 0);
 
 // src/entrypoints/http/feedback-routes.ts
+var { listThreads, getThread, applyFeedback: applyFeedback2, getFeedbackReceipt } = FeedbackService.method;
+var agentFeedbackPaths = new Set(
+  [listThreads, getThread, applyFeedback2, getFeedbackReceipt].map(
+    ({ parent, name }) => "/" + parent.typeName + "/" + name
+  )
+);
+function isAgentFeedbackRequest(path3, actor) {
+  return actor.feedbackAuthorId !== void 0 && agentFeedbackPaths.has(path3);
+}
+function feedbackActor(actor) {
+  if (actor.kind !== "agent") {
+    return actor;
+  }
+  const authorId = actor.feedbackAuthorId;
+  if (!authorId || authorId === actor.id) {
+    throw new HttpRequestError(403, "Agent feedback requires a separate author identity.");
+  }
+  return { id: authorId, principalId: actor.id, kind: actor.kind };
+}
 var rejections = {
   invalidText: FeedbackRejectionReason.INVALID_TEXT,
   invalidAnchor: FeedbackRejectionReason.INVALID_ANCHOR,
@@ -20180,13 +21126,14 @@ var rejections = {
   notFound: FeedbackRejectionReason.NOT_FOUND,
   forbidden: FeedbackRejectionReason.FORBIDDEN,
   versionChanged: FeedbackRejectionReason.VERSION_CHANGED,
-  commandIdReuse: FeedbackRejectionReason.COMMAND_ID_REUSE
+  commandIdReuse: FeedbackRejectionReason.COMMAND_ID_REUSE,
+  attachmentClaimed: FeedbackRejectionReason.ATTACHMENT_CLAIMED
 };
-function requireVersion(version2) {
-  if (version2 === void 0) {
+function requireVersion(version3) {
+  if (version3 === void 0) {
     throw new HttpRequestError(400, "Feedback expected version is required.");
   }
-  return version2;
+  return version3;
 }
 function readContent(content) {
   switch (content.case) {
@@ -20234,11 +21181,28 @@ function readTarget2(anchor2) {
         content: readContent(content)
       };
     }
+    case "selection": {
+      const { point: point3, bounds: bounds2, objects, expectedBoardRevision } = target2.value;
+      if (!point3) {
+        throw new HttpRequestError(400, "Feedback selection point is required.");
+      }
+      return {
+        kind: "selection",
+        point: point3,
+        bounds: bounds2,
+        objects: objects.map(({ objectId, geometryVersion, payloadVersion }) => ({
+          objectId: requireId(objectId),
+          geometryVersion: requireVersion(geometryVersion),
+          payloadVersion
+        })),
+        expectedBoardRevision: requireVersion(expectedBoardRevision)
+      };
+    }
     case void 0:
       throw new HttpRequestError(400, "Feedback anchor target is required.");
   }
 }
-function readOperation(operation) {
+function readOperation2(operation) {
   switch (operation.case) {
     case "create":
       return {
@@ -20263,10 +21227,25 @@ function readOperation(operation) {
     case "resolve":
     case "reopen":
     case "delete":
+    case "requestAttachment":
       return {
         kind: operation.case,
         threadId: requireId(operation.value.threadId),
         expectedThreadVersion: requireVersion(operation.value.expectedThreadVersion)
+      };
+    case "claimAttachment":
+    case "resetAttachmentClaim":
+      return {
+        kind: operation.case,
+        threadId: requireId(operation.value.threadId),
+        requestId: requireId(operation.value.requestId)
+      };
+    case "confirmAttachment":
+      return {
+        kind: operation.case,
+        threadId: requireId(operation.value.threadId),
+        requestId: requireId(operation.value.requestId),
+        claimId: requireId(operation.value.claimId)
       };
     case void 0:
       throw new HttpRequestError(400, "Feedback operation is required.");
@@ -20298,11 +21277,24 @@ function writeContent(unit) {
   }
 }
 function writeAnchor(anchor2) {
-  const { target: target2, ...source } = anchor2;
+  const { target: target2, frozenTargets, ...data } = anchor2;
+  const source = { ...data, frozenTargets: frozenTargets ? [...frozenTargets] : [] };
   if (target2.kind === "board") {
     return {
       ...source,
       target: { target: { case: "boardPoint", value: target2.point } }
+    };
+  }
+  if (target2.kind === "selection") {
+    const { point: point3, bounds: bounds2, objects, expectedBoardRevision } = target2;
+    return {
+      ...source,
+      target: {
+        target: {
+          case: "selection",
+          value: { point: point3, bounds: bounds2, objects: [...objects], expectedBoardRevision }
+        }
+      }
     };
   }
   const { objectId, u, v, geometryVersion } = target2;
@@ -20330,8 +21322,15 @@ function writeAnchor(anchor2) {
   };
 }
 function writeThread(thread) {
+  const attachments = {
+    pending: FeedbackAttachmentState.PENDING,
+    claimed: FeedbackAttachmentState.CLAIMED,
+    attached: FeedbackAttachmentState.ATTACHED
+  };
+  const { attachment } = thread;
   return {
     ...thread,
+    attachment: attachment && { ...attachment, state: attachments[attachment.state] },
     status: thread.status === "open" ? FeedbackThreadStatus.OPEN : FeedbackThreadStatus.RESOLVED,
     anchor: writeAnchor(thread.anchor)
   };
@@ -20359,31 +21358,45 @@ function writeReceipt(receipt) {
   };
 }
 function createFeedbackRoutes(application) {
-  const { listThreads: listThreads2, getThread: getThread2, applyFeedback: applyFeedback2, getFeedbackReceipt } = FeedbackService.method;
   return [
-    unaryRoute(listThreads2, (actor, request) => {
-      const { boardId, pageSize, cursor, status, authorActorId, authoredByViewer } = request;
-      const page = application.listThreads(actor, requireId(boardId), {
+    unaryRoute(listThreads, (actor, request) => {
+      const {
+        boardId,
+        pageSize,
+        cursor,
+        status,
+        authorActorId,
+        authoredByViewer,
+        pendingAttachment
+      } = request;
+      const author = feedbackActor(actor);
+      const page = application.listThreads(author, requireId(boardId), {
         pageSize,
         cursor,
         status: readStatus(status),
-        authorActorId: authoredByViewer ? actor.id : authorActorId
+        authorActorId: authoredByViewer ? author.id : authorActorId,
+        pendingAttachment
       });
       return { ...page, threads: page.threads.map(writeThread) };
     }),
-    unaryRoute(getThread2, (actor, request) => {
+    unaryRoute(getThread, (actor, request) => {
       const { boardId, threadId, pageSize, cursor } = request;
-      const page = application.getThread(actor, requireId(boardId), requireId(threadId), {
-        pageSize,
-        cursor
-      });
+      const page = application.getThread(
+        feedbackActor(actor),
+        requireId(boardId),
+        requireId(threadId),
+        {
+          pageSize,
+          cursor
+        }
+      );
       return { ...page, thread: writeThread(page.thread), replies: [...page.replies] };
     }),
     unaryRoute(applyFeedback2, (actor, request) => {
-      const receipt = application.applyFeedback(actor, {
+      const receipt = application.applyFeedback(feedbackActor(actor), {
         boardId: requireId(request.boardId),
         commandId: requireId(request.commandId),
-        operation: readOperation(request.operation)
+        operation: readOperation2(request.operation)
       });
       return { receipt: writeReceipt(receipt) };
     }),
@@ -20391,7 +21404,11 @@ function createFeedbackRoutes(application) {
       getFeedbackReceipt,
       (actor, request) => {
         const commandId = requireId(request.commandId);
-        const receipt = application.getReceipt(actor, requireId(request.boardId), commandId);
+        const receipt = application.getReceipt(
+          feedbackActor(actor),
+          requireId(request.boardId),
+          commandId
+        );
         if (!receipt) {
           return { result: { case: "notRecorded", value: { commandId } } };
         }
@@ -20402,8 +21419,10 @@ function createFeedbackRoutes(application) {
 }
 
 // ../../packages/contracts/dist/proto/luming/studio/v1/whiteboard_history_pb.js
-var file_luming_studio_v1_whiteboard_history = /* @__PURE__ */ fileDesc("CilsdW1pbmcvc3R1ZGlvL3YxL3doaXRlYm9hcmRfaGlzdG9yeS5wcm90bxIQbHVtaW5nLnN0dWRpby52MSJtChhMaXN0Qm9hcmRWZXJzaW9uc1JlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSHAoPYmVmb3JlX3JldmlzaW9uGAIgASgESACIAQESDQoFbGltaXQYAyABKA1CEgoQX2JlZm9yZV9yZXZpc2lvbiLEAQoZTGlzdEJvYXJkVmVyc2lvbnNSZXNwb25zZRIdChBjdXJyZW50X3JldmlzaW9uGAEgASgESACIAQESNwoIdmVyc2lvbnMYAiADKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkVmVyc2lvblN1bW1hcnkSIQoUbmV4dF9iZWZvcmVfcmV2aXNpb24YAyABKARIAYgBAUITChFfY3VycmVudF9yZXZpc2lvbkIXChVfbmV4dF9iZWZvcmVfcmV2aXNpb24ijgIKE0JvYXJkVmVyc2lvblN1bW1hcnkSFQoIcmV2aXNpb24YASABKARIAIgBARINCgV0aXRsZRgCIAEoCRIcCg9zYXZlZF9hdF9taWxsaXMYAyABKARIAYgBARIQCghhY3Rvcl9pZBgEIAEoCRIwCgRraW5kGAUgASgOMiIubHVtaW5nLnN0dWRpby52MS5Cb2FyZFZlcnNpb25LaW5kEhwKFGNoYW5nZWRfb2JqZWN0X2NvdW50GAYgASgNEhwKD3NvdXJjZV9yZXZpc2lvbhgHIAEoBEgCiAEBQgsKCV9yZXZpc2lvbkISChBfc2F2ZWRfYXRfbWlsbGlzQhIKEF9zb3VyY2VfcmV2aXNpb24iUwobR2V0Qm9hcmRWZXJzaW9uU2NlbmVSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhUKCHJldmlzaW9uGAIgASgESACIAQFCCwoJX3JldmlzaW9uIksKHEdldEJvYXJkVmVyc2lvblNjZW5lUmVzcG9uc2USKwoFc2NlbmUYASABKAsyHC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU2NlbmUiagoeR2V0Qm9hcmRWZXJzaW9uUGF5bG9hZHNSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhUKCHJldmlzaW9uGAIgASgESACIAQESEgoKb2JqZWN0X2lkcxgDIAMoCUILCglfcmV2aXNpb24ipAEKH0dldEJvYXJkVmVyc2lvblBheWxvYWRzUmVzcG9uc2USEAoIYm9hcmRfaWQYASABKAkSFQoIcmV2aXNpb24YAiABKARIAIgBARI2CgdyZXN1bHRzGAMgAygLMiUubHVtaW5nLnN0dWRpby52MS5PYmplY3RQYXlsb2FkUmVzdWx0EhMKC3VuYXZhaWxhYmxlGAQgASgIQgsKCV9yZXZpc2lvbiKnAgoaUmVzdG9yZUJvYXJkVmVyc2lvblJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCRIVCghyZXZpc2lvbhgDIAEoBEgBiAEBEiYKGWV4cGVjdGVkX2N1cnJlbnRfcmV2aXNpb24YBCABKARIAogBARIzCgV3aG9sZRgFIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuRXhwb3J0V2hvbGVCb2FyZEgAEjsKCXNlbGVjdGlvbhgGIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRXhwb3J0Qm9hcmRTZWxlY3Rpb25IAEIHCgVzY29wZUILCglfcmV2aXNpb25CHAoaX2V4cGVjdGVkX2N1cnJlbnRfcmV2aXNpb24iUgobUmVzdG9yZUJvYXJkVmVyc2lvblJlc3BvbnNlEjMKB3JlY2VpcHQYASABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkRWRpdFJlY2VpcHQigQIKGUV4cG9ydEJvYXJkVmVyc2lvblJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSFQoIcmV2aXNpb24YAiABKARIAYgBARIzCgV3aG9sZRgDIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuRXhwb3J0V2hvbGVCb2FyZEgAEjsKCXNlbGVjdGlvbhgEIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRXhwb3J0Qm9hcmRTZWxlY3Rpb25IABIzCgZmb3JtYXQYBSABKA4yIy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkRXhwb3J0Rm9ybWF0QgcKBXNjb3BlQgsKCV9yZXZpc2lvbiLrAQoaRXhwb3J0Qm9hcmRWZXJzaW9uUmVzcG9uc2USMQoEZmlsZRgBIAEoCzIhLmx1bWluZy5zdHVkaW8udjEuRXhwb3J0Qm9hcmRGaWxlSAASOQoIcmVqZWN0ZWQYAiABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLkV4cG9ydEJvYXJkUmVqZWN0ZWRIABIVCgt1bmF2YWlsYWJsZRgDIAEoCEgAEj4KC2Jyb3dzZXJfcG5nGAQgASgLMicubHVtaW5nLnN0dWRpby52MS5FeHBvcnRCb2FyZEJyb3dzZXJQbmdIAEIICgZyZXN1bHQqmgIKEEJvYXJkVmVyc2lvbktpbmQSIgoeQk9BUkRfVkVSU0lPTl9LSU5EX1VOU1BFQ0lGSUVEEAASHwobQk9BUkRfVkVSU0lPTl9LSU5EX0JBU0VMSU5FEAESHwobQk9BUkRfVkVSU0lPTl9LSU5EX0dFT01FVFJZEAISHgoaQk9BUkRfVkVSU0lPTl9LSU5EX0NPTlRFTlQQAxIcChhCT0FSRF9WRVJTSU9OX0tJTkRfSU1BR0UQBBIeChpCT0FSRF9WRVJTSU9OX0tJTkRfUkVTVE9SRRAFEhwKGEJPQVJEX1ZFUlNJT05fS0lORF9UUkFTSBAGEiQKIEJPQVJEX1ZFUlNJT05fS0lORF9SRVNUT1JFX1RSQVNIEAcy3wQKE0JvYXJkSGlzdG9yeVNlcnZpY2USbAoRTGlzdEJvYXJkVmVyc2lvbnMSKi5sdW1pbmcuc3R1ZGlvLnYxLkxpc3RCb2FyZFZlcnNpb25zUmVxdWVzdBorLmx1bWluZy5zdHVkaW8udjEuTGlzdEJvYXJkVmVyc2lvbnNSZXNwb25zZRJ1ChRHZXRCb2FyZFZlcnNpb25TY2VuZRItLmx1bWluZy5zdHVkaW8udjEuR2V0Qm9hcmRWZXJzaW9uU2NlbmVSZXF1ZXN0Gi4ubHVtaW5nLnN0dWRpby52MS5HZXRCb2FyZFZlcnNpb25TY2VuZVJlc3BvbnNlEn4KF0dldEJvYXJkVmVyc2lvblBheWxvYWRzEjAubHVtaW5nLnN0dWRpby52MS5HZXRCb2FyZFZlcnNpb25QYXlsb2Fkc1JlcXVlc3QaMS5sdW1pbmcuc3R1ZGlvLnYxLkdldEJvYXJkVmVyc2lvblBheWxvYWRzUmVzcG9uc2UScgoTUmVzdG9yZUJvYXJkVmVyc2lvbhIsLmx1bWluZy5zdHVkaW8udjEuUmVzdG9yZUJvYXJkVmVyc2lvblJlcXVlc3QaLS5sdW1pbmcuc3R1ZGlvLnYxLlJlc3RvcmVCb2FyZFZlcnNpb25SZXNwb25zZRJvChJFeHBvcnRCb2FyZFZlcnNpb24SKy5sdW1pbmcuc3R1ZGlvLnYxLkV4cG9ydEJvYXJkVmVyc2lvblJlcXVlc3QaLC5sdW1pbmcuc3R1ZGlvLnYxLkV4cG9ydEJvYXJkVmVyc2lvblJlc3BvbnNlYgZwcm90bzM", [file_luming_studio_v1_whiteboard_edits, file_luming_studio_v1_whiteboard_scene, file_luming_studio_v1_whiteboard_service]);
-var BoardVersionKindSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_whiteboard_history, 0);
+var file_luming_studio_v1_whiteboard_history = /* @__PURE__ */ fileDesc("CilsdW1pbmcvc3R1ZGlvL3YxL3doaXRlYm9hcmRfaGlzdG9yeS5wcm90bxIQbHVtaW5nLnN0dWRpby52MSJtChhMaXN0Qm9hcmRWZXJzaW9uc1JlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSHAoPYmVmb3JlX3JldmlzaW9uGAIgASgESACIAQESDQoFbGltaXQYAyABKA1CEgoQX2JlZm9yZV9yZXZpc2lvbiLEAQoZTGlzdEJvYXJkVmVyc2lvbnNSZXNwb25zZRIdChBjdXJyZW50X3JldmlzaW9uGAEgASgESACIAQESNwoIdmVyc2lvbnMYAiADKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkVmVyc2lvblN1bW1hcnkSIQoUbmV4dF9iZWZvcmVfcmV2aXNpb24YAyABKARIAYgBAUITChFfY3VycmVudF9yZXZpc2lvbkIXChVfbmV4dF9iZWZvcmVfcmV2aXNpb24i3wIKE0JvYXJkVmVyc2lvblN1bW1hcnkSFQoIcmV2aXNpb24YASABKARIAIgBARINCgV0aXRsZRgCIAEoCRIcCg9zYXZlZF9hdF9taWxsaXMYAyABKARIAYgBARIQCghhY3Rvcl9pZBgEIAEoCRIwCgRraW5kGAUgASgOMiIubHVtaW5nLnN0dWRpby52MS5Cb2FyZFZlcnNpb25LaW5kEhwKFGNoYW5nZWRfb2JqZWN0X2NvdW50GAYgASgNEhwKD3NvdXJjZV9yZXZpc2lvbhgHIAEoBEgCiAEBEjsKCmFjdG9yX2tpbmQYCCABKA4yJy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkVmVyc2lvbkFjdG9yS2luZBISCgphY3Rvcl9uYW1lGAkgASgJQgsKCV9yZXZpc2lvbkISChBfc2F2ZWRfYXRfbWlsbGlzQhIKEF9zb3VyY2VfcmV2aXNpb24iUwobR2V0Qm9hcmRWZXJzaW9uU2NlbmVSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhUKCHJldmlzaW9uGAIgASgESACIAQFCCwoJX3JldmlzaW9uIksKHEdldEJvYXJkVmVyc2lvblNjZW5lUmVzcG9uc2USKwoFc2NlbmUYASABKAsyHC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU2NlbmUiagoeR2V0Qm9hcmRWZXJzaW9uUGF5bG9hZHNSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhUKCHJldmlzaW9uGAIgASgESACIAQESEgoKb2JqZWN0X2lkcxgDIAMoCUILCglfcmV2aXNpb24ipAEKH0dldEJvYXJkVmVyc2lvblBheWxvYWRzUmVzcG9uc2USEAoIYm9hcmRfaWQYASABKAkSFQoIcmV2aXNpb24YAiABKARIAIgBARI2CgdyZXN1bHRzGAMgAygLMiUubHVtaW5nLnN0dWRpby52MS5PYmplY3RQYXlsb2FkUmVzdWx0EhMKC3VuYXZhaWxhYmxlGAQgASgIQgsKCV9yZXZpc2lvbiKnAgoaUmVzdG9yZUJvYXJkVmVyc2lvblJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCRIVCghyZXZpc2lvbhgDIAEoBEgBiAEBEiYKGWV4cGVjdGVkX2N1cnJlbnRfcmV2aXNpb24YBCABKARIAogBARIzCgV3aG9sZRgFIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuRXhwb3J0V2hvbGVCb2FyZEgAEjsKCXNlbGVjdGlvbhgGIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRXhwb3J0Qm9hcmRTZWxlY3Rpb25IAEIHCgVzY29wZUILCglfcmV2aXNpb25CHAoaX2V4cGVjdGVkX2N1cnJlbnRfcmV2aXNpb24iUgobUmVzdG9yZUJvYXJkVmVyc2lvblJlc3BvbnNlEjMKB3JlY2VpcHQYASABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkRWRpdFJlY2VpcHQi2gIKGUV4cG9ydEJvYXJkVmVyc2lvblJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSFQoIcmV2aXNpb24YAiABKARIAYgBARIzCgV3aG9sZRgDIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuRXhwb3J0V2hvbGVCb2FyZEgAEjsKCXNlbGVjdGlvbhgEIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRXhwb3J0Qm9hcmRTZWxlY3Rpb25IABIzCgZmb3JtYXQYBSABKA4yIy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkRXhwb3J0Rm9ybWF0EjkKCXJlY3RhbmdsZRgGIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRXhwb3J0Qm9hcmRSZWN0YW5nbGUSEgoFc2NhbGUYByABKAFIAogBAUIHCgVzY29wZUILCglfcmV2aXNpb25CCAoGX3NjYWxlIusBChpFeHBvcnRCb2FyZFZlcnNpb25SZXNwb25zZRIxCgRmaWxlGAEgASgLMiEubHVtaW5nLnN0dWRpby52MS5FeHBvcnRCb2FyZEZpbGVIABI5CghyZWplY3RlZBgCIAEoCzIlLmx1bWluZy5zdHVkaW8udjEuRXhwb3J0Qm9hcmRSZWplY3RlZEgAEhUKC3VuYXZhaWxhYmxlGAMgASgISAASPgoLYnJvd3Nlcl9wbmcYBCABKAsyJy5sdW1pbmcuc3R1ZGlvLnYxLkV4cG9ydEJvYXJkQnJvd3NlclBuZ0gAQggKBnJlc3VsdCplChVCb2FyZFZlcnNpb25BY3RvcktpbmQSKAokQk9BUkRfVkVSU0lPTl9BQ1RPUl9LSU5EX1VOU1BFQ0lGSUVEEAASIgoeQk9BUkRfVkVSU0lPTl9BQ1RPUl9LSU5EX0FHRU5UEAEqmgIKEEJvYXJkVmVyc2lvbktpbmQSIgoeQk9BUkRfVkVSU0lPTl9LSU5EX1VOU1BFQ0lGSUVEEAASHwobQk9BUkRfVkVSU0lPTl9LSU5EX0JBU0VMSU5FEAESHwobQk9BUkRfVkVSU0lPTl9LSU5EX0dFT01FVFJZEAISHgoaQk9BUkRfVkVSU0lPTl9LSU5EX0NPTlRFTlQQAxIcChhCT0FSRF9WRVJTSU9OX0tJTkRfSU1BR0UQBBIeChpCT0FSRF9WRVJTSU9OX0tJTkRfUkVTVE9SRRAFEhwKGEJPQVJEX1ZFUlNJT05fS0lORF9UUkFTSBAGEiQKIEJPQVJEX1ZFUlNJT05fS0lORF9SRVNUT1JFX1RSQVNIEAcy3wQKE0JvYXJkSGlzdG9yeVNlcnZpY2USbAoRTGlzdEJvYXJkVmVyc2lvbnMSKi5sdW1pbmcuc3R1ZGlvLnYxLkxpc3RCb2FyZFZlcnNpb25zUmVxdWVzdBorLmx1bWluZy5zdHVkaW8udjEuTGlzdEJvYXJkVmVyc2lvbnNSZXNwb25zZRJ1ChRHZXRCb2FyZFZlcnNpb25TY2VuZRItLmx1bWluZy5zdHVkaW8udjEuR2V0Qm9hcmRWZXJzaW9uU2NlbmVSZXF1ZXN0Gi4ubHVtaW5nLnN0dWRpby52MS5HZXRCb2FyZFZlcnNpb25TY2VuZVJlc3BvbnNlEn4KF0dldEJvYXJkVmVyc2lvblBheWxvYWRzEjAubHVtaW5nLnN0dWRpby52MS5HZXRCb2FyZFZlcnNpb25QYXlsb2Fkc1JlcXVlc3QaMS5sdW1pbmcuc3R1ZGlvLnYxLkdldEJvYXJkVmVyc2lvblBheWxvYWRzUmVzcG9uc2UScgoTUmVzdG9yZUJvYXJkVmVyc2lvbhIsLmx1bWluZy5zdHVkaW8udjEuUmVzdG9yZUJvYXJkVmVyc2lvblJlcXVlc3QaLS5sdW1pbmcuc3R1ZGlvLnYxLlJlc3RvcmVCb2FyZFZlcnNpb25SZXNwb25zZRJvChJFeHBvcnRCb2FyZFZlcnNpb24SKy5sdW1pbmcuc3R1ZGlvLnYxLkV4cG9ydEJvYXJkVmVyc2lvblJlcXVlc3QaLC5sdW1pbmcuc3R1ZGlvLnYxLkV4cG9ydEJvYXJkVmVyc2lvblJlc3BvbnNlYgZwcm90bzM", [file_luming_studio_v1_whiteboard_edits, file_luming_studio_v1_whiteboard_scene, file_luming_studio_v1_whiteboard_service]);
+var BoardVersionActorKindSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_whiteboard_history, 0);
+var BoardVersionActorKind = /* @__PURE__ */ tsEnum(BoardVersionActorKindSchema);
+var BoardVersionKindSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_whiteboard_history, 1);
 var BoardVersionKind = /* @__PURE__ */ tsEnum(BoardVersionKindSchema);
 var BoardHistoryService = /* @__PURE__ */ serviceDesc(file_luming_studio_v1_whiteboard_history, 0);
 
@@ -20439,6 +21458,35 @@ function toExportScope(scope2) {
       throw new HttpRequestError(400, "A board export scope is required");
   }
 }
+function toExportOptions(request) {
+  const { scope: scope2, format, rectangle, scale } = request;
+  if (rectangle && (format !== BoardExportFormat.PNG || scope2.case !== "whole")) {
+    throw new HttpRequestError(400, "A crop rectangle requires PNG and the whole board scope");
+  }
+  if (rectangle) {
+    const { x, y, width, height } = rectangle;
+    const bounds2 = [x, y, x + width, y + height];
+    const finiteBounds = bounds2.every((value) => Number.isFinite(value));
+    if (!finiteBounds || x + width <= x || y + height <= y) {
+      throw new HttpRequestError(
+        400,
+        "A crop rectangle requires finite bounds and positive dimensions"
+      );
+    }
+  }
+  if (scale !== void 0) {
+    const validScale = Number.isFinite(scale) && scale >= 0.1 && scale <= 4;
+    if (!validScale || scale !== 1 && format !== BoardExportFormat.PNG) {
+      throw new HttpRequestError(400, "Custom PNG export scale must be between 0.1 and 4");
+    }
+  }
+  return {
+    scope: toExportScope(scope2),
+    format: toExportFormat(format),
+    rectangle,
+    scale
+  };
+}
 function toExportCommand(request) {
   if (request.expectedRevision === void 0) {
     throw new HttpRequestError(400, "A saved board revision is required");
@@ -20446,8 +21494,7 @@ function toExportCommand(request) {
   return {
     boardId: requireId(request.boardId),
     expectedRevision: request.expectedRevision,
-    scope: toExportScope(request.scope),
-    format: toExportFormat(request.format)
+    ...toExportOptions(request)
   };
 }
 function toExportResponse(result) {
@@ -20506,11 +21553,12 @@ function requirePayloadIds(ids) {
   }
   return ids.map(requireId);
 }
-function toVersionSummary(version2) {
-  const { kind, savedAtMillis, ...summary } = version2;
+function toVersionSummary(version3) {
+  const { kind, savedAtMillis, actorKind, ...summary } = version3;
   return {
     ...summary,
     kind: versionKind[kind],
+    actorKind: actorKind === "agent" ? BoardVersionActorKind.AGENT : void 0,
     savedAtMillis: savedAtMillis === void 0 ? void 0 : BigInt(savedAtMillis)
   };
 }
@@ -20585,8 +21633,7 @@ function createBoardHistoryRoutes(application, digest2, observe) {
       const result = await application.exportVersionFile(actor, {
         boardId: requireId(request.boardId),
         expectedRevision: requireRevision(request.revision),
-        scope: toExportScope(request.scope),
-        format: toExportFormat(request.format)
+        ...toExportOptions(request)
       });
       if (result.kind === "file" || result.kind === "browserPng") {
         actor.authorize?.(request);
@@ -20597,7 +21644,7 @@ function createBoardHistoryRoutes(application, digest2, observe) {
 }
 
 // ../../packages/contracts/dist/proto/luming/studio/v1/board_room_service_pb.js
-var file_luming_studio_v1_board_room_service = /* @__PURE__ */ fileDesc("CilsdW1pbmcvc3R1ZGlvL3YxL2JvYXJkX3Jvb21fc2VydmljZS5wcm90bxIQbHVtaW5nLnN0dWRpby52MSInChNHZXRCb2FyZFJvb21SZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJIkcKFEdldEJvYXJkUm9vbVJlc3BvbnNlEi8KBWV2ZW50GAEgASgLMiAubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21FdmVudCJPCg9Cb2FyZFJvb21DdXJzb3ISGAoQcm9vbV9pbnN0YW5jZV9pZBgBIAEoCRIVCghzZXF1ZW5jZRgCIAEoBEgAiAEBQgsKCV9zZXF1ZW5jZSJxChpXYWl0Qm9hcmRSb29tRXZlbnRzUmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRIPCgd2aWV3X2lkGAIgASgJEjAKBWFmdGVyGAMgASgLMiEubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21DdXJzb3IiTwobV2FpdEJvYXJkUm9vbUV2ZW50c1Jlc3BvbnNlEjAKBmV2ZW50cxgBIAMoCzIgLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tRXZlbnQicwocU3RyZWFtQm9hcmRSb29tRXZlbnRzUmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRIPCgd2aWV3X2lkGAIgASgJEjAKBWFmdGVyGAMgASgLMiEubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21DdXJzb3IiUAodU3RyZWFtQm9hcmRSb29tRXZlbnRzUmVzcG9uc2USLwoFZXZlbnQYASABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbUV2ZW50ImQKEUJvYXJkUm9vbVZpZXdwb3J0EhAKCGNlbnRlcl94GAEgASgBEhAKCGNlbnRlcl95GAIgASgBEgwKBHpvb20YAyABKAESDQoFd2lkdGgYBCABKAESDgoGaGVpZ2h0GAUgASgBIjwKF0JvYXJkUm9vbVBhcnRpY2lwYW50S2V5EhAKCGFjdG9yX2lkGAEgASgJEg8KB3ZpZXdfaWQYAiABKAkioQEKGEJvYXJkUm9vbUdlc3R1cmVHZW9tZXRyeRIRCglvYmplY3RfaWQYASABKAkSJgoZZXhwZWN0ZWRfZ2VvbWV0cnlfdmVyc2lvbhgCIAEoBEgAiAEBEiwKCGdlb21ldHJ5GAMgASgLMhoubHVtaW5nLnN0dWRpby52MS5HZW9tZXRyeUIcChpfZXhwZWN0ZWRfZ2VvbWV0cnlfdmVyc2lvbiKMAQoXQm9hcmRSb29tR2VzdHVyZVByZXZpZXcSNAoEa2luZBgBIAEoDjImLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tR2VzdHVyZUtpbmQSOwoHY2hhbmdlcxgCIAMoCzIqLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tR2VzdHVyZUdlb21ldHJ5IpsEChRCb2FyZFJvb21QYXJ0aWNpcGFudBI2CgNrZXkYASABKAsyKS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVBhcnRpY2lwYW50S2V5EhQKDGRpc3BsYXlfbmFtZRgCIAEoCRIMCgRyb2xlGAMgASgJEhUKCHNlcXVlbmNlGAQgASgESACIAQESHwoSZXhwaXJlc19hdF91bml4X21zGAUgASgESAGIAQESJwoGY3Vyc29yGAYgASgLMhcubHVtaW5nLnN0dWRpby52MS5Qb2ludBI1Cgh2aWV3cG9ydBgHIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tVmlld3BvcnQSEQoJZm9sbG93aW5nGAggASgIEjoKB2dlc3R1cmUYCSABKAsyKS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbUdlc3R1cmVQcmV2aWV3EicKGmdlc3R1cmVfZXhwaXJlc19hdF91bml4X21zGAogASgESAKIAQESIAoTYWN0aXZpdHlfYXRfdW5peF9tcxgLIAEoBEgDiAEBEhoKEmVkaXRpbmdfb2JqZWN0X2lkcxgMIAMoCUILCglfc2VxdWVuY2VCFQoTX2V4cGlyZXNfYXRfdW5peF9tc0IdChtfZ2VzdHVyZV9leHBpcmVzX2F0X3VuaXhfbXNCFgoUX2FjdGl2aXR5X2F0X3VuaXhfbXMirgIKGlVwZGF0ZUJvYXJkUHJlc2VuY2VSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEg8KB3ZpZXdfaWQYAiABKAkSFQoIc2VxdWVuY2UYAyABKARIAIgBARInCgZjdXJzb3IYBCABKAsyFy5sdW1pbmcuc3R1ZGlvLnYxLlBvaW50EjUKCHZpZXdwb3J0GAUgASgLMiMubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21WaWV3cG9ydBIRCglmb2xsb3dpbmcYBiABKAgSOgoHZ2VzdHVyZRgHIAEoCzIpLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tR2VzdHVyZVByZXZpZXcSGgoSZWRpdGluZ19vYmplY3RfaWRzGAggAygJQgsKCV9zZXF1ZW5jZSIvChtVcGRhdGVCb2FyZFByZXNlbmNlUmVzcG9uc2USEAoIYWNjZXB0ZWQYASABKAgiYgoZTGVhdmVCb2FyZFByZXNlbmNlUmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRIPCgd2aWV3X2lkGAIgASgJEhUKCHNlcXVlbmNlGAMgASgESACIAQFCCwoJX3NlcXVlbmNlIi4KGkxlYXZlQm9hcmRQcmVzZW5jZVJlc3BvbnNlEhAKCGFjY2VwdGVkGAEgASgIIqgDChFCb2FyZFJvb21TbmFwc2hvdBIQCghhY3Rvcl9pZBgBIAEoCRIQCghjYW5fZWRpdBgCIAEoCBIbCg5ib2FyZF9yZXZpc2lvbhgDIAEoBEgAiAEBEjwKDHBhcnRpY2lwYW50cxgEIAMoCzImLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tUGFydGljaXBhbnQSLwoFdGltZXIYBSABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVRpbWVyEj4KEGFnZW50X3dvcmtzcGFjZXMYBiADKAsyJC5sdW1pbmcuc3R1ZGlvLnYxLlJvb21BZ2VudFdvcmtzcGFjZRIiChpjYW5fcmVsZWFzZV9hZ2VudF9hY3Rpdml0eRgHIAEoCBIdChBmZWVkYmFja192ZXJzaW9uGAggASgESAGIAQESIAoTc3VnZ2VzdGlvbnNfdmVyc2lvbhgJIAEoBEgCiAEBQhEKD19ib2FyZF9yZXZpc2lvbkITChFfZmVlZGJhY2tfdmVyc2lvbkIWChRfc3VnZ2VzdGlvbnNfdmVyc2lvbiKNAQoVQm9hcmRSb29tUGFydGljaXBhbnRzEjcKB3Vwc2VydHMYASADKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVBhcnRpY2lwYW50EjsKCHJlbW92YWxzGAIgAygLMikubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21QYXJ0aWNpcGFudEtleSLTAQoXQm9hcmRSb29tQ29udGVudENoYW5nZWQSGwoOYm9hcmRfcmV2aXNpb24YASABKARIAIgBARIaChJjaGFuZ2VkX29iamVjdF9pZHMYAiADKAkSGgoScmVtb3ZlZF9vYmplY3RfaWRzGAMgAygJEhUKDXJlZnJlc2hfc2NlbmUYBCABKAgSOQoPY2hhbmdlZF9vYmplY3RzGAUgAygLMiAubHVtaW5nLnN0dWRpby52MS5PYmplY3RNZXRhZGF0YUIRCg9fYm9hcmRfcmV2aXNpb24iFQoTQm9hcmRSb29tQWNjZXNzTG9zdCI+ChpCb2FyZFJvb21EaXNjdXNzaW9uQ2hhbmdlZBIUCgd2ZXJzaW9uGAEgASgESACIAQFCCgoIX3ZlcnNpb24iswUKDkJvYXJkUm9vbUV2ZW50EhAKCGJvYXJkX2lkGAEgASgJEhgKEHJvb21faW5zdGFuY2VfaWQYAiABKAkSFQoIc2VxdWVuY2UYAyABKARIAYgBARIgChNzZXJ2ZXJfdGltZV91bml4X21zGAQgASgESAKIAQESNwoIc25hcHNob3QYBSABKAsyIy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVNuYXBzaG90SAASPwoMcGFydGljaXBhbnRzGAYgASgLMicubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21QYXJ0aWNpcGFudHNIABIxCgV0aW1lchgHIAEoCzIgLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tVGltZXJIABJECg9jb250ZW50X2NoYW5nZWQYCCABKAsyKS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbUNvbnRlbnRDaGFuZ2VkSAASPAoLYWNjZXNzX2xvc3QYCSABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbUFjY2Vzc0xvc3RIABJEChBhZ2VudF93b3Jrc3BhY2VzGAogASgLMigubHVtaW5nLnN0dWRpby52MS5Sb29tQWdlbnRXb3Jrc3BhY2VMaXN0SAASSAoQZmVlZGJhY2tfY2hhbmdlZBgLIAEoCzIsLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tRGlzY3Vzc2lvbkNoYW5nZWRIABJLChNzdWdnZXN0aW9uc19jaGFuZ2VkGAwgASgLMiwubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21EaXNjdXNzaW9uQ2hhbmdlZEgAQgkKB3BheWxvYWRCCwoJX3NlcXVlbmNlQhYKFF9zZXJ2ZXJfdGltZV91bml4X21zIscBCg5Cb2FyZFJvb21UaW1lchIUCgd2ZXJzaW9uGAEgASgESACIAQESNAoFcGhhc2UYAiABKA4yJS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVRpbWVyUGhhc2USEwoLZHVyYXRpb25fbXMYAyABKA0SHQoQZGVhZGxpbmVfdW5peF9tcxgEIAEoBEgBiAEBEhQKDHJlbWFpbmluZ19tcxgFIAEoDUIKCghfdmVyc2lvbkITChFfZGVhZGxpbmVfdW5peF9tcyISChBCb2FyZFRpbWVyQWN0aW9uIosDChdDaGFuZ2VCb2FyZFRpbWVyUmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJEh0KEGV4cGVjdGVkX3ZlcnNpb24YAyABKARIAYgBARIzCgVzdGFydBgEIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuQm9hcmRUaW1lckFjdGlvbkgAEjMKBXBhdXNlGAUgASgLMiIubHVtaW5nLnN0dWRpby52MS5Cb2FyZFRpbWVyQWN0aW9uSAASNAoGcmVzdW1lGAYgASgLMiIubHVtaW5nLnN0dWRpby52MS5Cb2FyZFRpbWVyQWN0aW9uSAASMwoFcmVzZXQYByABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkVGltZXJBY3Rpb25IABIZCg9zZXRfZHVyYXRpb25fbXMYCCABKA1IABIcChJhZGp1c3RfZHVyYXRpb25fbXMYCSABKBFIAEIICgZhY3Rpb25CEwoRX2V4cGVjdGVkX3ZlcnNpb24iRAoRQm9hcmRUaW1lckFwcGxpZWQSLwoFdGltZXIYASABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVRpbWVyIkUKEkJvYXJkVGltZXJDb25mbGljdBIvCgV0aW1lchgBIAEoCzIgLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tVGltZXIiSwoSQm9hcmRUaW1lclJlamVjdGVkEjUKBnJlYXNvbhgBIAEoDjIlLmx1bWluZy5zdHVkaW8udjEuQm9hcmRUaW1lclJlamVjdGlvbiLwAQoRQm9hcmRUaW1lclJlY2VpcHQSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCRI2CgdhcHBsaWVkGAMgASgLMiMubHVtaW5nLnN0dWRpby52MS5Cb2FyZFRpbWVyQXBwbGllZEgAEjgKCGNvbmZsaWN0GAQgASgLMiQubHVtaW5nLnN0dWRpby52MS5Cb2FyZFRpbWVyQ29uZmxpY3RIABI4CghyZWplY3RlZBgFIAEoCzIkLmx1bWluZy5zdHVkaW8udjEuQm9hcmRUaW1lclJlamVjdGVkSABCCQoHb3V0Y29tZSKKAQoYQ2hhbmdlQm9hcmRUaW1lclJlc3BvbnNlEjQKB3JlY2VpcHQYASABKAsyIy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkVGltZXJSZWNlaXB0EiAKE3NlcnZlcl90aW1lX3VuaXhfbXMYAiABKARIAIgBAUIWChRfc2VydmVyX3RpbWVfdW5peF9tcyJDChtHZXRCb2FyZFRpbWVyUmVjZWlwdFJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCSKOAQocR2V0Qm9hcmRUaW1lclJlY2VpcHRSZXNwb25zZRI0CgdyZWNlaXB0GAEgASgLMiMubHVtaW5nLnN0dWRpby52MS5Cb2FyZFRpbWVyUmVjZWlwdBIgChNzZXJ2ZXJfdGltZV91bml4X21zGAIgASgESACIAQFCFgoUX3NlcnZlcl90aW1lX3VuaXhfbXMiSgoTQWdlbnRBY3Rpdml0eUJvdW5kcxIJCgF4GAEgASgBEgkKAXkYAiABKAESDQoFd2lkdGgYAyABKAESDgoGaGVpZ2h0GAQgASgBIi4KGEFnZW50QWN0aXZpdHlPYmplY3RTY29wZRISCgpvYmplY3RfaWRzGAEgAygJIpQBChJBZ2VudEFjdGl2aXR5U2NvcGUSPQoHb2JqZWN0cxgBIAEoCzIqLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eU9iamVjdFNjb3BlSAASNQoEYXJlYRgCIAEoCzIlLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eUJvdW5kc0gAQggKBnRhcmdldCJ1ChJBZ2VudEFjdGl2aXR5QmVnaW4SMwoFc2NvcGUYASABKAsyJC5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlTY29wZRINCgVsYWJlbBgCIAEoCRIbChNwcmV2aW91c19nZW5lcmF0aW9uGAMgASgJInkKE0FnZW50QWN0aXZpdHlVcGRhdGUSEgoKZ2VuZXJhdGlvbhgBIAEoCRIzCgVwaGFzZRgCIAEoDjIkLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eVBoYXNlEhkKEWFjdGl2ZV9vYmplY3RfaWRzGAMgAygJIiYKEEFnZW50QWN0aXZpdHlFbmQSEgoKZ2VuZXJhdGlvbhgBIAEoCSIVChNBZ2VudEFjdGl2aXR5U3RhdHVzIioKFEFnZW50QWN0aXZpdHlSZWxlYXNlEhIKCmdlbmVyYXRpb24YASABKAki8gIKGkNoYW5nZUFnZW50QWN0aXZpdHlSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJEg8KB3Rhc2tfaWQYAyABKAkSNQoFYmVnaW4YBCABKAsyJC5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlCZWdpbkgAEjcKBnVwZGF0ZRgFIAEoCzIlLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eVVwZGF0ZUgAEjEKA2VuZBgGIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eUVuZEgAEjcKBnN0YXR1cxgHIAEoCzIlLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eVN0YXR1c0gAEjkKB3JlbGVhc2UYCCABKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlSZWxlYXNlSABCCAoGYWN0aW9uImsKFlJvb21BZ2VudFdvcmtzcGFjZUFyZWESCgoCaWQYASABKAkSNQoGYm91bmRzGAIgASgLMiUubHVtaW5nLnN0dWRpby52MS5BZ2VudEFjdGl2aXR5Qm91bmRzEg4KBmFjdGl2ZRgDIAEoCCK1AgoSUm9vbUFnZW50V29ya3NwYWNlEhAKCGFnZW50X2lkGAEgASgJEg8KB3Rhc2tfaWQYAiABKAkSEgoKZ2VuZXJhdGlvbhgDIAEoCRINCgVsYWJlbBgEIAEoCRIzCgVwaGFzZRgFIAEoDjIkLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eVBoYXNlEjcKBWFyZWFzGAYgAygLMigubHVtaW5nLnN0dWRpby52MS5Sb29tQWdlbnRXb3Jrc3BhY2VBcmVhEh8KEmV4cGlyZXNfYXRfdW5peF9tcxgHIAEoBEgAiAEBEjMKBXNjb3BlGAggASgLMiQubHVtaW5nLnN0dWRpby52MS5BZ2VudEFjdGl2aXR5U2NvcGVCFQoTX2V4cGlyZXNfYXRfdW5peF9tcyJSChZSb29tQWdlbnRXb3Jrc3BhY2VMaXN0EjgKCndvcmtzcGFjZXMYASADKAsyJC5sdW1pbmcuc3R1ZGlvLnYxLlJvb21BZ2VudFdvcmtzcGFjZSJiChJBZ2VudEFjdGl2aXR5RW5kZWQSEgoKZ2VuZXJhdGlvbhgBIAEoCRI4CgZyZWFzb24YAiABKA4yKC5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlFbmRSZWFzb24i1wEKG0NoYW5nZUFnZW50QWN0aXZpdHlSZXNwb25zZRI5Cgl3b3Jrc3BhY2UYASABKAsyJC5sdW1pbmcuc3R1ZGlvLnYxLlJvb21BZ2VudFdvcmtzcGFjZUgAEjUKBWVuZGVkGAIgASgLMiQubHVtaW5nLnN0dWRpby52MS5BZ2VudEFjdGl2aXR5RW5kZWRIABI8CghyZWplY3RlZBgDIAEoDjIoLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eVJlamVjdGlvbkgAQggKBnJlc3VsdCqpAQoUQm9hcmRSb29tR2VzdHVyZUtpbmQSJwojQk9BUkRfUk9PTV9HRVNUVVJFX0tJTkRfVU5TUEVDSUZJRUQQABIgChxCT0FSRF9ST09NX0dFU1RVUkVfS0lORF9NT1ZFEAESIgoeQk9BUkRfUk9PTV9HRVNUVVJFX0tJTkRfUkVTSVpFEAISIgoeQk9BUkRfUk9PTV9HRVNUVVJFX0tJTkRfUk9UQVRFEAMqxwEKE0JvYXJkUm9vbVRpbWVyUGhhc2USJgoiQk9BUkRfUk9PTV9USU1FUl9QSEFTRV9VTlNQRUNJRklFRBAAEh8KG0JPQVJEX1JPT01fVElNRVJfUEhBU0VfSURMRRABEiIKHkJPQVJEX1JPT01fVElNRVJfUEhBU0VfUlVOTklORxACEiEKHUJPQVJEX1JPT01fVElNRVJfUEhBU0VfUEFVU0VEEAMSIAocQk9BUkRfUk9PTV9USU1FUl9QSEFTRV9FTkRFRBAEKrcBChNCb2FyZFRpbWVyUmVqZWN0aW9uEiUKIUJPQVJEX1RJTUVSX1JFSkVDVElPTl9VTlNQRUNJRklFRBAAEiMKH0JPQVJEX1RJTUVSX1JFSkVDVElPTl9GT1JCSURERU4QARIoCiRCT0FSRF9USU1FUl9SRUpFQ1RJT05fSU5WQUxJRF9BQ1RJT04QAhIqCiZCT0FSRF9USU1FUl9SRUpFQ1RJT05fQ09NTUFORF9JRF9SRVVTRRADKqQBChJBZ2VudEFjdGl2aXR5UGhhc2USJAogQUdFTlRfQUNUSVZJVFlfUEhBU0VfVU5TUEVDSUZJRUQQABIiCh5BR0VOVF9BQ1RJVklUWV9QSEFTRV9QUkVQQVJJTkcQARIgChxBR0VOVF9BQ1RJVklUWV9QSEFTRV9XUklUSU5HEAISIgoeQUdFTlRfQUNUSVZJVFlfUEhBU0VfVkVSSUZZSU5HEAMqvwIKFkFnZW50QWN0aXZpdHlSZWplY3Rpb24SKAokQUdFTlRfQUNUSVZJVFlfUkVKRUNUSU9OX1VOU1BFQ0lGSUVEEAASJAogQUdFTlRfQUNUSVZJVFlfUkVKRUNUSU9OX0lOVkFMSUQQARIkCiBBR0VOVF9BQ1RJVklUWV9SRUpFQ1RJT05fT1ZFUkxBUBACEiUKIUFHRU5UX0FDVElWSVRZX1JFSkVDVElPTl9DQVBBQ0lUWRADEiYKIkFHRU5UX0FDVElWSVRZX1JFSkVDVElPTl9OT1RfRk9VTkQQBBIvCitBR0VOVF9BQ1RJVklUWV9SRUpFQ1RJT05fR0VORVJBVElPTl9DSEFOR0VEEAUSLworQUdFTlRfQUNUSVZJVFlfUkVKRUNUSU9OX1dPUktTUEFDRV9SRUxFQVNFRBAGKrsBChZBZ2VudEFjdGl2aXR5RW5kUmVhc29uEikKJUFHRU5UX0FDVElWSVRZX0VORF9SRUFTT05fVU5TUEVDSUZJRUQQABInCiNBR0VOVF9BQ1RJVklUWV9FTkRfUkVBU09OX0NPTVBMRVRFRBABEiYKIkFHRU5UX0FDVElWSVRZX0VORF9SRUFTT05fUkVMRUFTRUQQAhIlCiFBR0VOVF9BQ1RJVklUWV9FTkRfUkVBU09OX0VYUElSRUQQAzKcBwoQQm9hcmRSb29tU2VydmljZRJdCgxHZXRCb2FyZFJvb20SJS5sdW1pbmcuc3R1ZGlvLnYxLkdldEJvYXJkUm9vbVJlcXVlc3QaJi5sdW1pbmcuc3R1ZGlvLnYxLkdldEJvYXJkUm9vbVJlc3BvbnNlEnIKE1dhaXRCb2FyZFJvb21FdmVudHMSLC5sdW1pbmcuc3R1ZGlvLnYxLldhaXRCb2FyZFJvb21FdmVudHNSZXF1ZXN0Gi0ubHVtaW5nLnN0dWRpby52MS5XYWl0Qm9hcmRSb29tRXZlbnRzUmVzcG9uc2USegoVU3RyZWFtQm9hcmRSb29tRXZlbnRzEi4ubHVtaW5nLnN0dWRpby52MS5TdHJlYW1Cb2FyZFJvb21FdmVudHNSZXF1ZXN0Gi8ubHVtaW5nLnN0dWRpby52MS5TdHJlYW1Cb2FyZFJvb21FdmVudHNSZXNwb25zZTABEnIKE1VwZGF0ZUJvYXJkUHJlc2VuY2USLC5sdW1pbmcuc3R1ZGlvLnYxLlVwZGF0ZUJvYXJkUHJlc2VuY2VSZXF1ZXN0Gi0ubHVtaW5nLnN0dWRpby52MS5VcGRhdGVCb2FyZFByZXNlbmNlUmVzcG9uc2USbwoSTGVhdmVCb2FyZFByZXNlbmNlEisubHVtaW5nLnN0dWRpby52MS5MZWF2ZUJvYXJkUHJlc2VuY2VSZXF1ZXN0GiwubHVtaW5nLnN0dWRpby52MS5MZWF2ZUJvYXJkUHJlc2VuY2VSZXNwb25zZRJpChBDaGFuZ2VCb2FyZFRpbWVyEikubHVtaW5nLnN0dWRpby52MS5DaGFuZ2VCb2FyZFRpbWVyUmVxdWVzdBoqLmx1bWluZy5zdHVkaW8udjEuQ2hhbmdlQm9hcmRUaW1lclJlc3BvbnNlEnUKFEdldEJvYXJkVGltZXJSZWNlaXB0Ei0ubHVtaW5nLnN0dWRpby52MS5HZXRCb2FyZFRpbWVyUmVjZWlwdFJlcXVlc3QaLi5sdW1pbmcuc3R1ZGlvLnYxLkdldEJvYXJkVGltZXJSZWNlaXB0UmVzcG9uc2UScgoTQ2hhbmdlQWdlbnRBY3Rpdml0eRIsLmx1bWluZy5zdHVkaW8udjEuQ2hhbmdlQWdlbnRBY3Rpdml0eVJlcXVlc3QaLS5sdW1pbmcuc3R1ZGlvLnYxLkNoYW5nZUFnZW50QWN0aXZpdHlSZXNwb25zZWIGcHJvdG8z", [file_luming_studio_v1_whiteboard_scene]);
+var file_luming_studio_v1_board_room_service = /* @__PURE__ */ fileDesc("CilsdW1pbmcvc3R1ZGlvL3YxL2JvYXJkX3Jvb21fc2VydmljZS5wcm90bxIQbHVtaW5nLnN0dWRpby52MSInChNHZXRCb2FyZFJvb21SZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJIkcKFEdldEJvYXJkUm9vbVJlc3BvbnNlEi8KBWV2ZW50GAEgASgLMiAubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21FdmVudCJPCg9Cb2FyZFJvb21DdXJzb3ISGAoQcm9vbV9pbnN0YW5jZV9pZBgBIAEoCRIVCghzZXF1ZW5jZRgCIAEoBEgAiAEBQgsKCV9zZXF1ZW5jZSJxChpXYWl0Qm9hcmRSb29tRXZlbnRzUmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRIPCgd2aWV3X2lkGAIgASgJEjAKBWFmdGVyGAMgASgLMiEubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21DdXJzb3IiTwobV2FpdEJvYXJkUm9vbUV2ZW50c1Jlc3BvbnNlEjAKBmV2ZW50cxgBIAMoCzIgLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tRXZlbnQicwocU3RyZWFtQm9hcmRSb29tRXZlbnRzUmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRIPCgd2aWV3X2lkGAIgASgJEjAKBWFmdGVyGAMgASgLMiEubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21DdXJzb3IiUAodU3RyZWFtQm9hcmRSb29tRXZlbnRzUmVzcG9uc2USLwoFZXZlbnQYASABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbUV2ZW50ImQKEUJvYXJkUm9vbVZpZXdwb3J0EhAKCGNlbnRlcl94GAEgASgBEhAKCGNlbnRlcl95GAIgASgBEgwKBHpvb20YAyABKAESDQoFd2lkdGgYBCABKAESDgoGaGVpZ2h0GAUgASgBIjwKF0JvYXJkUm9vbVBhcnRpY2lwYW50S2V5EhAKCGFjdG9yX2lkGAEgASgJEg8KB3ZpZXdfaWQYAiABKAkioQEKGEJvYXJkUm9vbUdlc3R1cmVHZW9tZXRyeRIRCglvYmplY3RfaWQYASABKAkSJgoZZXhwZWN0ZWRfZ2VvbWV0cnlfdmVyc2lvbhgCIAEoBEgAiAEBEiwKCGdlb21ldHJ5GAMgASgLMhoubHVtaW5nLnN0dWRpby52MS5HZW9tZXRyeUIcChpfZXhwZWN0ZWRfZ2VvbWV0cnlfdmVyc2lvbiKMAQoXQm9hcmRSb29tR2VzdHVyZVByZXZpZXcSNAoEa2luZBgBIAEoDjImLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tR2VzdHVyZUtpbmQSOwoHY2hhbmdlcxgCIAMoCzIqLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tR2VzdHVyZUdlb21ldHJ5IpsEChRCb2FyZFJvb21QYXJ0aWNpcGFudBI2CgNrZXkYASABKAsyKS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVBhcnRpY2lwYW50S2V5EhQKDGRpc3BsYXlfbmFtZRgCIAEoCRIMCgRyb2xlGAMgASgJEhUKCHNlcXVlbmNlGAQgASgESACIAQESHwoSZXhwaXJlc19hdF91bml4X21zGAUgASgESAGIAQESJwoGY3Vyc29yGAYgASgLMhcubHVtaW5nLnN0dWRpby52MS5Qb2ludBI1Cgh2aWV3cG9ydBgHIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tVmlld3BvcnQSEQoJZm9sbG93aW5nGAggASgIEjoKB2dlc3R1cmUYCSABKAsyKS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbUdlc3R1cmVQcmV2aWV3EicKGmdlc3R1cmVfZXhwaXJlc19hdF91bml4X21zGAogASgESAKIAQESIAoTYWN0aXZpdHlfYXRfdW5peF9tcxgLIAEoBEgDiAEBEhoKEmVkaXRpbmdfb2JqZWN0X2lkcxgMIAMoCUILCglfc2VxdWVuY2VCFQoTX2V4cGlyZXNfYXRfdW5peF9tc0IdChtfZ2VzdHVyZV9leHBpcmVzX2F0X3VuaXhfbXNCFgoUX2FjdGl2aXR5X2F0X3VuaXhfbXMirgIKGlVwZGF0ZUJvYXJkUHJlc2VuY2VSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEg8KB3ZpZXdfaWQYAiABKAkSFQoIc2VxdWVuY2UYAyABKARIAIgBARInCgZjdXJzb3IYBCABKAsyFy5sdW1pbmcuc3R1ZGlvLnYxLlBvaW50EjUKCHZpZXdwb3J0GAUgASgLMiMubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21WaWV3cG9ydBIRCglmb2xsb3dpbmcYBiABKAgSOgoHZ2VzdHVyZRgHIAEoCzIpLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tR2VzdHVyZVByZXZpZXcSGgoSZWRpdGluZ19vYmplY3RfaWRzGAggAygJQgsKCV9zZXF1ZW5jZSIvChtVcGRhdGVCb2FyZFByZXNlbmNlUmVzcG9uc2USEAoIYWNjZXB0ZWQYASABKAgiYgoZTGVhdmVCb2FyZFByZXNlbmNlUmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRIPCgd2aWV3X2lkGAIgASgJEhUKCHNlcXVlbmNlGAMgASgESACIAQFCCwoJX3NlcXVlbmNlIi4KGkxlYXZlQm9hcmRQcmVzZW5jZVJlc3BvbnNlEhAKCGFjY2VwdGVkGAEgASgIIuMDChFCb2FyZFJvb21TbmFwc2hvdBIQCghhY3Rvcl9pZBgBIAEoCRIQCghjYW5fZWRpdBgCIAEoCBIbCg5ib2FyZF9yZXZpc2lvbhgDIAEoBEgAiAEBEjwKDHBhcnRpY2lwYW50cxgEIAMoCzImLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tUGFydGljaXBhbnQSLwoFdGltZXIYBSABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVRpbWVyEj4KEGFnZW50X3dvcmtzcGFjZXMYBiADKAsyJC5sdW1pbmcuc3R1ZGlvLnYxLlJvb21BZ2VudFdvcmtzcGFjZRIiChpjYW5fcmVsZWFzZV9hZ2VudF9hY3Rpdml0eRgHIAEoCBIdChBmZWVkYmFja192ZXJzaW9uGAggASgESAGIAQESIAoTc3VnZ2VzdGlvbnNfdmVyc2lvbhgJIAEoBEgCiAEBEjkKDW9ubGluZV9hZ2VudHMYCiABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLlJvb21PbmxpbmVBZ2VudHNCEQoPX2JvYXJkX3JldmlzaW9uQhMKEV9mZWVkYmFja192ZXJzaW9uQhYKFF9zdWdnZXN0aW9uc192ZXJzaW9uIo0BChVCb2FyZFJvb21QYXJ0aWNpcGFudHMSNwoHdXBzZXJ0cxgBIAMoCzImLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tUGFydGljaXBhbnQSOwoIcmVtb3ZhbHMYAiADKAsyKS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVBhcnRpY2lwYW50S2V5ItMBChdCb2FyZFJvb21Db250ZW50Q2hhbmdlZBIbCg5ib2FyZF9yZXZpc2lvbhgBIAEoBEgAiAEBEhoKEmNoYW5nZWRfb2JqZWN0X2lkcxgCIAMoCRIaChJyZW1vdmVkX29iamVjdF9pZHMYAyADKAkSFQoNcmVmcmVzaF9zY2VuZRgEIAEoCBI5Cg9jaGFuZ2VkX29iamVjdHMYBSADKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLk9iamVjdE1ldGFkYXRhQhEKD19ib2FyZF9yZXZpc2lvbiIVChNCb2FyZFJvb21BY2Nlc3NMb3N0Ij4KGkJvYXJkUm9vbURpc2N1c3Npb25DaGFuZ2VkEhQKB3ZlcnNpb24YASABKARIAIgBAUIKCghfdmVyc2lvbiKzBQoOQm9hcmRSb29tRXZlbnQSEAoIYm9hcmRfaWQYASABKAkSGAoQcm9vbV9pbnN0YW5jZV9pZBgCIAEoCRIVCghzZXF1ZW5jZRgDIAEoBEgBiAEBEiAKE3NlcnZlcl90aW1lX3VuaXhfbXMYBCABKARIAogBARI3CghzbmFwc2hvdBgFIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tU25hcHNob3RIABI/CgxwYXJ0aWNpcGFudHMYBiABKAsyJy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVBhcnRpY2lwYW50c0gAEjEKBXRpbWVyGAcgASgLMiAubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21UaW1lckgAEkQKD2NvbnRlbnRfY2hhbmdlZBgIIAEoCzIpLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tQ29udGVudENoYW5nZWRIABI8CgthY2Nlc3NfbG9zdBgJIAEoCzIlLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tQWNjZXNzTG9zdEgAEkQKEGFnZW50X3dvcmtzcGFjZXMYCiABKAsyKC5sdW1pbmcuc3R1ZGlvLnYxLlJvb21BZ2VudFdvcmtzcGFjZUxpc3RIABJIChBmZWVkYmFja19jaGFuZ2VkGAsgASgLMiwubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21EaXNjdXNzaW9uQ2hhbmdlZEgAEksKE3N1Z2dlc3Rpb25zX2NoYW5nZWQYDCABKAsyLC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbURpc2N1c3Npb25DaGFuZ2VkSABCCQoHcGF5bG9hZEILCglfc2VxdWVuY2VCFgoUX3NlcnZlcl90aW1lX3VuaXhfbXMixwEKDkJvYXJkUm9vbVRpbWVyEhQKB3ZlcnNpb24YASABKARIAIgBARI0CgVwaGFzZRgCIAEoDjIlLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tVGltZXJQaGFzZRITCgtkdXJhdGlvbl9tcxgDIAEoDRIdChBkZWFkbGluZV91bml4X21zGAQgASgESAGIAQESFAoMcmVtYWluaW5nX21zGAUgASgNQgoKCF92ZXJzaW9uQhMKEV9kZWFkbGluZV91bml4X21zIhIKEEJvYXJkVGltZXJBY3Rpb24iiwMKF0NoYW5nZUJvYXJkVGltZXJSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkSHQoQZXhwZWN0ZWRfdmVyc2lvbhgDIAEoBEgBiAEBEjMKBXN0YXJ0GAQgASgLMiIubHVtaW5nLnN0dWRpby52MS5Cb2FyZFRpbWVyQWN0aW9uSAASMwoFcGF1c2UYBSABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkVGltZXJBY3Rpb25IABI0CgZyZXN1bWUYBiABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkVGltZXJBY3Rpb25IABIzCgVyZXNldBgHIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuQm9hcmRUaW1lckFjdGlvbkgAEhkKD3NldF9kdXJhdGlvbl9tcxgIIAEoDUgAEhwKEmFkanVzdF9kdXJhdGlvbl9tcxgJIAEoEUgAQggKBmFjdGlvbkITChFfZXhwZWN0ZWRfdmVyc2lvbiJEChFCb2FyZFRpbWVyQXBwbGllZBIvCgV0aW1lchgBIAEoCzIgLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tVGltZXIiRQoSQm9hcmRUaW1lckNvbmZsaWN0Ei8KBXRpbWVyGAEgASgLMiAubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21UaW1lciJLChJCb2FyZFRpbWVyUmVqZWN0ZWQSNQoGcmVhc29uGAEgASgOMiUubHVtaW5nLnN0dWRpby52MS5Cb2FyZFRpbWVyUmVqZWN0aW9uIvABChFCb2FyZFRpbWVyUmVjZWlwdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJEjYKB2FwcGxpZWQYAyABKAsyIy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkVGltZXJBcHBsaWVkSAASOAoIY29uZmxpY3QYBCABKAsyJC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkVGltZXJDb25mbGljdEgAEjgKCHJlamVjdGVkGAUgASgLMiQubHVtaW5nLnN0dWRpby52MS5Cb2FyZFRpbWVyUmVqZWN0ZWRIAEIJCgdvdXRjb21lIooBChhDaGFuZ2VCb2FyZFRpbWVyUmVzcG9uc2USNAoHcmVjZWlwdBgBIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQm9hcmRUaW1lclJlY2VpcHQSIAoTc2VydmVyX3RpbWVfdW5peF9tcxgCIAEoBEgAiAEBQhYKFF9zZXJ2ZXJfdGltZV91bml4X21zIkMKG0dldEJvYXJkVGltZXJSZWNlaXB0UmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJIo4BChxHZXRCb2FyZFRpbWVyUmVjZWlwdFJlc3BvbnNlEjQKB3JlY2VpcHQYASABKAsyIy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkVGltZXJSZWNlaXB0EiAKE3NlcnZlcl90aW1lX3VuaXhfbXMYAiABKARIAIgBAUIWChRfc2VydmVyX3RpbWVfdW5peF9tcyJKChNBZ2VudEFjdGl2aXR5Qm91bmRzEgkKAXgYASABKAESCQoBeRgCIAEoARINCgV3aWR0aBgDIAEoARIOCgZoZWlnaHQYBCABKAEiLgoYQWdlbnRBY3Rpdml0eU9iamVjdFNjb3BlEhIKCm9iamVjdF9pZHMYASADKAkilAEKEkFnZW50QWN0aXZpdHlTY29wZRI9CgdvYmplY3RzGAEgASgLMioubHVtaW5nLnN0dWRpby52MS5BZ2VudEFjdGl2aXR5T2JqZWN0U2NvcGVIABI1CgRhcmVhGAIgASgLMiUubHVtaW5nLnN0dWRpby52MS5BZ2VudEFjdGl2aXR5Qm91bmRzSABCCAoGdGFyZ2V0InUKEkFnZW50QWN0aXZpdHlCZWdpbhIzCgVzY29wZRgBIAEoCzIkLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eVNjb3BlEg0KBWxhYmVsGAIgASgJEhsKE3ByZXZpb3VzX2dlbmVyYXRpb24YAyABKAkieQoTQWdlbnRBY3Rpdml0eVVwZGF0ZRISCgpnZW5lcmF0aW9uGAEgASgJEjMKBXBoYXNlGAIgASgOMiQubHVtaW5nLnN0dWRpby52MS5BZ2VudEFjdGl2aXR5UGhhc2USGQoRYWN0aXZlX29iamVjdF9pZHMYAyADKAkiJgoQQWdlbnRBY3Rpdml0eUVuZBISCgpnZW5lcmF0aW9uGAEgASgJIhUKE0FnZW50QWN0aXZpdHlTdGF0dXMiKgoUQWdlbnRBY3Rpdml0eVJlbGVhc2USEgoKZ2VuZXJhdGlvbhgBIAEoCSIZChdBZ2VudEFjdGl2aXR5RGlzY29ubmVjdCI5ChFBZ2VudFJlYWRQcmVzZW5jZRITCgthY3Rpdml0eV9pZBgBIAEoCRIPCgdyZWFkaW5nGAIgASgIIvEDChpDaGFuZ2VBZ2VudEFjdGl2aXR5UmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRIQCghhZ2VudF9pZBgCIAEoCRIPCgd0YXNrX2lkGAMgASgJEjUKBWJlZ2luGAQgASgLMiQubHVtaW5nLnN0dWRpby52MS5BZ2VudEFjdGl2aXR5QmVnaW5IABI3CgZ1cGRhdGUYBSABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlVcGRhdGVIABIxCgNlbmQYBiABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlFbmRIABI3CgZzdGF0dXMYByABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlTdGF0dXNIABI5CgdyZWxlYXNlGAggASgLMiYubHVtaW5nLnN0dWRpby52MS5BZ2VudEFjdGl2aXR5UmVsZWFzZUgAEj8KCmRpc2Nvbm5lY3QYCSABKAsyKS5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlEaXNjb25uZWN0SAASPAoNcmVhZF9wcmVzZW5jZRgKIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQWdlbnRSZWFkUHJlc2VuY2VIAEIICgZhY3Rpb24iawoWUm9vbUFnZW50V29ya3NwYWNlQXJlYRIKCgJpZBgBIAEoCRI1CgZib3VuZHMYAiABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlCb3VuZHMSDgoGYWN0aXZlGAMgASgIIusDChJSb29tQWdlbnRXb3Jrc3BhY2USEAoIYWdlbnRfaWQYASABKAkSDwoHdGFza19pZBgCIAEoCRISCgpnZW5lcmF0aW9uGAMgASgJEg0KBWxhYmVsGAQgASgJEjMKBXBoYXNlGAUgASgOMiQubHVtaW5nLnN0dWRpby52MS5BZ2VudEFjdGl2aXR5UGhhc2USNwoFYXJlYXMYBiADKAsyKC5sdW1pbmcuc3R1ZGlvLnYxLlJvb21BZ2VudFdvcmtzcGFjZUFyZWESHwoSZXhwaXJlc19hdF91bml4X21zGAcgASgESACIAQESMwoFc2NvcGUYCCABKAsyJC5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlTY29wZRIlChhsYXN0X3Byb2dyZXNzX2F0X3VuaXhfbXMYCSABKARIAYgBARIdChBlbmRlZF9hdF91bml4X21zGAogASgESAKIAQESPAoKZW5kX3JlYXNvbhgLIAEoDjIoLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eUVuZFJlYXNvbkIVChNfZXhwaXJlc19hdF91bml4X21zQhsKGV9sYXN0X3Byb2dyZXNzX2F0X3VuaXhfbXNCEwoRX2VuZGVkX2F0X3VuaXhfbXMijQEKFlJvb21BZ2VudFdvcmtzcGFjZUxpc3QSOAoKd29ya3NwYWNlcxgBIAMoCzIkLmx1bWluZy5zdHVkaW8udjEuUm9vbUFnZW50V29ya3NwYWNlEjkKDW9ubGluZV9hZ2VudHMYAiABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLlJvb21PbmxpbmVBZ2VudHMiQAoQUm9vbU9ubGluZUFnZW50cxIRCglhZ2VudF9pZHMYASADKAkSGQoRcmVhZGluZ19hZ2VudF9pZHMYAiADKAkiYgoSQWdlbnRBY3Rpdml0eUVuZGVkEhIKCmdlbmVyYXRpb24YASABKAkSOAoGcmVhc29uGAIgASgOMigubHVtaW5nLnN0dWRpby52MS5BZ2VudEFjdGl2aXR5RW5kUmVhc29uItgCChtDaGFuZ2VBZ2VudEFjdGl2aXR5UmVzcG9uc2USOQoJd29ya3NwYWNlGAEgASgLMiQubHVtaW5nLnN0dWRpby52MS5Sb29tQWdlbnRXb3Jrc3BhY2VIABI1CgVlbmRlZBgCIAEoCzIkLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eUVuZGVkSAASPAoIcmVqZWN0ZWQYAyABKA4yKC5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlSZWplY3Rpb25IABJBCgxkaXNjb25uZWN0ZWQYBCABKAsyKS5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlEaXNjb25uZWN0SAASPAoNcmVhZF9wcmVzZW5jZRgFIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQWdlbnRSZWFkUHJlc2VuY2VIAEIICgZyZXN1bHQiNAoOTWNwUGFuZWxDYW1lcmESCQoBeBgBIAEoARIJCgF5GAIgASgBEgwKBHpvb20YAyABKAEi8wEKDE1jcFBhbmVsVmlldxIQCghib2FyZF9pZBgBIAEoCRIUCgxzZWxlY3RlZF9pZHMYAiADKAkSFgoOc2VsZWN0ZWRfY291bnQYAyABKA0SMgoIdmlld3BvcnQYBCABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLk1jcFBhbmVsQ2FtZXJhEh4KEWZvY3VzZWRfb2JqZWN0X2lkGAUgASgJSACIAQESOQoPcmV0dXJuX3ZpZXdwb3J0GAYgASgLMiAubHVtaW5nLnN0dWRpby52MS5NY3BQYW5lbENhbWVyYUIUChJfZm9jdXNlZF9vYmplY3RfaWQivgEKFlVwZGF0ZVBhbmVsVmlld1JlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRIPCgd2aWV3X2lkGAIgASgJEhAKCHNlcXVlbmNlGAMgASgEEiEKGXNlc3Npb25fZXhwaXJlc19hdF9taWxsaXMYBCABKAQSLwoFc3RhdGUYBSABKAsyHi5sdW1pbmcuc3R1ZGlvLnYxLk1jcFBhbmVsVmlld0gAEg8KBWNsZWFyGAYgASgISABCCAoGdXBkYXRlIhkKF1VwZGF0ZVBhbmVsVmlld1Jlc3BvbnNlIjkKFFJlYWRQYW5lbFZpZXdSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEg8KB3ZpZXdfaWQYAiABKAkifAoVUmVhZFBhbmVsVmlld1Jlc3BvbnNlEi0KBXN0YXRlGAEgASgLMh4ubHVtaW5nLnN0dWRpby52MS5NY3BQYW5lbFZpZXcSHgoRdXBkYXRlZF9hdF9taWxsaXMYAiABKARIAIgBAUIUChJfdXBkYXRlZF9hdF9taWxsaXMqqQEKFEJvYXJkUm9vbUdlc3R1cmVLaW5kEicKI0JPQVJEX1JPT01fR0VTVFVSRV9LSU5EX1VOU1BFQ0lGSUVEEAASIAocQk9BUkRfUk9PTV9HRVNUVVJFX0tJTkRfTU9WRRABEiIKHkJPQVJEX1JPT01fR0VTVFVSRV9LSU5EX1JFU0laRRACEiIKHkJPQVJEX1JPT01fR0VTVFVSRV9LSU5EX1JPVEFURRADKscBChNCb2FyZFJvb21UaW1lclBoYXNlEiYKIkJPQVJEX1JPT01fVElNRVJfUEhBU0VfVU5TUEVDSUZJRUQQABIfChtCT0FSRF9ST09NX1RJTUVSX1BIQVNFX0lETEUQARIiCh5CT0FSRF9ST09NX1RJTUVSX1BIQVNFX1JVTk5JTkcQAhIhCh1CT0FSRF9ST09NX1RJTUVSX1BIQVNFX1BBVVNFRBADEiAKHEJPQVJEX1JPT01fVElNRVJfUEhBU0VfRU5ERUQQBCq3AQoTQm9hcmRUaW1lclJlamVjdGlvbhIlCiFCT0FSRF9USU1FUl9SRUpFQ1RJT05fVU5TUEVDSUZJRUQQABIjCh9CT0FSRF9USU1FUl9SRUpFQ1RJT05fRk9SQklEREVOEAESKAokQk9BUkRfVElNRVJfUkVKRUNUSU9OX0lOVkFMSURfQUNUSU9OEAISKgomQk9BUkRfVElNRVJfUkVKRUNUSU9OX0NPTU1BTkRfSURfUkVVU0UQAyqkAQoSQWdlbnRBY3Rpdml0eVBoYXNlEiQKIEFHRU5UX0FDVElWSVRZX1BIQVNFX1VOU1BFQ0lGSUVEEAASIgoeQUdFTlRfQUNUSVZJVFlfUEhBU0VfUFJFUEFSSU5HEAESIAocQUdFTlRfQUNUSVZJVFlfUEhBU0VfV1JJVElORxACEiIKHkFHRU5UX0FDVElWSVRZX1BIQVNFX1ZFUklGWUlORxADKr8CChZBZ2VudEFjdGl2aXR5UmVqZWN0aW9uEigKJEFHRU5UX0FDVElWSVRZX1JFSkVDVElPTl9VTlNQRUNJRklFRBAAEiQKIEFHRU5UX0FDVElWSVRZX1JFSkVDVElPTl9JTlZBTElEEAESJAogQUdFTlRfQUNUSVZJVFlfUkVKRUNUSU9OX09WRVJMQVAQAhIlCiFBR0VOVF9BQ1RJVklUWV9SRUpFQ1RJT05fQ0FQQUNJVFkQAxImCiJBR0VOVF9BQ1RJVklUWV9SRUpFQ1RJT05fTk9UX0ZPVU5EEAQSLworQUdFTlRfQUNUSVZJVFlfUkVKRUNUSU9OX0dFTkVSQVRJT05fQ0hBTkdFRBAFEi8KK0FHRU5UX0FDVElWSVRZX1JFSkVDVElPTl9XT1JLU1BBQ0VfUkVMRUFTRUQQBiq7AQoWQWdlbnRBY3Rpdml0eUVuZFJlYXNvbhIpCiVBR0VOVF9BQ1RJVklUWV9FTkRfUkVBU09OX1VOU1BFQ0lGSUVEEAASJwojQUdFTlRfQUNUSVZJVFlfRU5EX1JFQVNPTl9DT01QTEVURUQQARImCiJBR0VOVF9BQ1RJVklUWV9FTkRfUkVBU09OX1JFTEVBU0VEEAISJQohQUdFTlRfQUNUSVZJVFlfRU5EX1JFQVNPTl9FWFBJUkVEEAMynAcKEEJvYXJkUm9vbVNlcnZpY2USXQoMR2V0Qm9hcmRSb29tEiUubHVtaW5nLnN0dWRpby52MS5HZXRCb2FyZFJvb21SZXF1ZXN0GiYubHVtaW5nLnN0dWRpby52MS5HZXRCb2FyZFJvb21SZXNwb25zZRJyChNXYWl0Qm9hcmRSb29tRXZlbnRzEiwubHVtaW5nLnN0dWRpby52MS5XYWl0Qm9hcmRSb29tRXZlbnRzUmVxdWVzdBotLmx1bWluZy5zdHVkaW8udjEuV2FpdEJvYXJkUm9vbUV2ZW50c1Jlc3BvbnNlEnoKFVN0cmVhbUJvYXJkUm9vbUV2ZW50cxIuLmx1bWluZy5zdHVkaW8udjEuU3RyZWFtQm9hcmRSb29tRXZlbnRzUmVxdWVzdBovLmx1bWluZy5zdHVkaW8udjEuU3RyZWFtQm9hcmRSb29tRXZlbnRzUmVzcG9uc2UwARJyChNVcGRhdGVCb2FyZFByZXNlbmNlEiwubHVtaW5nLnN0dWRpby52MS5VcGRhdGVCb2FyZFByZXNlbmNlUmVxdWVzdBotLmx1bWluZy5zdHVkaW8udjEuVXBkYXRlQm9hcmRQcmVzZW5jZVJlc3BvbnNlEm8KEkxlYXZlQm9hcmRQcmVzZW5jZRIrLmx1bWluZy5zdHVkaW8udjEuTGVhdmVCb2FyZFByZXNlbmNlUmVxdWVzdBosLmx1bWluZy5zdHVkaW8udjEuTGVhdmVCb2FyZFByZXNlbmNlUmVzcG9uc2USaQoQQ2hhbmdlQm9hcmRUaW1lchIpLmx1bWluZy5zdHVkaW8udjEuQ2hhbmdlQm9hcmRUaW1lclJlcXVlc3QaKi5sdW1pbmcuc3R1ZGlvLnYxLkNoYW5nZUJvYXJkVGltZXJSZXNwb25zZRJ1ChRHZXRCb2FyZFRpbWVyUmVjZWlwdBItLmx1bWluZy5zdHVkaW8udjEuR2V0Qm9hcmRUaW1lclJlY2VpcHRSZXF1ZXN0Gi4ubHVtaW5nLnN0dWRpby52MS5HZXRCb2FyZFRpbWVyUmVjZWlwdFJlc3BvbnNlEnIKE0NoYW5nZUFnZW50QWN0aXZpdHkSLC5sdW1pbmcuc3R1ZGlvLnYxLkNoYW5nZUFnZW50QWN0aXZpdHlSZXF1ZXN0Gi0ubHVtaW5nLnN0dWRpby52MS5DaGFuZ2VBZ2VudEFjdGl2aXR5UmVzcG9uc2Uy3wEKE01jcFBhbmVsVmlld1NlcnZpY2USZgoPVXBkYXRlUGFuZWxWaWV3EigubHVtaW5nLnN0dWRpby52MS5VcGRhdGVQYW5lbFZpZXdSZXF1ZXN0GikubHVtaW5nLnN0dWRpby52MS5VcGRhdGVQYW5lbFZpZXdSZXNwb25zZRJgCg1SZWFkUGFuZWxWaWV3EiYubHVtaW5nLnN0dWRpby52MS5SZWFkUGFuZWxWaWV3UmVxdWVzdBonLmx1bWluZy5zdHVkaW8udjEuUmVhZFBhbmVsVmlld1Jlc3BvbnNlYgZwcm90bzM", [file_luming_studio_v1_whiteboard_scene]);
 var WaitBoardRoomEventsResponseSchema = /* @__PURE__ */ messageDesc(file_luming_studio_v1_board_room_service, 4);
 var BoardRoomEventSchema = /* @__PURE__ */ messageDesc(file_luming_studio_v1_board_room_service, 21);
 var BoardRoomGestureKindSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_board_room_service, 0);
@@ -20613,6 +21660,7 @@ var AgentActivityRejection = /* @__PURE__ */ tsEnum(AgentActivityRejectionSchema
 var AgentActivityEndReasonSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_board_room_service, 5);
 var AgentActivityEndReason = /* @__PURE__ */ tsEnum(AgentActivityEndReasonSchema);
 var BoardRoomService = /* @__PURE__ */ serviceDesc(file_luming_studio_v1_board_room_service, 0);
+var McpPanelViewService = /* @__PURE__ */ serviceDesc(file_luming_studio_v1_board_room_service, 1);
 
 // ../../packages/contracts/dist/proto/luming/studio/v1/board_sharing_service_pb.js
 var file_luming_studio_v1_board_sharing_service = /* @__PURE__ */ fileDesc("CixsdW1pbmcvc3R1ZGlvL3YxL2JvYXJkX3NoYXJpbmdfc2VydmljZS5wcm90bxIQbHVtaW5nLnN0dWRpby52MSIqChZHZXRCb2FyZFNoYXJpbmdSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJIkoKF0dldEJvYXJkU2hhcmluZ1Jlc3BvbnNlEi8KB3NoYXJpbmcYASABKAsyHi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU2hhcmluZyKCAwoMQm9hcmRTaGFyaW5nEhAKCGJvYXJkX2lkGAEgASgJEg8KB2VuYWJsZWQYAiABKAgSLQoFc2NvcGUYAyABKA4yHi5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdTY29wZRIUCgd2ZXJzaW9uGAQgASgESACIAQESKwoEcm9sZRgFIAEoDjIdLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ1JvbGUSEAoIY2FuX2VkaXQYBiABKAgSEwoLY2FuX2NvbW1lbnQYByABKAgSLAoFbGlua3MYCCADKAsyHS5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdMaW5rEjAKB21lbWJlcnMYCSADKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdNZW1iZXISEgoKbWVtYmVyX3VybBgKIAEoCRIfChJvd25lcl9kaXNwbGF5X25hbWUYCyABKAlIAYgBAUIKCghfdmVyc2lvbkIVChNfb3duZXJfZGlzcGxheV9uYW1lIlgKC1NoYXJpbmdMaW5rEisKBHJvbGUYASABKA4yHS5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdSb2xlEg8KB2VuYWJsZWQYAiABKAgSCwoDdXJsGAMgASgJItcBCg1TaGFyaW5nTWVtYmVyEhAKCGFjdG9yX2lkGAEgASgJEgwKBG5hbWUYAiABKAkSKwoEcm9sZRgDIAEoDjIdLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ1JvbGUSDwoHcmVtb3ZlZBgEIAEoCBIOCgZhY3RpdmUYBSABKAgSEwoGb25saW5lGAYgASgISACIAQESIAoTbGFzdF9zZWVuX2F0X21pbGxpcxgHIAEoBEgBiAEBQgkKB19vbmxpbmVCFgoUX2xhc3Rfc2Vlbl9hdF9taWxsaXMihAUKGVVwZGF0ZUJvYXJkU2hhcmluZ1JlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCRIdChBleHBlY3RlZF92ZXJzaW9uGAMgASgESAGIAQESNgoJc2V0X3Njb3BlGAQgASgLMiEubHVtaW5nLnN0dWRpby52MS5TZXRTaGFyaW5nU2NvcGVIABIyCgRzdG9wGAUgASgLMiIubHVtaW5nLnN0dWRpby52MS5TdG9wQm9hcmRTaGFyaW5nSAASQAoOc2V0X2ludml0YXRpb24YBiABKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLlNldFNoYXJpbmdJbnZpdGF0aW9uSAASRAoQcmVzZXRfaW52aXRhdGlvbhgHIAEoCzIoLmx1bWluZy5zdHVkaW8udjEuUmVzZXRTaGFyaW5nSW52aXRhdGlvbkgAEkcKEmNoYW5nZV9tZW1iZXJfcm9sZRgIIAEoCzIpLmx1bWluZy5zdHVkaW8udjEuQ2hhbmdlU2hhcmluZ01lbWJlclJvbGVIABI+Cg1yZW1vdmVfbWVtYmVyGAkgASgLMiUubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nTWVtYmVyVGFyZ2V0SAASQwoOcmVzdG9yZV9tZW1iZXIYCiABKAsyKS5sdW1pbmcuc3R1ZGlvLnYxLkNoYW5nZVNoYXJpbmdNZW1iZXJSb2xlSAASPgoNZm9yZ2V0X21lbWJlchgLIAEoCzIlLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ01lbWJlclRhcmdldEgAQgsKCW9wZXJhdGlvbkITChFfZXhwZWN0ZWRfdmVyc2lvbiJACg9TZXRTaGFyaW5nU2NvcGUSLQoFc2NvcGUYASABKA4yHi5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdTY29wZSISChBTdG9wQm9hcmRTaGFyaW5nIlQKFFNldFNoYXJpbmdJbnZpdGF0aW9uEisKBHJvbGUYASABKA4yHS5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdSb2xlEg8KB2VuYWJsZWQYAiABKAgiRQoWUmVzZXRTaGFyaW5nSW52aXRhdGlvbhIrCgRyb2xlGAEgASgOMh0ubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nUm9sZSJYChdDaGFuZ2VTaGFyaW5nTWVtYmVyUm9sZRIQCghhY3Rvcl9pZBgBIAEoCRIrCgRyb2xlGAIgASgOMh0ubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nUm9sZSInChNTaGFyaW5nTWVtYmVyVGFyZ2V0EhAKCGFjdG9yX2lkGAEgASgJIlYKGlVwZGF0ZUJvYXJkU2hhcmluZ1Jlc3BvbnNlEjgKB3JlY2VpcHQYASABKAsyJy5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdDb21tYW5kUmVjZWlwdCJFCh1HZXRCb2FyZFNoYXJpbmdSZWNlaXB0UmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJIloKHkdldEJvYXJkU2hhcmluZ1JlY2VpcHRSZXNwb25zZRI4CgdyZWNlaXB0GAEgASgLMicubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nQ29tbWFuZFJlY2VpcHQiwgEKFVNoYXJpbmdDb21tYW5kUmVjZWlwdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJEjoKB2FwcGxpZWQYAyABKAsyJy5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdDb21tYW5kQXBwbGllZEgAEjwKCHJlamVjdGVkGAQgASgLMigubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nQ29tbWFuZFJlamVjdGVkSABCCQoHb3V0Y29tZSI5ChVTaGFyaW5nQ29tbWFuZEFwcGxpZWQSFAoHdmVyc2lvbhgBIAEoBEgAiAEBQgoKCF92ZXJzaW9uIlIKFlNoYXJpbmdDb21tYW5kUmVqZWN0ZWQSOAoGcmVhc29uGAEgASgOMigubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nUmVqZWN0aW9uUmVhc29uIksKHUluc3BlY3RCb2FyZEludml0YXRpb25SZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhgKEGludml0YXRpb25fdG9rZW4YAiABKAkizAEKHkluc3BlY3RCb2FyZEludml0YXRpb25SZXNwb25zZRI1CgppbnZpdGF0aW9uGAEgASgLMiEubHVtaW5nLnN0dWRpby52MS5Cb2FyZEludml0YXRpb24SOwoJcmVqZWN0aW9uGAIgASgOMigubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nUmVqZWN0aW9uUmVhc29uEjYKB3Nlc3Npb24YAyABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdHdWVzdFNlc3Npb24iXwoPQm9hcmRJbnZpdGF0aW9uEhAKCGJvYXJkX2lkGAEgASgJEg0KBXRpdGxlGAIgASgJEisKBHJvbGUYAyABKA4yHS5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdSb2xlIlYKGkpvaW5Cb2FyZEludml0YXRpb25SZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhgKEGludml0YXRpb25fdG9rZW4YAiABKAkSDAoEbmFtZRgDIAEoCSKSAQobSm9pbkJvYXJkSW52aXRhdGlvblJlc3BvbnNlEjYKB3Nlc3Npb24YASABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdHdWVzdFNlc3Npb24SOwoJcmVqZWN0aW9uGAIgASgOMigubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nUmVqZWN0aW9uUmVhc29uIr0BChNTaGFyaW5nR3Vlc3RTZXNzaW9uEhAKCGJvYXJkX2lkGAEgASgJEhAKCGFjdG9yX2lkGAIgASgJEgwKBG5hbWUYAyABKAkSKwoEcm9sZRgEIAEoDjIdLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ1JvbGUSFAoHdmVyc2lvbhgFIAEoBEgAiAEBEhAKCGNhbl9lZGl0GAYgASgIEhMKC2Nhbl9jb21tZW50GAcgASgIQgoKCF92ZXJzaW9uKpEBCgtTaGFyaW5nUm9sZRIcChhTSEFSSU5HX1JPTEVfVU5TUEVDSUZJRUQQABIWChJTSEFSSU5HX1JPTEVfT1dORVIQARIXChNTSEFSSU5HX1JPTEVfRURJVE9SEAISGgoWU0hBUklOR19ST0xFX0NPTU1FTlRFUhADEhcKE1NIQVJJTkdfUk9MRV9WSUVXRVIQBCpdCgxTaGFyaW5nU2NvcGUSHQoZU0hBUklOR19TQ09QRV9VTlNQRUNJRklFRBAAEhcKE1NIQVJJTkdfU0NPUEVfTE9DQUwQARIVChFTSEFSSU5HX1NDT1BFX0xBThACKt4DChZTaGFyaW5nUmVqZWN0aW9uUmVhc29uEigKJFNIQVJJTkdfUkVKRUNUSU9OX1JFQVNPTl9VTlNQRUNJRklFRBAAEiYKIlNIQVJJTkdfUkVKRUNUSU9OX1JFQVNPTl9GT1JCSURERU4QARIsCihTSEFSSU5HX1JFSkVDVElPTl9SRUFTT05fVkVSU0lPTl9DSEFOR0VEEAISLQopU0hBUklOR19SRUpFQ1RJT05fUkVBU09OX0NPTU1BTkRfSURfUkVVU0UQAxIsCihTSEFSSU5HX1JFSkVDVElPTl9SRUFTT05fSU5WQUxJRF9DT01NQU5EEAQSLAooU0hBUklOR19SRUpFQ1RJT05fUkVBU09OX0xBTl9VTkFWQUlMQUJMRRAFEjMKL1NIQVJJTkdfUkVKRUNUSU9OX1JFQVNPTl9JTlZJVEFUSU9OX1VOQVZBSUxBQkxFEAYSJwojU0hBUklOR19SRUpFQ1RJT05fUkVBU09OX05BTUVfVEFLRU4QBxIvCitTSEFSSU5HX1JFSkVDVElPTl9SRUFTT05fTUVNQkVSX1VOQVZBSUxBQkxFEAgSKgomU0hBUklOR19SRUpFQ1RJT05fUkVBU09OX1JPTEVfRElTQUJMRUQQCTLcBAoTQm9hcmRTaGFyaW5nU2VydmljZRJmCg9HZXRCb2FyZFNoYXJpbmcSKC5sdW1pbmcuc3R1ZGlvLnYxLkdldEJvYXJkU2hhcmluZ1JlcXVlc3QaKS5sdW1pbmcuc3R1ZGlvLnYxLkdldEJvYXJkU2hhcmluZ1Jlc3BvbnNlEm8KElVwZGF0ZUJvYXJkU2hhcmluZxIrLmx1bWluZy5zdHVkaW8udjEuVXBkYXRlQm9hcmRTaGFyaW5nUmVxdWVzdBosLmx1bWluZy5zdHVkaW8udjEuVXBkYXRlQm9hcmRTaGFyaW5nUmVzcG9uc2USewoWR2V0Qm9hcmRTaGFyaW5nUmVjZWlwdBIvLmx1bWluZy5zdHVkaW8udjEuR2V0Qm9hcmRTaGFyaW5nUmVjZWlwdFJlcXVlc3QaMC5sdW1pbmcuc3R1ZGlvLnYxLkdldEJvYXJkU2hhcmluZ1JlY2VpcHRSZXNwb25zZRJ7ChZJbnNwZWN0Qm9hcmRJbnZpdGF0aW9uEi8ubHVtaW5nLnN0dWRpby52MS5JbnNwZWN0Qm9hcmRJbnZpdGF0aW9uUmVxdWVzdBowLmx1bWluZy5zdHVkaW8udjEuSW5zcGVjdEJvYXJkSW52aXRhdGlvblJlc3BvbnNlEnIKE0pvaW5Cb2FyZEludml0YXRpb24SLC5sdW1pbmcuc3R1ZGlvLnYxLkpvaW5Cb2FyZEludml0YXRpb25SZXF1ZXN0Gi0ubHVtaW5nLnN0dWRpby52MS5Kb2luQm9hcmRJbnZpdGF0aW9uUmVzcG9uc2ViBnByb3RvMw");
@@ -20628,6 +21676,7 @@ var BoardSharingService = /* @__PURE__ */ serviceDesc(file_luming_studio_v1_boar
 var method = BoardRoomService.method.changeAgentActivity;
 var agentActivityPath = "/" + BoardRoomService.typeName + "/" + method.name;
 var agentActivityRequestLimit = 16 * 1024;
+var agentIdentifier = /^agent-[\w.:-]{1,122}$/u;
 var phases2 = {
   preparing: AgentActivityPhase.PREPARING,
   writing: AgentActivityPhase.WRITING,
@@ -20652,14 +21701,26 @@ var rejections2 = {
   workspaceReleased: AgentActivityRejection.WORKSPACE_RELEASED
 };
 function agentWorkspaceWire(workspace) {
-  const { scope: scope2, phase, areas, expiresAtUnixMs, ...key } = workspace;
+  const {
+    scope: scope2,
+    phase,
+    areas,
+    expiresAtUnixMs,
+    lastProgressAtUnixMs,
+    endedAtUnixMs,
+    endReason,
+    ...key
+  } = workspace;
   const target2 = scope2.kind === "area" ? { case: "area", value: scope2.bounds } : { case: "objects", value: { objectIds: [...scope2.objectIds] } };
   return {
     ...key,
     scope: { target: target2 },
     phase: phases2[phase],
     areas: [...areas],
-    expiresAtUnixMs: BigInt(expiresAtUnixMs)
+    expiresAtUnixMs: BigInt(expiresAtUnixMs),
+    lastProgressAtUnixMs: lastProgressAtUnixMs === void 0 ? void 0 : BigInt(lastProgressAtUnixMs),
+    endedAtUnixMs: endedAtUnixMs === void 0 ? void 0 : BigInt(endedAtUnixMs),
+    endReason: endReason === void 0 ? void 0 : endReasons[endReason]
   };
 }
 function resultWire(result) {
@@ -20688,7 +21749,7 @@ function readScope(scope2) {
   }
   throw new RoomInputError("An Agent workspace scope is required.");
 }
-function readOperation2(action, taskId) {
+function readOperation3(action, taskId) {
   switch (action.case) {
     case "begin":
       return {
@@ -20716,6 +21777,8 @@ function readOperation2(action, taskId) {
     case "status":
       return { kind: "status", taskId };
     case "release":
+    case "disconnect":
+    case "readPresence":
     case void 0:
       throw new RoomInputError("An Agent workspace action is required.");
   }
@@ -20723,12 +21786,19 @@ function readOperation2(action, taskId) {
 function agentActivityRoute(application) {
   return unaryRoute(method, (actor, request) => {
     const { action } = request;
-    const boardId = requireId(request.boardId);
     const { agentId, taskId } = request;
     const ownerId = actor.id;
-    if (!agentId.startsWith("agent-") || ownerId === agentId) {
+    if (!agentIdentifier.test(agentId) || ownerId === agentId) {
       throw new RoomInputError("An independent Agent work session is required.");
     }
+    if (action.case === "disconnect") {
+      if (actor.kind !== "agent" || actor.guestScope) {
+        throw new RoomAccessError("Closing an Agent session requires the Agent entrypoint.");
+      }
+      application.disconnectAgent(ownerId, agentId);
+      return { result: { case: "disconnected", value: {} } };
+    }
+    const boardId = requireId(request.boardId);
     if (action.case === "release") {
       if (actor.kind === "agent" || actor.guestScope) {
         throw new RoomAccessError("Only the board owner can release an Agent workspace.");
@@ -20746,8 +21816,13 @@ function agentActivityRoute(application) {
     if (actor.kind !== "agent") {
       throw new RoomAccessError("Agent workspace changes require the Agent entrypoint.");
     }
+    if (action.case === "readPresence") {
+      const { activityId, reading } = action.value;
+      application.setAgentReadPresence({ boardId, ownerId, agentId }, activityId, reading);
+      return { result: { case: "readPresence", value: action.value } };
+    }
     return resultWire(
-      application.changeAgentActivity({ boardId, ownerId, agentId }, readOperation2(action, taskId))
+      application.changeAgentActivity({ boardId, ownerId, agentId }, readOperation3(action, taskId))
     );
   });
 }
@@ -20767,14 +21842,14 @@ var rejections3 = {
 var encodedFrames = /* @__PURE__ */ new WeakMap();
 var maximumFrameCharacters = 128 * 1024;
 function timerWire({
-  version: version2,
+  version: version3,
   phase,
   durationMs,
   deadlineUnixMs,
   remainingMs
 }) {
   return {
-    version: version2,
+    version: version3,
     phase: phases3[phase],
     durationMs,
     deadlineUnixMs: deadlineUnixMs === void 0 ? void 0 : BigInt(deadlineUnixMs),
@@ -20813,6 +21888,8 @@ function payloadWire(payload) {
         participants,
         timer,
         agentWorkspaces,
+        onlineAgentIds: onlineAgentIds2,
+        readingAgentIds,
         canReleaseAgentActivity,
         feedbackVersion,
         suggestionsVersion
@@ -20826,6 +21903,10 @@ function payloadWire(payload) {
           participants: participants.map(participantWire),
           timer: timerWire(timer),
           agentWorkspaces: agentWorkspaces.map(agentWorkspaceWire),
+          onlineAgents: onlineAgentIds2 && {
+            agentIds: [...onlineAgentIds2],
+            readingAgentIds: [...readingAgentIds ?? []]
+          },
           canReleaseAgentActivity,
           feedbackVersion,
           suggestionsVersion
@@ -20844,7 +21925,13 @@ function payloadWire(payload) {
     case "agentWorkspaces":
       return {
         case: "agentWorkspaces",
-        value: { workspaces: payload.workspaces.map(agentWorkspaceWire) }
+        value: {
+          workspaces: payload.workspaces.map(agentWorkspaceWire),
+          onlineAgents: payload.onlineAgentIds && {
+            agentIds: [...payload.onlineAgentIds],
+            readingAgentIds: [...payload.readingAgentIds ?? []]
+          }
+        }
       };
     case "contentChanged": {
       const { boardRevision, changedObjectIds: changedObjectIds2, removedObjectIds, changedObjects, refreshScene } = payload.change;
@@ -21305,7 +22392,7 @@ function guestRole(value) {
   }
   throw new HttpRequestError(400, "Invalid invitation role.");
 }
-function readOperation3(operation) {
+function readOperation4(operation) {
   switch (operation.case) {
     case "setScope":
       return { kind: operation.case, scope: scope(operation.value.scope) };
@@ -21345,7 +22432,7 @@ function readCommand(request) {
     boardId: requireId(boardId),
     commandId: requireId(commandId),
     expectedVersion,
-    operation: readOperation3(operation)
+    operation: readOperation4(operation)
   };
 }
 function writeSharing(sharing, options) {
@@ -21594,6 +22681,114 @@ async function handleGuestInvitation(request, response, options, guest) {
   } else {
     joinInvitation(request, response, options, guest, bytes);
   }
+}
+
+// src/entrypoints/http/mcp-panel-view.ts
+var validId2 = /^[A-Za-z0-9_-]{1,128}$/u;
+var validSession = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/iu;
+var leaseLifetime = 30 * 6e4;
+var viewLifetime = 6e4;
+var maximumViews = 256;
+var maximumSelectedIds = 40;
+var maximumCoordinate = 1e9;
+var { readPanelView, updatePanelView } = McpPanelViewService.method;
+function requireLocalActor2(actor) {
+  if (actor.guestScope !== void 0 || actor.kind === "agent") {
+    throw new WhiteboardAccessError();
+  }
+}
+function cameraValid(camera) {
+  if (!camera) {
+    return false;
+  }
+  const { x, y, zoom } = camera;
+  const coordinates = Math.abs(x) <= maximumCoordinate && Math.abs(y) <= maximumCoordinate;
+  return coordinates && zoom >= 0.05 && zoom <= 8;
+}
+function validateState(state) {
+  const { boardId, selectedIds, selectedCount, viewport, focusedObjectId, returnViewport } = state;
+  const validSelection2 = selectedIds.length <= maximumSelectedIds && selectedCount >= selectedIds.length && new Set(selectedIds).size === selectedIds.length;
+  const validFocus = focusedObjectId === void 0 || validId2.test(focusedObjectId);
+  const validReturn = !returnViewport || Boolean(focusedObjectId && cameraValid(returnViewport));
+  if (!validId2.test(boardId) || !validSelection2 || !selectedIds.every((id) => validId2.test(id))) {
+    throw new HttpRequestError(400, "Invalid panel board or selection.");
+  }
+  if (!cameraValid(viewport) || !validFocus || !validReturn) {
+    throw new HttpRequestError(400, "Invalid panel camera or focus.");
+  }
+}
+function entryKey(actor, viewId) {
+  if (!validId2.test(viewId)) {
+    throw new HttpRequestError(400, "Invalid panel view identity.");
+  }
+  return JSON.stringify([actor.id, viewId]);
+}
+function makeEntry(request, now, state) {
+  const { sessionId, sequence: sequence3, sessionExpiresAtMillis } = request;
+  const visibleUntil = Math.min(Number(sessionExpiresAtMillis), now + viewLifetime);
+  const forgetAfter = now + viewLifetime;
+  return { sessionId, sequence: sequence3, visibleUntil, forgetAfter, updatedAt: now, state };
+}
+function publishLease(request, now) {
+  const expiry = Number(request.sessionExpiresAtMillis);
+  if (expiry <= now || expiry > now + leaseLifetime) {
+    throw new HttpRequestError(400, "Panel session has expired or is invalid.");
+  }
+}
+function createMcpPanelViewRoutes(application, now) {
+  const entries = /* @__PURE__ */ new Map();
+  function forgetOld(time) {
+    for (const [key, entry] of entries) {
+      if (entry.forgetAfter <= time) {
+        entries.delete(key);
+      }
+    }
+  }
+  function update2(actor, request) {
+    requireLocalActor2(actor);
+    const key = entryKey(actor, request.viewId);
+    if (!validSession.test(request.sessionId) || request.sequence === 0n) {
+      throw new HttpRequestError(400, "Invalid panel session sequence.");
+    }
+    const time = now();
+    forgetOld(time);
+    const previous = entries.get(key);
+    if (!previous && entries.size >= maximumViews) {
+      throw new RoomCapacityError("Too many local panel views.");
+    }
+    if (request.update.case === "clear" && request.update.value) {
+      if (!previous || previous.sessionId === request.sessionId && request.sequence >= previous.sequence) {
+        entries.set(key, makeEntry(request, time));
+      }
+      return {};
+    }
+    if (request.update.case !== "state") {
+      throw new HttpRequestError(400, "Panel update must publish a view or clear it.");
+    }
+    const state = request.update.value;
+    validateState(state);
+    publishLease(request, time);
+    application.getObjectPayloads(actor, state.boardId, []);
+    if (!previous || request.sequence > previous.sequence) {
+      entries.set(key, makeEntry(request, time, state));
+    }
+    return {};
+  }
+  return [
+    unaryRoute(updatePanelView, update2),
+    unaryRoute(readPanelView, (actor, { boardId, viewId }) => {
+      requireLocalActor2(actor);
+      const key = entryKey(actor, viewId);
+      const time = now();
+      forgetOld(time);
+      const result = entries.get(key);
+      if (result?.state?.boardId !== boardId || result.visibleUntil <= time) {
+        return {};
+      }
+      application.getObjectPayloads(actor, boardId, []);
+      return { state: result.state, updatedAtMillis: BigInt(result.updatedAt) };
+    })
+  ];
 }
 
 // src/entrypoints/http/room-changes.ts
@@ -24530,11 +25725,17 @@ var RoomEventStream = class {
   }
   open(cursor) {
     const { application, boardId, key } = this.options;
-    const subscription = application.subscribeAfter(boardId, key, cursor, {
-      deliver: (event) => this.run(() => this.enqueue(event)),
-      recheck: () => this.run(() => this.checkAccess()),
-      close: () => this.fail(new ConnectError("Room stream closed", Code.Unavailable))
-    });
+    const subscription = application.subscribeAfter(
+      boardId,
+      key,
+      cursor,
+      {
+        deliver: (event) => this.run(() => this.enqueue(event)),
+        recheck: () => this.run(() => this.checkAccess()),
+        close: () => this.fail(new ConnectError("Room stream closed", Code.Unavailable))
+      },
+      "stream"
+    );
     this.subscription = subscription;
     for (const event of subscription.events) {
       this.enqueue(event);
@@ -24616,8 +25817,9 @@ var RoomEventStream = class {
   }
   dispose() {
     clearInterval(this.interval);
-    this.subscription?.release();
+    const subscription = this.subscription;
     this.subscription = void 0;
+    subscription?.release();
     this.pending.length = 0;
     this.pendingBytes = 0;
   }
@@ -24658,13 +25860,19 @@ function createRoomEventStreamRoute(application, reportError) {
           key: { actorId: actor.id, viewId: input.viewId },
           reportError,
           ...request
-        }).read(cursor, context.signal);
+        }).read(cursor, AbortSignal.any([context.signal, request.disconnected]));
       });
     }
   });
   return (request, response, authorize) => {
+    const responseClosed = new AbortController();
+    response.once("close", () => responseClosed.abort());
+    if (response.destroyed) {
+      responseClosed.abort();
+    }
     requests.set(request, {
       authorize,
+      disconnected: responseClosed.signal,
       disconnectBlockedWriter() {
         if (response.writableNeedDrain) {
           response.destroy();
@@ -24912,10 +26120,6 @@ function createWhiteboardRoutes(application, observe) {
   ];
 }
 
-// ../../packages/contracts/dist/proto/luming/studio/v1/board_suggestion_service_pb.js
-var file_luming_studio_v1_board_suggestion_service = /* @__PURE__ */ fileDesc("Ci9sdW1pbmcvc3R1ZGlvL3YxL2JvYXJkX3N1Z2dlc3Rpb25fc2VydmljZS5wcm90bxIQbHVtaW5nLnN0dWRpby52MSIqChRCb2FyZFJldmlld1NlbGVjdGlvbhISCgpvYmplY3RfaWRzGAEgAygJIu0BCh5DcmVhdGVCb2FyZFJldmlld1NvdXJjZVJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCRI7CglzZWxlY3Rpb24YAyABKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUmV2aWV3U2VsZWN0aW9uSAASHAoSZmVlZGJhY2tfdGhyZWFkX2lkGAQgASgJSAASJAoXZXhwZWN0ZWRfYm9hcmRfcmV2aXNpb24YBSABKARIAYgBAUIICgZvcmlnaW5CGgoYX2V4cGVjdGVkX2JvYXJkX3JldmlzaW9uIrwCChFCb2FyZFJldmlld1NvdXJjZRIRCglzb3VyY2VfaWQYASABKAkSEAoIYm9hcmRfaWQYAiABKAkSJAoXY2FwdHVyZWRfYm9hcmRfcmV2aXNpb24YAyABKARIAIgBARISCgpvYmplY3RfaWRzGAQgAygJEh8KEmZlZWRiYWNrX3RocmVhZF9pZBgFIAEoCUgBiAEBEjQKB3RhcmdldHMYBiADKAsyIy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUmV2aWV3VGFyZ2V0EiMKFnRhcmdldHNfYm9hcmRfcmV2aXNpb24YByABKARIAogBAUIaChhfY2FwdHVyZWRfYm9hcmRfcmV2aXNpb25CFQoTX2ZlZWRiYWNrX3RocmVhZF9pZEIZChdfdGFyZ2V0c19ib2FyZF9yZXZpc2lvbiLIAQoRQm9hcmRSZXZpZXdUYXJnZXQSEQoJb2JqZWN0X2lkGAEgASgJEgwKBGtpbmQYAiABKAkSHQoQZ2VvbWV0cnlfdmVyc2lvbhgDIAEoBEgAiAEBEhwKD3BheWxvYWRfdmVyc2lvbhgEIAEoBEgBiAEBEiwKCGdlb21ldHJ5GAUgASgLMhoubHVtaW5nLnN0dWRpby52MS5HZW9tZXRyeUITChFfZ2VvbWV0cnlfdmVyc2lvbkISChBfcGF5bG9hZF92ZXJzaW9uIlYKH0NyZWF0ZUJvYXJkUmV2aWV3U291cmNlUmVzcG9uc2USMwoGc291cmNlGAEgASgLMiMubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJldmlld1NvdXJjZSKvAgoaQm9hcmRTdWdnZXN0aW9uT3B0aW9uSW5wdXQSEQoJb3B0aW9uX2lkGAEgASgJEg0KBWxhYmVsGAIgASgJEhgKC2Rlc2NyaXB0aW9uGAMgASgJSAGIAQESPgoIZ2VvbWV0cnkYBCABKAsyKi5sdW1pbmcuc3R1ZGlvLnYxLkVkaXRCb2FyZEdlb21ldHJ5UmVxdWVzdEgAEj0KB2NvbnRlbnQYBSABKAsyKi5sdW1pbmcuc3R1ZGlvLnYxLkVkaXRPYmplY3RDb250ZW50UmVxdWVzdEgAEj4KCm9wZXJhdGlvbnMYBiADKAsyKi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU3VnZ2VzdGlvbkVkaXRJbnB1dEIGCgRlZGl0Qg4KDF9kZXNjcmlwdGlvbiKhAQoYQm9hcmRTdWdnZXN0aW9uRWRpdElucHV0Ej4KCGdlb21ldHJ5GAEgASgLMioubHVtaW5nLnN0dWRpby52MS5FZGl0Qm9hcmRHZW9tZXRyeVJlcXVlc3RIABI9Cgdjb250ZW50GAIgASgLMioubHVtaW5nLnN0dWRpby52MS5FZGl0T2JqZWN0Q29udGVudFJlcXVlc3RIAEIGCgRlZGl0IqsBChxTdWJtaXRCb2FyZFN1Z2dlc3Rpb25SZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkSEQoJc291cmNlX2lkGAMgASgJEhMKC29ic2VydmF0aW9uGAQgASgJEj0KB29wdGlvbnMYBSADKAsyLC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU3VnZ2VzdGlvbk9wdGlvbklucHV0ImMKFUJvYXJkU3VnZ2VzdGlvbk9wdGlvbhIRCglvcHRpb25faWQYASABKAkSDQoFbGFiZWwYAiABKAkSGAoLZGVzY3JpcHRpb24YAyABKAlIAIgBAUIOCgxfZGVzY3JpcHRpb24i/gIKD0JvYXJkU3VnZ2VzdGlvbhITCgtwcm9wb3NhbF9pZBgBIAEoCRIRCglzb3VyY2VfaWQYAiABKAkSEwoLb2JzZXJ2YXRpb24YAyABKAkSHQoQcHJvcG9zYWxfdmVyc2lvbhgEIAEoBEgAiAEBEhkKEWV4cGlyZXNfYXRfbWlsbGlzGAUgASgEEjgKB29wdGlvbnMYBiADKAsyJy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU3VnZ2VzdGlvbk9wdGlvbhIfChJhY2NlcHRlZF9vcHRpb25faWQYByABKAlIAYgBARIkChdhY2NlcHRlZF9ib2FyZF9yZXZpc2lvbhgIIAEoBEgCiAEBEhAKCHJlamVjdGVkGAkgASgIEhkKEWFjdGl2ZV9vcHRpb25faWRzGAogAygJQhMKEV9wcm9wb3NhbF92ZXJzaW9uQhUKE19hY2NlcHRlZF9vcHRpb25faWRCGgoYX2FjY2VwdGVkX2JvYXJkX3JldmlzaW9uIlYKHVN1Ym1pdEJvYXJkU3VnZ2VzdGlvblJlc3BvbnNlEjUKCnN1Z2dlc3Rpb24YASABKAsyIS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU3VnZ2VzdGlvbiJ2ChtMaXN0Qm9hcmRTdWdnZXN0aW9uc1JlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSDQoFbGltaXQYAiABKA0SHwoSYmVmb3JlX3Byb3Bvc2FsX2lkGAMgASgJSACIAQFCFQoTX2JlZm9yZV9wcm9wb3NhbF9pZCKWAQocTGlzdEJvYXJkU3VnZ2VzdGlvbnNSZXNwb25zZRI0Cglwcm9wb3NhbHMYASADKAsyIS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU3VnZ2VzdGlvbhIkChduZXh0X2JlZm9yZV9wcm9wb3NhbF9pZBgCIAEoCUgAiAEBQhoKGF9uZXh0X2JlZm9yZV9wcm9wb3NhbF9pZCKfAQodUHJldmlld0JvYXJkU3VnZ2VzdGlvblJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEwoLcHJvcG9zYWxfaWQYAiABKAkSEQoJb3B0aW9uX2lkGAMgASgJEiYKGWV4cGVjdGVkX3Byb3Bvc2FsX3ZlcnNpb24YBCABKARIAIgBAUIcChpfZXhwZWN0ZWRfcHJvcG9zYWxfdmVyc2lvbiL2AQoWQm9hcmRTdWdnZXN0aW9uUHJldmlldxIbCg5ib2FyZF9yZXZpc2lvbhgBIAEoBEgAiAEBEjkKD2NoYW5nZWRfb2JqZWN0cxgCIAMoCzIgLmx1bWluZy5zdHVkaW8udjEuT2JqZWN0TWV0YWRhdGESGgoScmVtb3ZlZF9vYmplY3RfaWRzGAMgAygJEhQKDG9iamVjdF9vcmRlchgEIAMoCRI/ChBjaGFuZ2VkX3BheWxvYWRzGAUgAygLMiUubHVtaW5nLnN0dWRpby52MS5PYmplY3RQYXlsb2FkUmVzdWx0QhEKD19ib2FyZF9yZXZpc2lvbiLZAQoeUHJldmlld0JvYXJkU3VnZ2VzdGlvblJlc3BvbnNlEjsKB3ByZXZpZXcYASABKAsyKC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU3VnZ2VzdGlvblByZXZpZXdIABI3Cghjb25mbGljdBgCIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQm9hcmRFZGl0Q29uZmxpY3RIABI3CghyZWplY3RlZBgDIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQm9hcmRFZGl0UmVqZWN0ZWRIAEIICgZyZXN1bHQisgEKHEFjY2VwdEJvYXJkU3VnZ2VzdGlvblJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEwoLcHJvcG9zYWxfaWQYAiABKAkSEQoJb3B0aW9uX2lkGAMgASgJEiYKGWV4cGVjdGVkX3Byb3Bvc2FsX3ZlcnNpb24YBCABKARIAIgBARISCgpjb21tYW5kX2lkGAUgASgJQhwKGl9leHBlY3RlZF9wcm9wb3NhbF92ZXJzaW9uIlQKHUFjY2VwdEJvYXJkU3VnZ2VzdGlvblJlc3BvbnNlEjMKB3JlY2VpcHQYASABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkRWRpdFJlY2VpcHQinwEKHFJlamVjdEJvYXJkU3VnZ2VzdGlvblJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEwoLcHJvcG9zYWxfaWQYAiABKAkSJgoZZXhwZWN0ZWRfcHJvcG9zYWxfdmVyc2lvbhgDIAEoBEgAiAEBEhIKCmNvbW1hbmRfaWQYBCABKAlCHAoaX2V4cGVjdGVkX3Byb3Bvc2FsX3ZlcnNpb24iVgodUmVqZWN0Qm9hcmRTdWdnZXN0aW9uUmVzcG9uc2USNQoKc3VnZ2VzdGlvbhgBIAEoCzIhLmx1bWluZy5zdHVkaW8udjEuQm9hcmRTdWdnZXN0aW9uMvoFChZCb2FyZFN1Z2dlc3Rpb25TZXJ2aWNlEn4KF0NyZWF0ZUJvYXJkUmV2aWV3U291cmNlEjAubHVtaW5nLnN0dWRpby52MS5DcmVhdGVCb2FyZFJldmlld1NvdXJjZVJlcXVlc3QaMS5sdW1pbmcuc3R1ZGlvLnYxLkNyZWF0ZUJvYXJkUmV2aWV3U291cmNlUmVzcG9uc2USeAoVU3VibWl0Qm9hcmRTdWdnZXN0aW9uEi4ubHVtaW5nLnN0dWRpby52MS5TdWJtaXRCb2FyZFN1Z2dlc3Rpb25SZXF1ZXN0Gi8ubHVtaW5nLnN0dWRpby52MS5TdWJtaXRCb2FyZFN1Z2dlc3Rpb25SZXNwb25zZRJ1ChRMaXN0Qm9hcmRTdWdnZXN0aW9ucxItLmx1bWluZy5zdHVkaW8udjEuTGlzdEJvYXJkU3VnZ2VzdGlvbnNSZXF1ZXN0Gi4ubHVtaW5nLnN0dWRpby52MS5MaXN0Qm9hcmRTdWdnZXN0aW9uc1Jlc3BvbnNlEnsKFlByZXZpZXdCb2FyZFN1Z2dlc3Rpb24SLy5sdW1pbmcuc3R1ZGlvLnYxLlByZXZpZXdCb2FyZFN1Z2dlc3Rpb25SZXF1ZXN0GjAubHVtaW5nLnN0dWRpby52MS5QcmV2aWV3Qm9hcmRTdWdnZXN0aW9uUmVzcG9uc2USeAoVQWNjZXB0Qm9hcmRTdWdnZXN0aW9uEi4ubHVtaW5nLnN0dWRpby52MS5BY2NlcHRCb2FyZFN1Z2dlc3Rpb25SZXF1ZXN0Gi8ubHVtaW5nLnN0dWRpby52MS5BY2NlcHRCb2FyZFN1Z2dlc3Rpb25SZXNwb25zZRJ4ChVSZWplY3RCb2FyZFN1Z2dlc3Rpb24SLi5sdW1pbmcuc3R1ZGlvLnYxLlJlamVjdEJvYXJkU3VnZ2VzdGlvblJlcXVlc3QaLy5sdW1pbmcuc3R1ZGlvLnYxLlJlamVjdEJvYXJkU3VnZ2VzdGlvblJlc3BvbnNlYgZwcm90bzM", [file_luming_studio_v1_whiteboard_edits, file_luming_studio_v1_whiteboard_scene, file_luming_studio_v1_whiteboard_service]);
-var BoardSuggestionService = /* @__PURE__ */ serviceDesc(file_luming_studio_v1_board_suggestion_service, 0);
-
 // src/entrypoints/http/suggestion-routes.ts
 var {
   createBoardReviewSource,
@@ -24923,10 +26127,26 @@ var {
   listBoardSuggestions,
   previewBoardSuggestion,
   acceptBoardSuggestion,
+  chooseAgentBoardSuggestion,
   rejectBoardSuggestion
 } = BoardSuggestionService.method;
 var { editBoardGeometry: editBoardGeometry2, editObjectContent: editObjectContent2 } = BoardEditService.method;
 var boardSuggestionSubmitPath = "/" + BoardSuggestionService.typeName + "/" + submitBoardSuggestion.name;
+var agentSuggestionChoosePath = "/" + BoardSuggestionService.typeName + "/" + chooseAgentBoardSuggestion.name;
+var agentChoiceIdentifier = /^[A-Za-z0-9_.:-]{1,160}$/u;
+function toAgentChoiceReceipt(receipt) {
+  const { outcome } = receipt;
+  if (outcome.kind === "rejected") {
+    return toBoardEditReceipt(receipt);
+  }
+  if (outcome.kind === "conflict") {
+    return toBoardEditReceipt({ ...receipt, outcome: { ...outcome, payloads: void 0 } });
+  }
+  return toBoardEditReceipt({
+    ...receipt,
+    outcome: { ...outcome, payloads: [], removedPayloadObjectIds: void 0, order: void 0 }
+  });
+}
 function reviewActor(actor) {
   return { id: actor.id, kind: actor.kind ?? "human" };
 }
@@ -25113,6 +26333,41 @@ function createBoardSuggestionRoutes(application, digest2, observe) {
       observe?.(receipt);
       return { receipt: toBoardEditReceipt(receipt) };
     }),
+    unaryRoute(chooseAgentBoardSuggestion, (actor, request) => {
+      const {
+        boardId,
+        commandId,
+        proposalId,
+        optionId,
+        expectedProposalVersion,
+        agentId,
+        taskId,
+        generation
+      } = request;
+      const validBinding = [agentId, taskId, generation].every(
+        (value) => agentChoiceIdentifier.test(value)
+      );
+      if (!validBinding || !agentId.startsWith("agent-") || agentId === actor.id) {
+        throw new HttpRequestError(400, "A current Agent suggestion workspace is required.");
+      }
+      const receipt = application.acceptAgent(
+        reviewActor(actor),
+        {
+          boardId: requireId(boardId),
+          commandId: requireId(commandId),
+          proposalId: requireId(proposalId),
+          optionId: requireId(optionId),
+          expectedProposalVersion: compareVersion(expectedProposalVersion),
+          agentId,
+          taskId,
+          generation,
+          signature: "agent-suggestion-choose:" + digest2(toBinary(chooseAgentBoardSuggestion.input, request))
+        },
+        decodeEdit
+      );
+      observe?.(receipt);
+      return { receipt: toAgentChoiceReceipt(receipt) };
+    }),
     unaryRoute(rejectBoardSuggestion, (actor, request) => ({
       suggestion: toSuggestion(
         application.reject(reviewActor(actor), {
@@ -25132,7 +26387,7 @@ var attach = BoardEditService.method.attachBoardVideo;
 var emptyContent = new Uint8Array();
 var boardVideoRoutePath = "/" + BoardEditService.typeName + "/" + attach.name;
 var boardVideoRequestLimit = 20 * 1024 * 1024 + 32 * 1024;
-function readOperation4({
+function readOperation5({
   objectId,
   displayName,
   content,
@@ -25152,7 +26407,7 @@ function createVideoEditRoute(application, digest2, observe) {
     const receipt = application.attachVideo(actor, {
       boardId: requireId(boardId),
       commandId: requireId(commandId),
-      operation: readOperation4(request),
+      operation: readOperation5(request),
       signature: "video:" + digest2(metadata) + ":" + digest2(content)
     });
     observe?.(receipt);
@@ -25281,7 +26536,10 @@ var requestLimits = /* @__PURE__ */ new Map([
   [boardImageRoutePath, boardImageRequestLimit],
   [boardDocumentImageRoutePath, boardImageRequestLimit],
   [boardVideoRoutePath, boardVideoRequestLimit],
-  [agentActivityPath, agentActivityRequestLimit]
+  [agentActivityPath, agentActivityRequestLimit],
+  [agentBoardWritePath, agentBoardWriteRequestLimit],
+  [agentBoardReceiptPath, agentBoardWriteRequestLimit + 16],
+  ["/luming.studio.v1.BoardArchiveService/ImportBoardAsset", MAX_BOARD_ASSET_IMPORT_BYTES + 1024]
 ]);
 function serveRoomConnection(request, response, { features, resolveActor, onError }, roomStream) {
   const path3 = request.url ?? "";
@@ -25330,7 +26588,15 @@ async function handleRequest(request, response, routes, options) {
     sendStatus(response, 401);
     return;
   }
-  if (actor.kind === "agent" && path3 !== agentSuggestionPath && path3 !== agentActivityPath) {
+  const agentOperation = [
+    agentSuggestionPath,
+    agentActivityPath,
+    agentBoardWritePath,
+    agentBoardReceiptPath,
+    agentSuggestionChoosePath
+  ].includes(path3);
+  const agentFeedback = isAgentFeedbackRequest(path3, actor);
+  if (actor.kind === "agent" && !agentOperation && !agentFeedback) {
     sendStatus(response, 403);
     return;
   }
@@ -25361,8 +26627,14 @@ function handleError(response, error, onError) {
     }
     return;
   }
-  const forbidden = error instanceof WhiteboardAccessError || error instanceof FeedbackAccessError;
-  if (forbidden || error instanceof SharingAccessError || error instanceof RoomAccessError) {
+  const forbidden2 = [
+    WhiteboardAccessError,
+    FeedbackAccessError,
+    BoardAssetAccessError,
+    SharingAccessError,
+    RoomAccessError
+  ].some((AccessError) => error instanceof AccessError);
+  if (forbidden2) {
     if (canRespond) {
       sendStatus(response, 403);
     }
@@ -25419,15 +26691,18 @@ function createWhiteboardRequestHandler(options, guest) {
     createDocumentImageRoute(features.editor, features.digest),
     ...createBoardHistoryRoutes(features.history, features.digest, observe),
     ...createFeedbackRoutes(features.feedback),
+    ...features.agentBoardWrite ? createAgentBoardWriteRoutes(features.agentBoardWrite, features.digest, observe) : [],
     ...features.rooms ? createRoomRoutes(features.rooms) : [],
     ...features.suggestions ? createBoardSuggestionRoutes(features.suggestions, features.digest, observe) : []
   ] : [];
   const routes = {
     unary: new Map([
       ...createWhiteboardRoutes(application, observe),
+      ...createMcpPanelViewRoutes(application, Date.now),
       ...studioRoutes,
       ...createCatalogRoutes(catalogApplication),
       createArchiveReceiptRoute(archiveApplication),
+      ...createBoardAssetRoutes(archiveApplication),
       ...sharing ? createSharingRoutes(sharing) : []
     ]),
     roomStream: features?.rooms && createRoomEventStreamRoute(features.rooms, onError)
@@ -25500,6 +26775,18 @@ async function loadGuestWebAssets(directory) {
 
 // src/infrastructure/platform/mcp-runtime.ts
 var import_proper_lockfile = __toESM(require_proper_lockfile(), 1);
+var agentFeedbackRoutes = new Set(
+  ["ListThreads", "GetThread", "ApplyFeedback", "GetFeedbackReceipt"].map(
+    (method4) => "/luming.studio.v1.FeedbackService/" + method4
+  )
+);
+
+// src/infrastructure/platform/mcp-files.ts
+import { constants as constants2 } from "node:fs";
+import { platform } from "node:os";
+var assetFileLimit = 20 * 1024 * 1024;
+var windows = platform() === "win32";
+var readFlags = constants2.O_RDONLY | (constants2.O_NOFOLLOW ?? 0) | (constants2.O_NONBLOCK ?? 0);
 
 // src/infrastructure/platform/png-renderer.ts
 import { readFile as readFile2 } from "node:fs/promises";
@@ -26286,16 +27573,16 @@ function archiveIndex(value, count) {
   return value;
 }
 function archiveFields(value) {
-  const fields = /* @__PURE__ */ new Map();
+  const fields2 = /* @__PURE__ */ new Map();
   for (const entry of archiveArray(value)) {
     const pair = archiveArray(entry);
     const [name, element] = pair;
-    if (pair.length !== 2 || typeof name !== "string" || fields.has(name)) {
+    if (pair.length !== 2 || typeof name !== "string" || fields2.has(name)) {
       throw invalidArchive("Invalid or duplicate archive field");
     }
-    fields.set(name, element);
+    fields2.set(name, element);
   }
-  return fields;
+  return fields2;
 }
 function primitive(value) {
   const scalar = value === null || typeof value === "string" || typeof value === "boolean";
@@ -26319,8 +27606,8 @@ var ArchiveValueReader = class {
   texts;
   payloads;
   textByIndex = /* @__PURE__ */ new Map();
-  text(reference) {
-    const index = archiveIndex(reference, this.texts.length);
+  text(reference2) {
+    const index = archiveIndex(reference2, this.texts.length);
     const cached = this.textByIndex.get(index);
     if (cached) {
       return cached;
@@ -26337,10 +27624,10 @@ var ArchiveValueReader = class {
     return text3;
   }
   object(value, budget, depth) {
-    const fields = archiveFields(value);
-    reserve(budget, 2 + Math.max(0, fields.size - 1));
+    const fields2 = archiveFields(value);
+    reserve(budget, 2 + Math.max(0, fields2.size - 1));
     const entries = [];
-    for (const [key, element] of fields) {
+    for (const [key, element] of fields2) {
       reserve(budget, jsonBytes(key) + 1);
       entries.push([key, this.value(element, budget, depth + 1)]);
     }
@@ -26374,8 +27661,8 @@ var ArchiveValueReader = class {
     }
     throw invalidArchive("Invalid archive value type");
   }
-  payload(reference, budget) {
-    const index = archiveIndex(reference, this.payloads.length);
+  payload(reference2, budget) {
+    const index = archiveIndex(reference2, this.payloads.length);
     return this.value(this.payloads[index], budget, 0);
   }
 };
@@ -26497,19 +27784,19 @@ function restoreUnits(encoded, prior, payloadCount) {
     restored[ordinal] = archiveIndex(pair[1], payloadCount);
     previousOrdinal = ordinal;
   }
-  return restored.map((reference) => archiveIndex(reference, payloadCount));
+  return restored.map((reference2) => archiveIndex(reference2, payloadCount));
 }
 function restoreContent(encoded, prior, payloadCount) {
   if (typeof encoded === "number") {
     return archiveIndex(encoded, payloadCount);
   }
   const entry = archiveRecord(encoded);
-  const fields = archiveIndex(entry.fields, payloadCount);
+  const fields2 = archiveIndex(entry.fields, payloadCount);
   if (Object.hasOwn(entry, "base")) {
     if (Object.keys(entry).length !== 4) {
       throw invalidArchive("Invalid archive delta record");
     }
-    return { fields, units: restoreUnits(entry, prior, payloadCount) };
+    return { fields: fields2, units: restoreUnits(entry, prior, payloadCount) };
   }
   if (Object.keys(entry).length !== 2) {
     throw invalidArchive("Invalid archive content record");
@@ -26518,15 +27805,15 @@ function restoreContent(encoded, prior, payloadCount) {
   if (units.length > MAX_UNITS) {
     throw archiveTooLarge();
   }
-  return { fields, units: units.map((id) => archiveIndex(id, payloadCount)) };
+  return { fields: fields2, units: units.map((id) => archiveIndex(id, payloadCount)) };
 }
 function readHistory(value, contentCount, payloadCount) {
   const history = archiveArray(value);
   if (history.length > MAX_HISTORY) {
     throw archiveTooLarge();
   }
-  return history.map((version2) => {
-    const references = archiveArray(version2);
+  return history.map((version3) => {
+    const references = archiveArray(version3);
     if (references.length !== 3) {
       throw invalidArchive("Invalid archive history references");
     }
@@ -26547,13 +27834,13 @@ function readScene(value, readPayload) {
     }
     return { objects: elements2, style: content.style };
   }
-  const fields = archiveRecord(readPayload(value.fields, budget));
-  if (Object.hasOwn(fields, "elements")) {
+  const fields2 = archiveRecord(readPayload(value.fields, budget));
+  if (Object.hasOwn(fields2, "elements")) {
     throw invalidArchive("Duplicate archive object list");
   }
   return {
-    objects: value.units.map((reference) => readPayload(reference, budget)),
-    style: fields.style
+    objects: value.units.map((reference2) => readPayload(reference2, budget)),
+    style: fields2.style
   };
 }
 function currentSceneFields({ objects, style }) {
@@ -26569,18 +27856,18 @@ function currentSceneFields({ objects, style }) {
 }
 function cachedPayload(reader2, total) {
   const cache = /* @__PURE__ */ new Map();
-  return (reference, budget) => {
-    let entry = cache.get(reference);
+  return (reference2, budget) => {
+    let entry = cache.get(reference2);
     if (!entry) {
       const measured = { maximum: total.maximum - total.bytes, bytes: 0, nodes: 0 };
-      const value = reader2.payload(reference, measured);
+      const value = reader2.payload(reference2, measured);
       total.bytes += measured.bytes;
       total.nodes += measured.nodes;
       if (total.nodes > MAX_JSON_STRUCTURE) {
         throw archiveTooLarge();
       }
       entry = { value, bytes: measured.bytes, nodes: measured.nodes };
-      cache.set(reference, entry);
+      cache.set(reference2, entry);
     }
     budget.bytes += entry.bytes;
     budget.nodes += entry.nodes;
@@ -26594,13 +27881,13 @@ function legacyStudioBackup(current, board, history, reader2, budget) {
   if (typeof current === "number" || !Number.isSafeInteger(board.revision)) {
     return false;
   }
-  const fields = archiveRecord(reader2.payload(current.fields, budget));
-  if (Object.keys(fields).length > 0) {
+  const fields2 = archiveRecord(reader2.payload(current.fields, budget));
+  if (Object.keys(fields2).length > 0) {
     return false;
   }
   return history.every(({ entry }) => {
-    const record7 = archiveRecord(reader2.payload(entry, budget));
-    return Number.isSafeInteger(record7.revision) && record7.id === "revision-" + String(record7.revision);
+    const record8 = archiveRecord(reader2.payload(entry, budget));
+    return Number.isSafeInteger(record8.revision) && record8.id === "revision-" + String(record8.revision);
   });
 }
 function projectState(header, contents, reader2, artifactId, history) {
@@ -26633,7 +27920,7 @@ function projectState(header, contents, reader2, artifactId, history) {
     return {
       title,
       ...currentSceneFields(
-        readScene(current, (reference, allowance) => reader2.payload(reference, allowance))
+        readScene(current, (reference2, allowance) => reader2.payload(reference2, allowance))
       ),
       assets
     };
@@ -26713,12 +28000,12 @@ var ArchiveRecords = class {
   bytes = 0;
   previous;
   reserve(value) {
-    const record7 = JSON.stringify(value);
-    this.bytes += Buffer5.byteLength(record7) + 1;
+    const record8 = JSON.stringify(value);
+    this.bytes += Buffer5.byteLength(record8) + 1;
     if (this.bytes > MAX_ARCHIVE_STATE_BYTES) {
       throw new BackupLimit();
     }
-    return record7;
+    return record8;
   }
   text(value) {
     const indexed = this.textIds.get(value);
@@ -26766,17 +28053,17 @@ var ArchiveRecords = class {
     }
     return id;
   }
-  delta(units, fields) {
+  delta(units, fields2) {
     const previous = this.previous;
     if (previous) {
       const changes = units.flatMap(
         (value, index) => value !== previous.elements[index] ? [[index, value]] : []
       );
       if (changes.length * 4 + 8 < units.length) {
-        return { base: previous.index, fields, length: units.length, changes };
+        return { base: previous.index, fields: fields2, length: units.length, changes };
       }
     }
-    return { fields, units };
+    return { fields: fields2, units };
   }
   content(elements2, contentFields2) {
     const retained = this.contentIds.get(elements2);
@@ -26800,13 +28087,13 @@ var ArchiveRecords = class {
     return index;
   }
   serialize(state) {
-    const fields = state.contentFields ?? this.emptyFields;
+    const fields2 = state.contentFields ?? this.emptyFields;
     const history = state.history.map(({ entry, artifact: artifact2, elements: elements2 }) => [
       this.payload(entry),
       this.payload(artifact2),
-      this.content(elements2, fields)
+      this.content(elements2, fields2)
     ]);
-    const current = this.content(state.elements, fields);
+    const current = this.content(state.elements, fields2);
     const properties = Object.entries(state.properties).map(([field, value]) => [
       field,
       this.payload(value)
@@ -27054,10 +28341,10 @@ async function readEntries(archive, limitForName) {
     await file.close();
   }
 }
-async function inflateEntry(source, bounds, output, compressed) {
+async function inflateEntry(source, bounds2, output, compressed) {
   const inflate = createInflateRaw();
   try {
-    await pipeline(source, inflate, bounds, output);
+    await pipeline(source, inflate, bounds2, output);
   } catch (error) {
     const code = error instanceof Error && "code" in error ? error.code : void 0;
     if (typeof code === "string" && code.startsWith("Z_")) {
@@ -27072,7 +28359,7 @@ async function inflateEntry(source, bounds, output, compressed) {
 async function extractEntry(archive, entry, file) {
   let size = 0;
   let checksum = 0;
-  const bounds = new Transform({
+  const bounds2 = new Transform({
     transform(chunk, _encoding, done) {
       size += chunk.length;
       if (size > entry.size || size > entry.limit) {
@@ -27089,9 +28376,9 @@ async function extractEntry(archive, entry, file) {
   }) : Readable.from([]);
   const output = createWriteStream(file, { flags: "wx" });
   if (entry.encoding === DEFLATE) {
-    await inflateEntry(source, bounds, output, entry.compressed);
+    await inflateEntry(source, bounds2, output, entry.compressed);
   } else {
-    await pipeline(source, bounds, output);
+    await pipeline(source, bounds2, output);
   }
   if (size !== entry.size || checksum !== entry.checksum) {
     throw invalidZip("ZIP entry failed integrity verification");
@@ -27456,15 +28743,15 @@ function readActiveBoardGuest(connection, boardId, actorId2, now) {
   if (!row) {
     return void 0;
   }
-  const { role, name, scope: scope2, version: version2 } = row;
+  const { role, name, scope: scope2, version: version3 } = row;
   const validRole = role === "editor" || role === "commenter" || role === "viewer";
   const validScope = scope2 === "local" || scope2 === "lan";
-  const validMetadata = typeof name === "string" && typeof version2 === "bigint";
+  const validMetadata = typeof name === "string" && typeof version3 === "bigint";
   if (!validRole || !validScope || !validMetadata) {
     throw new Error("Invalid stored guest access.");
   }
   const lastSeenAtMillis = typeof row.last_seen_at_millis === "bigint" ? Number(row.last_seen_at_millis) : void 0;
-  return { role, name, scope: scope2, version: version2, lastSeenAtMillis };
+  return { role, name, scope: scope2, version: version3, lastSeenAtMillis };
 }
 function readBoardAccess(connection, boardId, actorId2) {
   const local = localAccess(connection, boardId, actorId2);
@@ -28335,7 +29622,14 @@ function nativeSceneReader(resolveSource, origin, validate) {
   };
 }
 function legacyActor(value) {
-  return value === void 0 ? void 0 : requiredId(record4(value, "version actor").id, "actor ID");
+  if (value === void 0) {
+    return;
+  }
+  const actor = record4(value, "version actor");
+  return {
+    id: requiredId(actor.id, "actor ID"),
+    agentName: actor.kind === "agent" && typeof actor.name === "string" ? actor.name.trim() : void 0
+  };
 }
 function versionDate(value, name) {
   return value === void 0 ? void 0 : unsignedInteger(value, name);
@@ -28347,7 +29641,8 @@ function parseVersion(entry, artifact2, native) {
     throw new ArchiveObjectError("The archived version does not match its whiteboard revision.");
   }
   const data = native ? record4(entry.studioII, "Studio II version") : void 0;
-  const actorId2 = data ? optionalString2(data.actorId, "version actor") : legacyActor(entry.actor);
+  const actor = data ? void 0 : legacyActor(entry.actor);
+  const actorId2 = data ? optionalString2(data.actorId, "version actor") : actor?.id;
   const savedAtMillis = data ? versionDate(data.savedAtMillis, "version date") : archivedDate(entry.createdAt, "version date");
   const source = /^revision-(\d+)$/u.exec(
     optionalString2(entry.restoredFrom, "version source") ?? ""
@@ -28367,6 +29662,7 @@ function parseVersion(entry, artifact2, native) {
     revision,
     title,
     actorId: actorId2,
+    agentName: actor?.agentName,
     savedAtMillis,
     sourceRevision,
     kind,
@@ -28397,19 +29693,19 @@ function compareScenes(left, right) {
 function readVersions(restoration, revision, sourceBoardId, objects, scene) {
   const history = [];
   for (const item of restoration.history) {
-    const version2 = parseVersion(item.entry, item.artifact, restoration.details !== void 0);
+    const version3 = parseVersion(item.entry, item.artifact, restoration.details !== void 0);
     const previous = history.at(-1)?.revision;
-    const discontinuity = previous !== void 0 && version2.revision !== previous + 1n;
-    if (item.artifact.id !== sourceBoardId || version2.revision > revision || discontinuity) {
+    const discontinuity = previous !== void 0 && version3.revision !== previous + 1n;
+    if (item.artifact.id !== sourceBoardId || version3.revision > revision || discontinuity) {
       throw new ArchiveObjectError("Archived revisions do not form a continuous board history.");
     }
     const savedObjects = scene(item.objects);
-    if (version2.revision === revision && !compareScenes(savedObjects, objects)) {
+    if (version3.revision === revision && !compareScenes(savedObjects, objects)) {
       throw new ArchiveObjectError(
         "The latest archived version does not match the whiteboard scene."
       );
     }
-    history.push({ ...version2, objects: savedObjects });
+    history.push({ ...version3, objects: savedObjects });
   }
   const latest = history.at(-1);
   if (restoration.details && !latest) {
@@ -28522,6 +29818,50 @@ function targets(value, name) {
 var tally = within(0xffffffffn);
 var version = within(9223372036854775807n, 1n);
 var date = within(maximumDate);
+function selectionAnchor(value, name) {
+  if (value === void 0 || value === null) {
+    return null;
+  }
+  const entry = record4(parsed(value, name), name);
+  const target2 = record4(entry.target, name);
+  if (target2.kind !== "selection") {
+    throw new ArchiveObjectError("Invalid archived feedback selection kind.");
+  }
+  const point3 = record4(target2.point, name);
+  numberValue(point3.x, "x");
+  numberValue(point3.y, "y");
+  stringValue2(target2.expectedBoardRevision, name);
+  unsigned(target2.expectedBoardRevision, name);
+  if (target2.bounds !== void 0) {
+    const bounds2 = record4(target2.bounds, name);
+    for (const field of ["x", "y", "width", "height"]) {
+      numberValue(bounds2[field], field);
+    }
+  }
+  const saved = sequence2(entry.frozenTargets, name);
+  if (saved.length > 120) {
+    throw new ArchiveObjectError("Archived feedback selection exceeds its object limit.");
+  }
+  const checked = saved.map((item) => {
+    const { reference: rawReference, object: rawObject } = record4(item, name);
+    const reference2 = record4(rawReference, name);
+    const object3 = record4(rawObject, name);
+    requiredId(reference2.objectId, name);
+    stringValue2(reference2.geometryVersion, name);
+    unsigned(reference2.geometryVersion, name);
+    if (reference2.payloadVersion !== void 0) {
+      stringValue2(reference2.payloadVersion, name);
+      unsigned(reference2.payloadVersion, name);
+    }
+    requiredId(object3.kind, name);
+    stringValue2(object3.label, name);
+    for (const field of ["x", "y", "width", "height", "rotation"]) {
+      numberValue(object3[field], field);
+    }
+    return { reference: reference2, object: object3 };
+  });
+  return JSON.stringify({ target: target2, frozenTargets: checked });
+}
 var threadColumns = {
   thread_id: requiredId,
   status: oneOf(statuses),
@@ -28541,7 +29881,8 @@ var threadColumns = {
   object_rotation: nullable(numberValue),
   version,
   updated_at_millis: date,
-  reply_count: tally
+  reply_count: tally,
+  selection_json: selectionAnchor
 };
 var messageColumns = {
   thread_id: requiredId,
@@ -28630,7 +29971,7 @@ function checkThreads(threads, messages, anchors) {
   }
   for (const thread of threads) {
     const count = counts.get(thread.thread_id);
-    const fields = [
+    const fields2 = [
       thread.object_u,
       thread.object_v,
       thread.object_geometry_version,
@@ -28643,7 +29984,7 @@ function checkThreads(threads, messages, anchors) {
       thread.object_rotation
     ];
     const wrongCounts = !count?.root || count.replies !== thread.reply_count;
-    const incompleteObject = fields.some(
+    const incompleteObject = fields2.some(
       (value) => thread.object_id === null !== (value === null)
     );
     const missingObject = thread.object_id === null && anchorsById.has(thread.thread_id);
@@ -28730,6 +30071,19 @@ var webMediaTypes = /* @__PURE__ */ new Set([
   "audio/wav",
   "audio/webm"
 ]);
+function legacyVersionAuthors(history) {
+  const names = /* @__PURE__ */ new Map();
+  for (const { actorId: actorId2, agentName } of history) {
+    if (actorId2 && agentName) {
+      names.set(actorId2, agentName);
+    }
+  }
+  if (names.size) {
+    return {
+      actors: Array.from(names, ([id, name]) => ({ id, name, kind: "agent", role: "editor" }))
+    };
+  }
+}
 function preparePublication(archive, { actorId: actorId2, boardId }, validate) {
   const prefix = `/assets/${archive.sourceBoardId}/`;
   const assetIds = /* @__PURE__ */ new Set();
@@ -28755,7 +30109,7 @@ function preparePublication(archive, { actorId: actorId2, boardId }, validate) {
     validate,
     archive.restoration
   );
-  const details = archive.restoration?.details;
+  const details = archive.restoration?.details ?? legacyVersionAuthors(scene.history);
   const metadata = details ? prepareRestoredMetadata(details, actorId2) : void 0;
   return { ...scene, assetIds, metadata };
 }
@@ -28871,6 +30225,131 @@ function readPublishedAsset(connection, actorId2, boardId, assetId, allowTrashed
   return { mimeType: publicMimeType(mimeType), bytes };
 }
 
+// src/infrastructure/adapters/archives/board-assets.ts
+function assetSource2(boardId, assetId) {
+  return "/studio-archive-assets/" + boardId + "/" + assetId;
+}
+function reference(boardId, row) {
+  const { asset_id: assetId, mime_type: mimeType, byte_length: byteLength } = row;
+  if (typeof assetId !== "string" || typeof mimeType !== "string" || typeof byteLength !== "number") {
+    throw new TypeError("Invalid board asset metadata.");
+  }
+  return {
+    assetId,
+    src: assetSource2(boardId, assetId),
+    mediaType: publicMimeType(mimeType),
+    byteLength
+  };
+}
+function isActiveBoardOwner(connection, actorId2, boardId) {
+  return readBoardAccess(connection, boardId, actorId2)?.isOwner === true;
+}
+function listBoardAssets(connection, actorId2, boardId, cursor, limit) {
+  if (!isActiveBoardOwner(connection, actorId2, boardId)) {
+    return void 0;
+  }
+  const rows2 = connection.prepare(`
+    SELECT asset_id, mime_type, length(bytes) AS byte_length
+    FROM board_archive_assets
+    WHERE board_id = ? AND asset_id > ?
+    ORDER BY asset_id
+    LIMIT ?
+  `).all(boardId, cursor, limit + 1);
+  const assets = rows2.slice(0, limit).map((row) => reference(boardId, row));
+  return { assets, nextCursor: rows2.length > limit ? assets.at(-1)?.assetId : void 0 };
+}
+function readRemoved(connection, boardId, assetId) {
+  return connection.prepare(`
+    SELECT 1 FROM board_removed_assets WHERE board_id = ? AND asset_id = ?
+  `).get(boardId, assetId) !== void 0;
+}
+function importBoardAsset(connection, actorId2, boardId, assetId, signature, asset) {
+  if (!isActiveBoardOwner(connection, actorId2, boardId)) {
+    return void 0;
+  }
+  const prior = connection.prepare("SELECT signature FROM board_asset_imports WHERE board_id = ? AND asset_id = ?").get(boardId, assetId);
+  if (prior && prior.signature !== signature) {
+    return { kind: "rejected", reason: "commandIdReuse" };
+  }
+  if (!prior) {
+    if (readRemoved(connection, boardId, assetId)) {
+      return { kind: "rejected", reason: "commandIdReuse" };
+    }
+    const inserted = connection.prepare(`
+        INSERT INTO board_archive_assets (board_id, asset_id, mime_type, bytes)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT (board_id, asset_id) DO NOTHING
+      `).run(boardId, assetId, asset.mimeType, asset.bytes);
+    if (Number(inserted.changes) !== 1) {
+      return { kind: "rejected", reason: "commandIdReuse" };
+    }
+    connection.prepare("INSERT INTO board_asset_imports (board_id, asset_id, signature) VALUES (?, ?, ?)").run(boardId, assetId, signature);
+  }
+  const existing = connection.prepare(`
+    SELECT asset_id, mime_type, length(bytes) AS byte_length
+    FROM board_archive_assets
+    WHERE board_id = ? AND asset_id = ?
+  `).get(boardId, assetId);
+  return existing ? { kind: "asset", asset: reference(boardId, existing) } : { kind: "rejected", reason: "notFound" };
+}
+function hasReference(connection, boardId, assetId) {
+  const src = assetSource2(boardId, assetId);
+  const match = connection.prepare(`
+    SELECT 1 FROM object_payloads WHERE board_id = ?1 AND instr(body_json, ?2) > 0
+    UNION ALL
+    SELECT 1 FROM board_history_payloads WHERE board_id = ?1 AND instr(body_json, ?2) > 0
+    UNION ALL
+    SELECT 1 FROM board_objects
+      WHERE board_id = ?1 AND (instr(label, ?2) > 0 OR instr(appearance_json, ?2) > 0 OR instr(detail_json, ?2) > 0)
+    UNION ALL
+    SELECT 1 FROM board_history_objects
+      WHERE board_id = ?1 AND (instr(label, ?2) > 0 OR instr(appearance_json, ?2) > 0 OR instr(detail_json, ?2) > 0)
+    UNION ALL
+    SELECT 1 FROM feedback_threads
+      WHERE board_id = ?1 AND (instr(object_label, ?2) > 0 OR instr(selection_json, ?2) > 0)
+    UNION ALL
+    SELECT 1 FROM feedback_content_anchors
+      WHERE board_id = ?1 AND (instr(unit_json, ?2) > 0 OR instr(frozen_excerpt, ?2) > 0)
+    UNION ALL
+    SELECT 1 FROM feedback_messages WHERE board_id = ?1 AND instr(text, ?2) > 0
+    UNION ALL
+    SELECT 1 FROM board_review_target_snapshots WHERE board_id = ?1 AND instr(targets_json, ?2) > 0
+    UNION ALL
+    SELECT 1 FROM board_suggestion_options
+      WHERE board_id = ?1 AND instr(CAST(edit_bytes AS TEXT), ?2) > 0
+    UNION ALL
+    SELECT 1 FROM board_suggestion_option_plans WHERE board_id = ?1 AND instr(plan_json, ?2) > 0
+    UNION ALL
+    SELECT 1 FROM board_edit_receipts WHERE board_id = ?1 AND instr(receipt_json, ?2) > 0
+    LIMIT 1
+  `).get(boardId, src);
+  return match !== void 0;
+}
+function deleteBoardAsset(connection, actorId2, boardId, assetId) {
+  if (!isActiveBoardOwner(connection, actorId2, boardId)) {
+    return void 0;
+  }
+  const existing = connection.prepare(`
+    SELECT 1 FROM board_archive_assets WHERE board_id = ? AND asset_id = ?
+  `).get(boardId, assetId);
+  if (!existing) {
+    return readRemoved(connection, boardId, assetId) ? { kind: "removed", assetId } : { kind: "rejected", reason: "notFound" };
+  }
+  if (hasReference(connection, boardId, assetId)) {
+    return { kind: "rejected", reason: "referenceInUse" };
+  }
+  connection.prepare(`
+    INSERT INTO board_removed_assets (board_id, asset_id, mime_type, bytes)
+    SELECT board_id, asset_id, mime_type, bytes FROM board_archive_assets
+    WHERE board_id = ? AND asset_id = ?
+    ON CONFLICT (board_id, asset_id) DO UPDATE SET mime_type = excluded.mime_type, bytes = excluded.bytes
+  `).run(boardId, assetId);
+  connection.prepare(`
+    DELETE FROM board_archive_assets WHERE board_id = ? AND asset_id = ?
+  `).run(boardId, assetId);
+  return { kind: "removed", assetId };
+}
+
 // src/infrastructure/adapters/archives/schema.ts
 var archiveSchema = `
   CREATE TABLE IF NOT EXISTS archive_import_receipts (
@@ -28892,6 +30371,21 @@ var archiveSchema = `
     asset_id TEXT NOT NULL,
     mime_type TEXT NOT NULL,
     bytes BLOB NOT NULL,
+    PRIMARY KEY (board_id, asset_id)
+  ) STRICT;
+
+  CREATE TABLE IF NOT EXISTS board_removed_assets (
+    board_id TEXT NOT NULL REFERENCES boards (board_id) ON DELETE CASCADE,
+    asset_id TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    bytes BLOB NOT NULL,
+    PRIMARY KEY (board_id, asset_id)
+  ) STRICT;
+
+  CREATE TABLE IF NOT EXISTS board_asset_imports (
+    board_id TEXT NOT NULL REFERENCES boards (board_id) ON DELETE CASCADE,
+    asset_id TEXT NOT NULL,
+    signature TEXT NOT NULL,
     PRIMARY KEY (board_id, asset_id)
   ) STRICT;
 
@@ -29028,7 +30522,13 @@ function createArchiveImportRepository(database, validate) {
     getReceipt: (actorId2, commandId) => database.read((connection) => readReceipt(connection, actorId2, commandId)?.receipt),
     getAsset: (actorId2, boardId, assetId, allowTrashedOwner) => database.read(
       (connection) => readPublishedAsset(connection, actorId2, boardId, assetId, allowTrashedOwner)
-    )
+    ),
+    isActiveBoardOwner: (actorId2, boardId) => database.read((connection) => isActiveBoardOwner(connection, actorId2, boardId)),
+    listBoardAssets: (actorId2, boardId, cursor, limit) => database.read((connection) => listBoardAssets(connection, actorId2, boardId, cursor, limit)),
+    importBoardAsset: (actorId2, boardId, assetId, signature, asset) => database.write(
+      (connection) => importBoardAsset(connection, actorId2, boardId, assetId, signature, asset)
+    ),
+    deleteBoardAsset: (actorId2, boardId, assetId) => database.write((connection) => deleteBoardAsset(connection, actorId2, boardId, assetId))
   };
 }
 
@@ -29158,12 +30658,12 @@ function rewriteState(value, replace) {
   if (Array.isArray(value)) {
     return value.map((entry) => rewriteState(entry, replace));
   }
-  const fields = record5(value);
-  if (!fields) {
+  const fields2 = record5(value);
+  if (!fields2) {
     return value;
   }
   return Object.fromEntries(
-    Object.entries(fields).map(([field, entry]) => [field, rewriteState(entry, replace)])
+    Object.entries(fields2).map(([field, entry]) => [field, rewriteState(entry, replace)])
   );
 }
 function rewriteEmbed(body, replace) {
@@ -29467,6 +30967,13 @@ function saveManagementReceipt(connection, actorId2, signature, receipt) {
 
 // src/infrastructure/adapters/catalog/schema.ts
 var catalogSchema = `
+  CREATE TABLE IF NOT EXISTS workbench_preferences (
+    actor_id TEXT PRIMARY KEY,
+    layout TEXT CHECK (layout IN ('grid', 'list')),
+    theme TEXT CHECK (theme IN ('light', 'dark')),
+    pinned_only INTEGER CHECK (pinned_only IN (0, 1))
+  ) STRICT;
+
   CREATE TABLE IF NOT EXISTS catalog_entries (
     board_id TEXT PRIMARY KEY REFERENCES boards (board_id) ON DELETE CASCADE,
     updated_at_millis INTEGER NOT NULL CHECK (updated_at_millis >= 0),
@@ -38658,22 +40165,48 @@ function readCatalogThumbnail(connection, lookup, cached) {
   if (cached?.revision === revision) {
     return { kind: "thumbnail", thumbnail: cached };
   }
-  const bounds = readBounds(connection, boardId);
-  if (!bounds) {
+  const bounds2 = readBounds(connection, boardId);
+  if (!bounds2) {
     return {
       kind: "scene",
       scene: { revision, left: 0, top: 0, right: 0, bottom: 0, objects: [] }
     };
   }
-  const objects = readRows2(connection, boardId, bounds.total).map(readObject2);
+  const objects = readRows2(connection, boardId, bounds2.total).map(readObject2);
   return {
     kind: "scene",
     scene: {
-      ...bounds,
+      ...bounds2,
       revision,
-      objects: bounds.total <= maximumDetailedObjects ? readDetailedObjects(connection, boardId, objects) : objects
+      objects: bounds2.total <= maximumDetailedObjects ? readDetailedObjects(connection, boardId, objects) : objects
     }
   };
+}
+
+// src/infrastructure/adapters/catalog/workbench-preferences.ts
+function readWorkbenchPreferences(connection, actorId2) {
+  const row = connection.prepare("SELECT layout, theme, pinned_only FROM workbench_preferences WHERE actor_id = ?").get(actorId2);
+  const { layout, theme, pinned_only: pinned } = row ?? {};
+  return {
+    layout: layout === "grid" || layout === "list" ? layout : void 0,
+    theme: theme === "light" || theme === "dark" ? theme : void 0,
+    pinnedOnly: pinned === 0 || pinned === 1 ? pinned === 1 : void 0
+  };
+}
+function updateWorkbenchPreferences(connection, actorId2, { layout, theme, pinnedOnly }) {
+  connection.prepare(`
+    INSERT INTO workbench_preferences (actor_id, layout, theme, pinned_only)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT (actor_id) DO UPDATE SET
+      layout = COALESCE(excluded.layout, workbench_preferences.layout),
+      theme = COALESCE(excluded.theme, workbench_preferences.theme),
+      pinned_only = COALESCE(excluded.pinned_only, workbench_preferences.pinned_only)
+  `).run(
+    actorId2,
+    layout ?? null,
+    theme ?? null,
+    pinnedOnly === void 0 ? null : Number(pinnedOnly)
+  );
 }
 
 // src/infrastructure/adapters/catalog/index.ts
@@ -38717,6 +40250,7 @@ var catalogTables = `
 var activeBoards = "l.trashed_at_millis IS NULL";
 var activePinnedBoards = activeBoards + " AND c.pinned = 1";
 var ownedTrash = "l.owner_actor_id = m.actor_id AND l.trashed_at_millis IS NOT NULL";
+var ownedPinnedTrash = ownedTrash + " AND c.pinned = 1";
 function readUnsigned(value, fieldName) {
   if (typeof value !== "bigint" || value < 0n) {
     throw new Error(`Invalid catalog integer for ${fieldName}.`);
@@ -38757,7 +40291,7 @@ function readListSummary(row) {
   };
 }
 function listRows(connection, lookup, condition, ordering) {
-  const { actorId: actorId2, query, limit, after } = lookup;
+  const { actorId: actorId2, query, limit, after, offset: offset2 = 0 } = lookup;
   const titleFilter = query ? "AND instr(studio_unicode_lower(b.title), ?) > 0" : "";
   const search = query ? [query.toLocaleLowerCase()] : [];
   const boundary = after ? `WHERE (${ordering.columns}) > (${ordering.parameters})` : "";
@@ -38773,10 +40307,10 @@ function listRows(connection, lookup, condition, ordering) {
     FROM visible
     ${boundary}
     ORDER BY ${ordering.columns}
-    LIMIT ?
+    LIMIT ? OFFSET ?
   `);
   statement.setReadBigInts(true);
-  return statement.all(actorId2, ...search, ...values, limit);
+  return statement.all(actorId2, ...search, ...values, limit, offset2);
 }
 function listBoards2(connection, lookup) {
   const condition = lookup.pinnedOnly ? activePinnedBoards : activeBoards;
@@ -38785,7 +40319,8 @@ function listBoards2(connection, lookup) {
   );
 }
 function listTrashedBoards2(connection, lookup) {
-  return listRows(connection, lookup, ownedTrash, trashOrderings[lookup.order]).map((row) => ({
+  const condition = lookup.pinnedOnly ? ownedPinnedTrash : ownedTrash;
+  return listRows(connection, lookup, condition, trashOrderings[lookup.order]).map((row) => ({
     board: readListSummary(row),
     trashedAtMillis: readUnsigned(row.trashed_at_millis, "trashed_at_millis")
   }));
@@ -38902,6 +40437,8 @@ function createCatalogRepository(database, recordLifecycleVersion) {
     listTrashedBoards: (lookup) => database.read((connection) => listTrashedBoards2(connection, lookup)),
     readThumbnail: (lookup, cached) => database.read((connection) => readCatalogThumbnail(connection, lookup, cached)),
     getReceipt: (actorId2, commandId) => database.read((connection) => getReceipt(connection, actorId2, commandId)?.receipt),
+    readPreferences: (actorId2) => database.read((connection) => readWorkbenchPreferences(connection, actorId2)),
+    updatePreferences: (actorId2, changes) => database.write((connection) => updateWorkbenchPreferences(connection, actorId2, changes)),
     write: (work) => database.write(
       (connection) => work({
         getReceipt: (actorId2, commandId) => getReceipt(connection, actorId2, commandId),
@@ -39088,7 +40625,7 @@ function listReplies(connection, boardId, threadId, afterPosition, limit) {
   return statement.all(boardId, threadId, afterPosition, limit).map(readMessage2);
 }
 function insertMessage(connection, boardId, threadId, position, message) {
-  const { messageId, authorActorId, authorName, text: text3, createdAtMillis, updatedAtMillis, version: version2 } = message;
+  const { messageId, authorActorId, authorName, text: text3, createdAtMillis, updatedAtMillis, version: version3 } = message;
   connection.prepare(`
       INSERT INTO feedback_messages (
         board_id, thread_id, message_id, author_actor_id, author_name, text,
@@ -39103,17 +40640,17 @@ function insertMessage(connection, boardId, threadId, position, message) {
     text3,
     createdAtMillis,
     updatedAtMillis,
-    version2,
+    version3,
     position
   );
 }
 function updateMessage(connection, boardId, threadId, message) {
-  const { messageId, text: text3, updatedAtMillis, version: version2 } = message;
+  const { messageId, text: text3, updatedAtMillis, version: version3 } = message;
   connection.prepare(`
       UPDATE feedback_messages
       SET text = ?, updated_at_millis = ?, version = ?
       WHERE board_id = ? AND thread_id = ? AND message_id = ?
-    `).run(text3, updatedAtMillis, version2, boardId, threadId, messageId);
+    `).run(text3, updatedAtMillis, version3, boardId, threadId, messageId);
 }
 
 // src/infrastructure/adapters/feedback/receipts.ts
@@ -39126,6 +40663,7 @@ function readRejection(value) {
     case "forbidden":
     case "versionChanged":
     case "commandIdReuse":
+    case "attachmentClaimed":
       return value;
     default:
       throw new Error("Invalid stored feedback rejection.");
@@ -39171,7 +40709,7 @@ function getReceipt2(connection, boardId, actorId2, commandId) {
 function saveReceipt(connection, actorId2, stored) {
   const { signature, receipt } = stored;
   const { boardId, commandId, outcome } = receipt;
-  const fields = outcome.kind === "applied" ? [
+  const fields2 = outcome.kind === "applied" ? [
     outcome.threadId,
     outcome.threadVersion,
     outcome.messageId ?? null,
@@ -39185,7 +40723,7 @@ function saveReceipt(connection, actorId2, stored) {
         board_id, actor_id, command_id, signature, result_kind, thread_id, thread_version,
         message_id, message_version, deleted, reason, current_version
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(boardId, actorId2, commandId, signature, outcome.kind, ...fields);
+    `).run(boardId, actorId2, commandId, signature, outcome.kind, ...fields2);
 }
 
 // src/infrastructure/adapters/feedback/schema.ts
@@ -39208,6 +40746,8 @@ var feedbackSchema = `
     object_width REAL,
     object_height REAL,
     object_rotation REAL,
+    selection_json TEXT CHECK (json_valid(selection_json)),
+    attachment_json TEXT CHECK (json_valid(attachment_json)),
     version INTEGER NOT NULL CHECK (version >= 1),
     updated_at_millis INTEGER NOT NULL CHECK (updated_at_millis >= 0),
     reply_count INTEGER NOT NULL CHECK (reply_count BETWEEN 0 AND 4294967295),
@@ -39264,6 +40804,100 @@ var feedbackSchema = `
   ) STRICT;
 `;
 
+// src/infrastructure/adapters/feedback/attachment-values.ts
+function record7(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function fields(value) {
+  if (!record7(value)) {
+    throw new Error("Invalid stored feedback source.");
+  }
+  return value;
+}
+function version2(value) {
+  if (typeof value !== "string" || !/^\d{1,20}$/u.test(value)) {
+    throw new Error("Invalid stored feedback source version.");
+  }
+  return BigInt(value);
+}
+function point2(value) {
+  const input = fields(value);
+  return { x: readFinite(input.x, "x"), y: readFinite(input.y, "y") };
+}
+function bounds(value) {
+  if (value !== void 0) {
+    const input = fields(value);
+    return {
+      ...point2(input),
+      width: readFinite(input.width, "width"),
+      height: readFinite(input.height, "height")
+    };
+  }
+}
+function targetReference(value) {
+  const input = fields(value);
+  return {
+    objectId: readText(input.objectId, "object_id"),
+    geometryVersion: version2(input.geometryVersion),
+    payloadVersion: input.payloadVersion === void 0 ? void 0 : version2(input.payloadVersion)
+  };
+}
+function frozenObject(value) {
+  const input = fields(value);
+  return {
+    ...point2(input),
+    kind: readText(input.kind, "kind"),
+    label: readText(input.label, "label"),
+    width: readFinite(input.width, "width"),
+    height: readFinite(input.height, "height"),
+    rotation: readFinite(input.rotation, "rotation")
+  };
+}
+function feedbackJson(value) {
+  return value === void 0 ? null : JSON.stringify(
+    value,
+    (_key, entry) => typeof entry === "bigint" ? entry.toString() : entry
+  );
+}
+function readSelectionSnapshot(value) {
+  const input = fields(JSON.parse(readText(value, "selection_json")));
+  const target2 = fields(input.target);
+  if (target2.kind !== "selection" || !Array.isArray(input.frozenTargets)) {
+    throw new Error("Invalid stored feedback selection.");
+  }
+  const frozenTargets = input.frozenTargets.map((entry) => {
+    const source = fields(entry);
+    return { reference: targetReference(source.reference), object: frozenObject(source.object) };
+  });
+  return {
+    target: {
+      kind: "selection",
+      point: point2(target2.point),
+      bounds: bounds(target2.bounds),
+      expectedBoardRevision: version2(target2.expectedBoardRevision),
+      objects: frozenTargets.map(({ reference: reference2 }) => reference2)
+    },
+    frozenTargets
+  };
+}
+function readAttachment(value) {
+  if (value === null) {
+    return;
+  }
+  const input = fields(JSON.parse(readText(value, "attachment_json")));
+  const { state, requestId, claimId, claimedAtMillis, threadVersion } = input;
+  if (state !== "pending" && state !== "claimed" && state !== "attached") {
+    throw new Error("Invalid stored feedback attachment state.");
+  }
+  return {
+    requestId: readText(requestId, "request_id"),
+    state,
+    claimId: typeof claimId === "string" ? claimId : void 0,
+    claimedAtMillis: claimedAtMillis === void 0 ? void 0 : version2(claimedAtMillis),
+    threadVersion: version2(threadVersion)
+  };
+}
+
 // src/infrastructure/adapters/feedback/threads.ts
 var selectThreads = `
   SELECT t.*, ${messageColumns2}, live.object_id AS live_object_id,
@@ -39299,6 +40933,14 @@ function readAnchor(row) {
     x: readFinite(row.frozen_x, "frozen_x"),
     y: readFinite(row.frozen_y, "frozen_y")
   };
+  if (row.selection_json !== null) {
+    return {
+      ...readSelectionSnapshot(row.selection_json),
+      sourceBoardRevision,
+      frozenPoint,
+      targetMissing: false
+    };
+  }
   if (row.object_id === null) {
     return {
       target: { kind: "board", point: frozenPoint },
@@ -39307,14 +40949,14 @@ function readAnchor(row) {
       targetMissing: false
     };
   }
-  const point2 = {
+  const point3 = {
     objectId: readText(row.object_id, "object_id"),
     u: readFinite(row.object_u, "object_u"),
     v: readFinite(row.object_v, "object_v"),
     geometryVersion: readUnsigned2(row.object_geometry_version, "object_geometry_version")
   };
-  const target2 = row.content_payload_version === null ? { ...point2, kind: "object" } : {
-    ...point2,
+  const target2 = row.content_payload_version === null ? { ...point3, kind: "object" } : {
+    ...point3,
     kind: "content",
     payloadVersion: readUnsigned2(row.content_payload_version, "content_payload_version"),
     content: decodeFeedbackContentUnit(row.content_unit_json)
@@ -39336,10 +40978,11 @@ function readThread(row) {
     first: readMessage2(row),
     version: readUnsigned2(row.version, "version"),
     updatedAtMillis: readUnsigned2(row.updated_at_millis, "updated_at_millis"),
-    replyCount: Number(readUnsigned2(row.reply_count, "reply_count"))
+    replyCount: Number(readUnsigned2(row.reply_count, "reply_count")),
+    attachment: readAttachment(row.attachment_json)
   };
 }
-function getThread(connection, boardId, threadId) {
+function getThread2(connection, boardId, threadId) {
   const statement = connection.prepare(`
     ${selectThreads}
     WHERE t.board_id = ? AND t.thread_id = ?
@@ -39348,7 +40991,7 @@ function getThread(connection, boardId, threadId) {
   const row = statement.get(boardId, threadId);
   return row && readThread(row);
 }
-function listThreads(connection, lookup) {
+function listThreads2(connection, lookup) {
   const { boardId, limit, position, status, authorActorId } = lookup;
   const conditions = ["t.board_id = ?"];
   const args = [boardId];
@@ -39359,6 +41002,9 @@ function listThreads(connection, lookup) {
   if (authorActorId) {
     conditions.push("m.author_actor_id = ?");
     args.push(authorActorId);
+  }
+  if (lookup.pendingAttachment) {
+    conditions.push("json_extract(t.attachment_json, '$.state') IN ('pending', 'claimed')");
   }
   if (position) {
     conditions.push("(t.updated_at_millis, t.thread_id) < (?, ?)");
@@ -39374,14 +41020,14 @@ function listThreads(connection, lookup) {
   return statement.all(...args, limit).map(readThread);
 }
 function objectFields2(anchor2) {
-  const { target: target2, frozenObject } = anchor2;
-  if (target2.kind === "board") {
+  const { target: target2, frozenObject: frozenObject2 } = anchor2;
+  if (target2.kind === "board" || target2.kind === "selection") {
     return [null, null, null, null, null, null, null, null, null, null, null];
   }
-  if (!frozenObject) {
+  if (!frozenObject2) {
     throw new Error("Object feedback requires frozen source geometry.");
   }
-  const { kind, label: label2, x, y, width, height, rotation } = frozenObject;
+  const { kind, label: label2, x, y, width, height, rotation } = frozenObject2;
   return [
     target2.objectId,
     target2.u,
@@ -39397,15 +41043,15 @@ function objectFields2(anchor2) {
   ];
 }
 function insertThread(connection, boardId, thread) {
-  const { threadId, status, anchor: anchor2, updatedAtMillis, version: version2, replyCount } = thread;
+  const { threadId, status, anchor: anchor2, updatedAtMillis, version: version3, replyCount } = thread;
   const { frozenPoint, sourceBoardRevision } = anchor2;
   connection.prepare(`
       INSERT INTO feedback_threads (
         board_id, thread_id, status, source_board_revision, frozen_x, frozen_y,
         object_id, object_u, object_v, object_geometry_version,
         object_kind, object_label, object_x, object_y, object_width, object_height, object_rotation,
-        version, updated_at_millis, reply_count
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        version, updated_at_millis, reply_count, selection_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
     boardId,
     threadId,
@@ -39414,9 +41060,12 @@ function insertThread(connection, boardId, thread) {
     frozenPoint.x,
     frozenPoint.y,
     ...objectFields2(anchor2),
-    version2,
+    version3,
     updatedAtMillis,
-    replyCount
+    replyCount,
+    feedbackJson(
+      anchor2.target.kind === "selection" ? { target: anchor2.target, frozenTargets: anchor2.frozenTargets } : void 0
+    )
   );
   insertMessage(connection, boardId, threadId, 0, thread.first);
   if (anchor2.target.kind === "content") {
@@ -39433,12 +41082,20 @@ function insertThread(connection, boardId, thread) {
   }
 }
 function updateThread(connection, boardId, thread) {
-  const { threadId, status, updatedAtMillis, version: version2, replyCount } = thread;
+  const { threadId, status, updatedAtMillis, version: version3, replyCount } = thread;
   connection.prepare(`
       UPDATE feedback_threads
-      SET status = ?, version = ?, updated_at_millis = ?, reply_count = ?
+      SET status = ?, version = ?, updated_at_millis = ?, reply_count = ?, attachment_json = ?
       WHERE board_id = ? AND thread_id = ?
-    `).run(status, version2, updatedAtMillis, replyCount, boardId, threadId);
+    `).run(
+    status,
+    version3,
+    updatedAtMillis,
+    replyCount,
+    feedbackJson(thread.attachment),
+    boardId,
+    threadId
+  );
 }
 function deleteThread(connection, boardId, threadId) {
   connection.prepare("DELETE FROM feedback_threads WHERE board_id = ? AND thread_id = ?").run(boardId, threadId);
@@ -39452,9 +41109,11 @@ function getBoardRevision(connection, boardId) {
 }
 function getObject2(connection, boardId, objectId) {
   const statement = connection.prepare(`
-    SELECT kind, label, x, y, width, height, rotation, geometry_version
-    FROM board_objects
-    WHERE board_id = ? AND object_id = ?
+    SELECT o.kind, o.label, o.x, o.y, o.width, o.height, o.rotation, o.geometry_version,
+           p.payload_version
+    FROM board_objects AS o
+    LEFT JOIN object_payloads AS p ON p.board_id = o.board_id AND p.object_id = o.object_id
+    WHERE o.board_id = ? AND o.object_id = ?
   `);
   statement.setReadBigInts(true);
   const row = statement.get(boardId, objectId);
@@ -39470,7 +41129,8 @@ function getObject2(connection, boardId, objectId) {
     width: readFinite(row.width, "width"),
     height: readFinite(row.height, "height"),
     rotation: readFinite(row.rotation, "rotation"),
-    geometryVersion: readUnsigned2(row.geometry_version, "geometry_version")
+    geometryVersion: readUnsigned2(row.geometry_version, "geometry_version"),
+    payloadVersion: row.payload_version === null ? void 0 : readUnsigned2(row.payload_version, "payload_version")
   };
 }
 function allocateId(connection) {
@@ -39483,8 +41143,8 @@ function createReader(connection) {
     getBoardRevision: (boardId) => getBoardRevision(connection, boardId),
     getObject: (boardId, objectId) => getObject2(connection, boardId, objectId),
     getContentSource: (boardId, target2) => readContentSource(connection, boardId, target2),
-    listThreads: (lookup) => listThreads(connection, lookup),
-    getThread: (boardId, threadId) => getThread(connection, boardId, threadId),
+    listThreads: (lookup) => listThreads2(connection, lookup),
+    getThread: (boardId, threadId) => getThread2(connection, boardId, threadId),
     listReplies: (boardId, threadId, afterPosition, limit) => listReplies(connection, boardId, threadId, afterPosition, limit),
     getMessage: (boardId, threadId, messageId) => getMessage(connection, boardId, threadId, messageId),
     getReceipt: (boardId, actorId2, commandId) => getReceipt2(connection, boardId, actorId2, commandId)
@@ -39493,6 +41153,14 @@ function createReader(connection) {
 function createFeedbackRepository(database) {
   database.write((connection) => {
     connection.exec(feedbackSchema);
+    const threadColumns2 = connection.prepare("PRAGMA table_info(feedback_threads)").all();
+    for (const column of ["selection_json", "attachment_json"]) {
+      if (!threadColumns2.some(({ name }) => name === column)) {
+        connection.exec(
+          "ALTER TABLE feedback_threads ADD COLUMN " + column + " TEXT CHECK (json_valid(" + column + "))"
+        );
+      }
+    }
     const columns = connection.prepare("PRAGMA table_info(feedback_messages)").all();
     if (!columns.some(({ name }) => name === "author_name")) {
       connection.exec("ALTER TABLE feedback_messages ADD COLUMN author_name TEXT");
@@ -39559,7 +41227,7 @@ var backupRows = {
     columns: `thread_id, status, source_board_revision, frozen_x, frozen_y,
       object_id, object_u, object_v, object_geometry_version, object_kind, object_label,
       object_x, object_y, object_width, object_height, object_rotation,
-      version, updated_at_millis, reply_count`,
+      version, updated_at_millis, reply_count, selection_json`,
     order: "thread_id"
   },
   feedback_messages: {
@@ -39642,6 +41310,20 @@ function retainBackupGuest(connection, boardId, actorId2) {
       SELECT board_id, actor_id, name, 'human', role
       FROM board_sharing_members WHERE board_id = ? AND actor_id = ?
     `).run(boardId, actorId2);
+}
+function historyAgentName(actorId2) {
+  return "Agent \xB7 " + actorId2.slice(-8);
+}
+function retainBackupAgent(connection, boardId, actorId2) {
+  if (!hasTable(connection, "board_archive_actors")) {
+    return;
+  }
+  connection.prepare(`
+      INSERT INTO board_archive_actors (board_id, actor_id, name, kind, role)
+      VALUES (?, ?, ?, 'agent', 'editor')
+      ON CONFLICT (board_id, actor_id) DO UPDATE SET name = excluded.name, kind = 'agent'
+      WHERE board_archive_actors.kind <> 'agent'
+    `).run(boardId, actorId2, historyAgentName(actorId2));
 }
 function readBackupDetails(connection, boardId) {
   return {
@@ -39788,8 +41470,8 @@ function decodeHead(value) {
   }
 }
 function decodeEndpoint(value) {
-  const { point: point2, attachment } = storedRecord(value, "endpoint");
-  const position = decodePoint(point2);
+  const { point: point3, attachment } = storedRecord(value, "endpoint");
+  const position = decodePoint(point3);
   if (attachment === void 0) {
     return { point: position };
   }
@@ -40023,7 +41705,11 @@ function publishBoardVersion(connection, before, after, commit) {
   const { boardId, title } = before;
   const { actorId: actorId2, kind, savedAtMillis, sourceRevision, changedObjectCount } = commit;
   const lifecycleKind = kind === "trash" || kind === "restoreTrash" ? kind : null;
-  retainBackupGuest(connection, boardId, actorId2);
+  if (commit.actorKind === "agent") {
+    retainBackupAgent(connection, boardId, actorId2);
+  } else {
+    retainBackupGuest(connection, boardId, actorId2);
+  }
   connection.prepare(`
     INSERT INTO board_versions (board_id, ${versionColumns})
       SELECT ?1, ?2, ?3, NULL, 'baseline', NULL, NULL, 0
@@ -40116,11 +41802,25 @@ function readCreationVersion(connection, boardId) {
   }
 }
 function withCreationVersion(connection, boardId, row) {
-  const version2 = decodeVersion(row);
-  if (version2.kind === "baseline" && version2.revision === 0n) {
-    return readCreationVersion(connection, boardId) ?? version2;
+  const version3 = decodeVersion(row);
+  if (version3.kind === "baseline" && version3.revision === 0n) {
+    return readCreationVersion(connection, boardId) ?? version3;
   }
-  return version2;
+  return version3;
+}
+var generatedAgentId = /^agent-(?:[a-f0-9]{32}|[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})$/u;
+function withHistoryAuthor(version3, actors) {
+  const { actorId: actorId2 } = version3;
+  if (!actorId2) {
+    return version3;
+  }
+  const profile = actors.get(actorId2);
+  const agent = profile ? profile.kind === "agent" : generatedAgentId.test(actorId2);
+  return agent ? {
+    ...version3,
+    actorKind: "agent",
+    actorName: profile?.name.trim() || historyAgentName(actorId2)
+  } : version3;
 }
 function readBoardVersions(connection, boardId, before, limit = defaultPageSize3) {
   const cutoff = before === void 0 ? "" : "AND revision < ?3";
@@ -40130,7 +41830,13 @@ function readBoardVersions(connection, boardId, before, limit = defaultPageSize3
   `);
   query.setReadBigInts(true);
   const rows2 = before === void 0 ? query.all(boardId, limit) : query.all(boardId, limit, before);
-  return rows2.map((row) => withCreationVersion(connection, boardId, row));
+  if (!rows2.length) {
+    return [];
+  }
+  const authors = readBackupActors(connection, boardId);
+  return rows2.map(
+    (row) => withHistoryAuthor(withCreationVersion(connection, boardId, row), authors)
+  );
 }
 function readBoardVersion(connection, boardId, revision) {
   const query = connection.prepare(`
@@ -40791,7 +42497,7 @@ function storedInverse(value) {
 }
 function storedApplication(value) {
   const data = storedRecord(value, "suggestion_application");
-  const footprint = storedRecord(data.footprint, "suggestion_application_footprint");
+  const footprint2 = storedRecord(data.footprint, "suggestion_application_footprint");
   return {
     optionId: storedText(data.optionId, "applied_option"),
     boardRevision: storedDecimalVersion(data.boardRevision, "application_board_revision"),
@@ -40800,9 +42506,9 @@ function storedApplication(value) {
       "application_baseline_revision"
     ),
     footprint: {
-      objectIds: storedIds2(footprint.objectIds, "application_objects") ?? [],
-      payloadIds: storedIds2(footprint.payloadIds, "application_payloads"),
-      editsOrder: storedBool(footprint.editsOrder, "application_order")
+      objectIds: storedIds2(footprint2.objectIds, "application_objects") ?? [],
+      payloadIds: storedIds2(footprint2.payloadIds, "application_payloads"),
+      editsOrder: storedBool(footprint2.editsOrder, "application_order")
     },
     inverse: storedInverse(data.inverse),
     afterFingerprint: storedText(data.afterFingerprint, "application_after_fingerprint")
@@ -41023,11 +42729,11 @@ function decodePlanMeta(value) {
   if (value === null) {
     return void 0;
   }
-  const { footprint, additionalEdits } = storedRecord(
+  const { footprint: footprint2, additionalEdits } = storedRecord(
     decodeJson(value, "suggestion_plan_json"),
     "suggestion_plan"
   );
-  const scope2 = storedRecord(footprint, "suggestion_plan_scope");
+  const scope2 = storedRecord(footprint2, "suggestion_plan_scope");
   return {
     footprint: {
       objectIds: readStoredIds(scope2.objectIds, "option_object_ids"),
@@ -41480,7 +43186,7 @@ function createReader2(connection) {
   return {
     getAccess: (boardId, actorId2) => {
       const access = readBoardAccess(connection, boardId, actorId2);
-      return access && { canEdit: access.canEdit };
+      return access && { canEdit: access.canEdit, isOwner: access.isOwner };
     },
     isTrashedOwner: (boardId, actorId2) => isTrashedBoardOwner(connection, boardId, actorId2),
     getBoard: (boardId) => readBoard2(connection, boardId),
@@ -41612,13 +43318,13 @@ function readReceipt5(connection, actorId2, key) {
   if (!row) {
     return void 0;
   }
-  const { signature, version: version2, duration_ms: duration, remaining_ms: remaining } = row;
+  const { signature, version: version3, duration_ms: duration, remaining_ms: remaining } = row;
   const enoughData = typeof duration === "bigint" && typeof remaining === "bigint";
-  if (typeof signature !== "string" || typeof version2 !== "bigint" || !enoughData) {
+  if (typeof signature !== "string" || typeof version3 !== "bigint" || !enoughData) {
     throw new Error("Invalid saved room timer receipt");
   }
   const timer = {
-    version: version2,
+    version: version3,
     durationMs: Number(duration),
     phase: readPhase(row.phase),
     deadlineUnixMs: typeof row.deadline_ms === "bigint" ? Number(row.deadline_ms) : void 0,
@@ -41705,12 +43411,12 @@ function readTimer(connection, boardId) {
   if (!row) {
     return void 0;
   }
-  const { version: version2, duration_ms: duration, deadline_ms: deadline, paused_ms: paused } = row;
-  if (typeof version2 !== "bigint" || typeof duration !== "bigint") {
+  const { version: version3, duration_ms: duration, deadline_ms: deadline, paused_ms: paused } = row;
+  if (typeof version3 !== "bigint" || typeof duration !== "bigint") {
     throw new Error("Invalid saved room timer");
   }
   return {
-    version: version2,
+    version: version3,
     durationMs: Number(duration),
     deadlineUnixMs: typeof deadline === "bigint" ? Number(deadline) : void 0,
     pausedRemainingMs: typeof paused === "bigint" ? Number(paused) : void 0
@@ -42001,20 +43707,20 @@ var sharingSchema = `
 function createSharingWriter(connection) {
   return {
     ...createSharingReader(connection),
-    saveSettings(boardId, { enabled, scope: scope2, version: version2 }) {
+    saveSettings(boardId, { enabled, scope: scope2, version: version3 }) {
       connection.prepare(`
         INSERT INTO board_sharing (board_id, enabled, scope, version) VALUES (?, ?, ?, ?)
         ON CONFLICT (board_id) DO UPDATE SET
           enabled = excluded.enabled, scope = excluded.scope, version = excluded.version
-      `).run(boardId, Number(enabled), scope2, version2);
+      `).run(boardId, Number(enabled), scope2, version3);
     },
-    saveInvitation(boardId, { role, enabled, version: version2, seed }) {
+    saveInvitation(boardId, { role, enabled, version: version3, seed }) {
       connection.prepare(`
         INSERT INTO board_sharing_invites (board_id, role, enabled, version, seed)
         VALUES (?, ?, ?, ?, ?)
         ON CONFLICT (board_id, role) DO UPDATE SET enabled = excluded.enabled,
           version = excluded.version, seed = excluded.seed
-      `).run(boardId, role, Number(enabled), version2, seed);
+      `).run(boardId, role, Number(enabled), version3, seed);
     },
     saveMember(boardId, { actorId: actorId2, name, nameKey, role, invitationVersion, removed, lastSeenAtMillis }) {
       connection.prepare(`
@@ -42078,20 +43784,6 @@ function createSharingRepository(database) {
 }
 
 // src/bootstrap/room-workspace-scope.ts
-var radiansPerDegree2 = Math.PI / 180;
-function boundsOf2({ x, y, width, height, rotation }) {
-  const angle = rotation * radiansPerDegree2;
-  const sine = Math.abs(Math.sin(angle));
-  const cosine = Math.abs(Math.cos(angle));
-  const wrappedWidth = cosine * width + sine * height;
-  const wrappedHeight = sine * width + cosine * height;
-  return {
-    x: x + (width - wrappedWidth) / 2,
-    y: y + (height - wrappedHeight) / 2,
-    width: wrappedWidth,
-    height: wrappedHeight
-  };
-}
 function createRoomWorkspaceScope(repository) {
   return (boardId, ownerId, scope2) => repository.read((reader2) => {
     if (!reader2.getAccess(boardId, ownerId)?.canEdit) {
@@ -42104,7 +43796,7 @@ function createRoomWorkspaceScope(repository) {
     if (objects.length === scope2.objectIds.length) {
       return objects.map(({ objectId, geometry }) => ({
         id: objectId,
-        bounds: boundsOf2(geometry)
+        bounds: agentWriteBounds(geometry)
       }));
     }
   });
@@ -42186,7 +43878,9 @@ function createWhiteboardServer(options) {
     });
     const archiveApplication = createArchiveImportApplication(archives, {
       newBoardId: randomUUID,
-      now: Date.now
+      now: Date.now,
+      digest,
+      prepareAsset: (boardId, assetId, content) => prepareBoardAsset(boardId, assetId, content, validateSvgUpload)
     });
     const feedbackRepository = createFeedbackRepository(database);
     const feedback = createFeedbackApplication(feedbackRepository, {
@@ -42202,15 +43896,20 @@ function createWhiteboardServer(options) {
         newId: randomUUID,
         digest,
         onChanged: (boardId) => rooms.publishDiscussionChange(boardId, "suggestionsChanged"),
+        resolveAgentWorkspaces: (boardId, ownerId) => rooms.agentWriteWorkspaces(boardId, ownerId),
         readFeedbackSource(actor, boardId, feedbackThreadId) {
           try {
             const { thread } = feedback.getThread(actor, boardId, feedbackThreadId, {
               pageSize: 1
             });
-            const anchor2 = thread.anchor;
+            const { sourceBoardRevision, target: target2 } = thread.anchor;
+            const objectIds = target2.kind === "selection" ? target2.objects.map(({ objectId }) => objectId) : [];
+            if (target2.kind === "object" || target2.kind === "content") {
+              objectIds.push(target2.objectId);
+            }
             return {
-              capturedBoardRevision: anchor2.sourceBoardRevision,
-              objectId: anchor2.target.kind === "board" ? void 0 : anchor2.target.objectId
+              capturedBoardRevision: sourceBoardRevision,
+              objectIds
             };
           } catch (error) {
             if (error instanceof FeedbackThreadNotFoundError) {
@@ -42248,6 +43947,10 @@ function createWhiteboardServer(options) {
         history: createBoardHistoryApplication(repository, Date.now, renderSvgPng),
         feedback,
         rooms,
+        agentBoardWrite: createBoardAgentWriteApplication(repository, {
+          now: Date.now,
+          resolveWorkspaces: (boardId, ownerId) => rooms.agentWriteWorkspaces(boardId, ownerId)
+        }),
         suggestions,
         digest
       },
@@ -42379,7 +44082,9 @@ var runtime = createWhiteboardServer({
       return { id: actorId, kind: "human" };
     }
     if (matchesToken(supplied, agentToken)) {
-      return { id: actorId, kind: "agent" };
+      const author = request.headers["x-studio-feedback-agent-id"];
+      const feedbackAuthorId = typeof author === "string" && /^agent-[A-Za-z0-9_-]{1,128}$/u.test(author) ? author : void 0;
+      return { id: actorId, kind: "agent", feedbackAuthorId };
     }
     return void 0;
   },

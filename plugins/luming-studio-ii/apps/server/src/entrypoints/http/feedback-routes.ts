@@ -1,5 +1,6 @@
 import type { MessageInitShape } from '@bufbuild/protobuf';
 import {
+  FeedbackAttachmentState,
   FeedbackRejectionReason,
   FeedbackService,
   FeedbackThreadStatus,
@@ -24,7 +25,31 @@ import type {
   FeedbackThreadView,
 } from '../../modules/feedback/application/index.js';
 import { HttpRequestError, requireId } from './request.js';
-import { unaryRoute, type RouteEntry } from './unary-route.js';
+import { unaryRoute, type HttpActor, type RouteEntry } from './unary-route.js';
+
+const { listThreads, getThread, applyFeedback, getFeedbackReceipt } = FeedbackService.method;
+const agentFeedbackPaths = new Set(
+  [listThreads, getThread, applyFeedback, getFeedbackReceipt].map(
+    ({ parent, name }) => '/' + parent.typeName + '/' + name,
+  ),
+);
+
+export function isAgentFeedbackRequest(path: string, actor: HttpActor): boolean {
+  return actor.feedbackAuthorId !== undefined && agentFeedbackPaths.has(path);
+}
+
+function feedbackActor(actor: HttpActor) {
+  if (actor.kind !== 'agent') {
+    return actor;
+  }
+
+  const authorId = actor.feedbackAuthorId;
+  if (!authorId || authorId === actor.id) {
+    throw new HttpRequestError(403, 'Agent feedback requires a separate author identity.');
+  }
+
+  return { id: authorId, principalId: actor.id, kind: actor.kind };
+}
 
 const rejections: Record<RejectionReason, FeedbackRejectionReason> = {
   invalidText: FeedbackRejectionReason.INVALID_TEXT,
@@ -34,6 +59,7 @@ const rejections: Record<RejectionReason, FeedbackRejectionReason> = {
   forbidden: FeedbackRejectionReason.FORBIDDEN,
   versionChanged: FeedbackRejectionReason.VERSION_CHANGED,
   commandIdReuse: FeedbackRejectionReason.COMMAND_ID_REUSE,
+  attachmentClaimed: FeedbackRejectionReason.ATTACHMENT_CLAIMED,
 };
 
 function requireVersion(version: bigint | undefined): bigint {
@@ -93,6 +119,24 @@ function readTarget(anchor: FeedbackAnchorTarget | undefined): AnchorTarget {
         content: readContent(content),
       };
     }
+    case 'selection': {
+      const { point, bounds, objects, expectedBoardRevision } = target.value;
+      if (!point) {
+        throw new HttpRequestError(400, 'Feedback selection point is required.');
+      }
+
+      return {
+        kind: 'selection',
+        point,
+        bounds,
+        objects: objects.map(({ objectId, geometryVersion, payloadVersion }) => ({
+          objectId: requireId(objectId),
+          geometryVersion: requireVersion(geometryVersion),
+          payloadVersion,
+        })),
+        expectedBoardRevision: requireVersion(expectedBoardRevision),
+      };
+    }
     case undefined:
       throw new HttpRequestError(400, 'Feedback anchor target is required.');
   }
@@ -123,10 +167,25 @@ function readOperation(operation: ApplyFeedbackRequest['operation']): FeedbackOp
     case 'resolve':
     case 'reopen':
     case 'delete':
+    case 'requestAttachment':
       return {
         kind: operation.case,
         threadId: requireId(operation.value.threadId),
         expectedThreadVersion: requireVersion(operation.value.expectedThreadVersion),
+      };
+    case 'claimAttachment':
+    case 'resetAttachmentClaim':
+      return {
+        kind: operation.case,
+        threadId: requireId(operation.value.threadId),
+        requestId: requireId(operation.value.requestId),
+      };
+    case 'confirmAttachment':
+      return {
+        kind: operation.case,
+        threadId: requireId(operation.value.threadId),
+        requestId: requireId(operation.value.requestId),
+        claimId: requireId(operation.value.claimId),
       };
     case undefined:
       throw new HttpRequestError(400, 'Feedback operation is required.');
@@ -163,11 +222,26 @@ function writeContent(
 }
 
 function writeAnchor(anchor: FeedbackAnchor): MessageInitShape<typeof FeedbackAnchorSchema> {
-  const { target, ...source } = anchor;
+  const { target, frozenTargets, ...data } = anchor;
+  const source = { ...data, frozenTargets: frozenTargets ? [...frozenTargets] : [] };
   if (target.kind === 'board') {
     return {
       ...source,
       target: { target: { case: 'boardPoint', value: target.point } },
+    };
+  }
+
+  if (target.kind === 'selection') {
+    const { point, bounds, objects, expectedBoardRevision } = target;
+
+    return {
+      ...source,
+      target: {
+        target: {
+          case: 'selection',
+          value: { point, bounds, objects: [...objects], expectedBoardRevision },
+        },
+      },
     };
   }
 
@@ -198,8 +272,15 @@ function writeAnchor(anchor: FeedbackAnchor): MessageInitShape<typeof FeedbackAn
 }
 
 function writeThread(thread: FeedbackThreadView): MessageInitShape<typeof FeedbackThreadSchema> {
+  const attachments = {
+    pending: FeedbackAttachmentState.PENDING,
+    claimed: FeedbackAttachmentState.CLAIMED,
+    attached: FeedbackAttachmentState.ATTACHED,
+  };
+  const { attachment } = thread;
   return {
     ...thread,
+    attachment: attachment && { ...attachment, state: attachments[attachment.state] },
     status: thread.status === 'open' ? FeedbackThreadStatus.OPEN : FeedbackThreadStatus.RESOLVED,
     anchor: writeAnchor(thread.anchor),
   };
@@ -231,31 +312,44 @@ function writeReceipt(receipt: FeedbackReceipt): MessageInitShape<typeof Feedbac
 }
 
 export function createFeedbackRoutes(application: FeedbackApplication): readonly RouteEntry[] {
-  const { listThreads, getThread, applyFeedback, getFeedbackReceipt } = FeedbackService.method;
-
   return [
     unaryRoute(listThreads, (actor, request) => {
-      const { boardId, pageSize, cursor, status, authorActorId, authoredByViewer } = request;
-      const page = application.listThreads(actor, requireId(boardId), {
+      const {
+        boardId,
+        pageSize,
+        cursor,
+        status,
+        authorActorId,
+        authoredByViewer,
+        pendingAttachment,
+      } = request;
+      const author = feedbackActor(actor);
+      const page = application.listThreads(author, requireId(boardId), {
         pageSize,
         cursor,
         status: readStatus(status),
-        authorActorId: authoredByViewer ? actor.id : authorActorId,
+        authorActorId: authoredByViewer ? author.id : authorActorId,
+        pendingAttachment,
       });
 
       return { ...page, threads: page.threads.map(writeThread) };
     }),
     unaryRoute(getThread, (actor, request) => {
       const { boardId, threadId, pageSize, cursor } = request;
-      const page = application.getThread(actor, requireId(boardId), requireId(threadId), {
-        pageSize,
-        cursor,
-      });
+      const page = application.getThread(
+        feedbackActor(actor),
+        requireId(boardId),
+        requireId(threadId),
+        {
+          pageSize,
+          cursor,
+        },
+      );
 
       return { ...page, thread: writeThread(page.thread), replies: [...page.replies] };
     }),
     unaryRoute(applyFeedback, (actor, request) => {
-      const receipt = application.applyFeedback(actor, {
+      const receipt = application.applyFeedback(feedbackActor(actor), {
         boardId: requireId(request.boardId),
         commandId: requireId(request.commandId),
         operation: readOperation(request.operation),
@@ -267,7 +361,12 @@ export function createFeedbackRoutes(application: FeedbackApplication): readonly
       getFeedbackReceipt,
       (actor, request): MessageInitShape<typeof GetFeedbackReceiptResponseSchema> => {
         const commandId = requireId(request.commandId);
-        const receipt = application.getReceipt(actor, requireId(request.boardId), commandId);
+        const receipt = application.getReceipt(
+          feedbackActor(actor),
+          requireId(request.boardId),
+          commandId,
+        );
+
         if (!receipt) {
           return { result: { case: 'notRecorded', value: { commandId } } };
         }

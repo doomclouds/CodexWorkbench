@@ -173,13 +173,39 @@ const permitted = [
     `import { BoardSuggestionService } from '${suggestionsProtocol}';\nimport { createWhiteboardServer } from '../../src/bootstrap/index.js';`,
   ],
   [
-    'src/entrypoints/mcp/index.ts',
+    'src/entrypoints/mcp/artifact-list.ts',
     `import { BoardCatalogService, BoardSortOrder } from '${catalogProtocol}';`,
   ],
   ['src/entrypoints/mcp/agent-activity.ts', `import { BoardRoomService } from '${roomsProtocol}';`],
+  ['src/entrypoints/mcp/panel-view.ts', `import { McpPanelViewService } from '${roomsProtocol}';`],
+  [
+    'src/entrypoints/mcp/artifact-context.ts',
+    `import { BoardHistoryService } from '${historyProtocol}';\nimport { FeedbackService } from '${feedbackProtocol}';`,
+  ],
   [
     'tests/integration/mcp-agent-activity.test.ts',
     `import { createStudioMcpServer } from '../../src/entrypoints/mcp/index.js';\nimport { Client } from '${mcpClientSdk}';\nimport { InMemoryTransport } from '${mcpTestTransport}';`,
+  ],
+  [
+    'tests/integration/mcp-artifact-context.test.ts',
+    `import { createStudioMcpServer } from '../../src/entrypoints/mcp/index.js';\nimport { Client } from '${mcpClientSdk}';\nimport { InMemoryTransport } from '${mcpTestTransport}';`,
+  ],
+  [
+    'tests/integration/mcp-artifact-list.test.ts',
+    `import { createStudioMcpServer } from '../../src/entrypoints/mcp/index.js';\nimport { Client } from '${mcpClientSdk}';\nimport { InMemoryTransport } from '${mcpTestTransport}';`,
+  ],
+  [
+    'src/entrypoints/mcp/artifact-read-data.ts',
+    `import { BoardHistoryService } from '${historyProtocol}';\nimport { FeedbackService } from '${feedbackProtocol}';\nimport { BoardArchiveService } from '@codexworkbench/luming-studio-ii-contracts/archives/service';`,
+  ],
+  ['src/entrypoints/mcp/artifact-context-content.ts', "import { parse } from 'parse5';"],
+  [
+    'src/entrypoints/mcp/artifact-read-search.ts',
+    "import { parse } from 'parse5';\nimport { parseRichText } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/rich-text';",
+  ],
+  [
+    'tests/integration/mcp-artifact-read.test.ts',
+    `import { Client } from '${mcpClientSdk}';\nimport { InMemoryTransport } from '${mcpTestTransport}';`,
   ],
   [
     'src/infrastructure/platform/mcp-runtime.ts',
@@ -283,6 +309,14 @@ const permitted = [
     "import { normalizeTitle } from '../domain/index.js';\nimport type { CatalogWriter } from '../ports/index.js';",
   ],
   [catalogAdapter + 'index.ts', "import { duplicateBoard } from './duplicate-board.js';"],
+  [
+    'src/entrypoints/http/catalog-preferences.ts',
+    `import { BoardCatalogService } from '${catalogProtocol}';\nimport type { CatalogApplication } from '@catalog/application/index.js';`,
+  ],
+  [
+    catalogAdapter + 'workbench-preferences.ts',
+    "import type { WorkbenchPreferences } from '@catalog/ports/index.js';\nimport type { SqliteConnection } from '../../platform/index.js';",
+  ],
   [
     catalogAdapter + 'duplicate-board.ts',
     "import type { CatalogWriter } from '@catalog/ports/index.js';\nimport type { SqliteConnection } from '../../platform/index.js';",
@@ -453,6 +487,11 @@ for (const [file, code] of permitted) {
 
 const rejected = [
   [
+    'the workbench preferences adapter cannot use the wire contract directly',
+    catalogAdapter + 'workbench-preferences.ts',
+    `import { BoardCatalogService } from '${catalogProtocol}';`,
+  ],
+  [
     'the whiteboard application imports shared connector geometry directly',
     whiteboard + 'application/index.ts',
     `import { routeConnector } from '${connectorRoute}';`,
@@ -620,6 +659,11 @@ const rejected = [
   [
     'MCP entrypoint loads catalogue protocol instead of an injected catalogue operation',
     'src/entrypoints/mcp/thread-operations.ts',
+    `import { BoardCatalogService } from '${catalogProtocol}';`,
+  ],
+  [
+    'MCP entrypoint bypasses the artifact list boundary',
+    'src/entrypoints/mcp/index.ts',
     `import { BoardCatalogService } from '${catalogProtocol}';`,
   ],
   [

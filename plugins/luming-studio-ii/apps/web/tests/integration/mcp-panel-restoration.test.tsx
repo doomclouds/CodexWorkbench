@@ -1,8 +1,15 @@
 import { act, type ComponentProps } from 'react';
+import { create, fromBinary, toBinary } from '@bufbuild/protobuf';
+import {
+  BoardCatalogService,
+  type WorkbenchPreferences,
+} from '@codexworkbench/luming-studio-ii-contracts/catalog/service';
 import { expect, test } from 'vitest';
 import { StudioApp } from '../../src/app/index.js';
+import { createWorkbenchPreferencesService } from '../../src/data/catalog/index.js';
 import type { WhiteboardObject, WhiteboardService } from '../../src/data/whiteboard/index.js';
 import { connectMcpApp, type McpViewContext } from '../../src/platform/mcp/index.js';
+import { WhiteboardExportSurface } from '../../src/surfaces/whiteboard-export/index.js';
 import { createControlFixture } from '../support/render-control.js';
 
 type Message = Readonly<Record<string, unknown>>;
@@ -70,19 +77,25 @@ function toolContext(id: string) {
 interface HostOptions {
   readonly modelContext?: Message;
   readonly hostCapabilities?: Message;
+  readonly availableDisplayModes?: readonly string[];
   readonly responseStatus?: number;
-  readonly downloadError?: boolean;
+  readonly downloadError?: boolean | (() => boolean);
   readonly messageError?: boolean;
+  readonly postWorkbenchPreferences?: (input: Message) => Uint8Array | undefined;
 }
 
 function withHost({
   modelContext = { updateId: 'prior-state', structuredContent: savedView },
   hostCapabilities = capabilities,
+  availableDisplayModes,
   responseStatus = 200,
   downloadError = false,
   messageError = false,
+  postWorkbenchPreferences,
 }: HostOptions = {}) {
   const recorder: Message[] = [];
+  const tools: Message[] = [];
+  let initialize: Message | undefined;
   const iframe = document.createElement('iframe');
   document.body.append(iframe);
   const host = iframe.contentWindow;
@@ -102,6 +115,7 @@ function withHost({
 
   host.postMessage = (request: Message) => {
     if (request.method === 'ui/initialize') {
+      initialize = request;
       respond(request, {
         protocolVersion: '2026-01-26',
         hostInfo: { name: 'Fixture', version: '1' },
@@ -109,8 +123,15 @@ function withHost({
         hostContext: {
           toolInfo: toolContext('original-call'),
           'openai/modelContext': modelContext,
+          ...(availableDisplayModes ? { displayMode: 'inline', availableDisplayModes } : {}),
         },
       });
+
+      return;
+    }
+    if (request.method === 'ui/request-display-mode') {
+      recorder.push(request);
+      respond(request, { mode: 'fullscreen' });
 
       return;
     }
@@ -122,7 +143,8 @@ function withHost({
     }
     if (request.method === 'ui/download-file') {
       recorder.push(request);
-      respond(request, { isError: downloadError });
+      const isError = typeof downloadError === 'function' ? downloadError() : downloadError;
+      respond(request, { isError });
 
       return;
     }
@@ -134,9 +156,11 @@ function withHost({
     }
     if (request.method === 'tools/call') {
       const params = request.params as { arguments: Message };
+      tools.push(params.arguments);
+      const payload = postWorkbenchPreferences?.(params.arguments);
       respond(request, {
         structuredContent: { ok: true },
-        _meta: callMetadata(params.arguments.action, responseStatus),
+        _meta: callMetadata(params.arguments.action, responseStatus, payload),
       });
     }
   };
@@ -145,6 +169,8 @@ function withHost({
 
   return {
     recorder,
+    tools,
+    readInitialize: () => initialize,
     notify: (method: string, params: Message) => dispatch({ method, params }),
     dispose() {
       window.parent = parent;
@@ -153,12 +179,19 @@ function withHost({
   };
 }
 
-function callMetadata(action: unknown, status: number) {
+function callMetadata(action: unknown, status: number, payload?: Uint8Array) {
   if (action === 'connect') {
     return { session: { id: 'fixture-session', expiresAtMillis: Number.MAX_SAFE_INTEGER } };
   }
   if (action === 'request') {
-    return { response: { status, size: 0, contentType: 'application/protobuf' } };
+    return {
+      response: {
+        status,
+        size: payload?.length ?? 0,
+        contentType: 'application/protobuf',
+        ...(payload ? { body: btoa(String.fromCharCode(...payload)) } : {}),
+      },
+    };
   }
 
   return {};
@@ -179,9 +212,143 @@ async function withBridge(
   }
 }
 
+function workbenchPreferencesFixture() {
+  const { getWorkbenchPreferences: read, updateWorkbenchPreferences: update } =
+    BoardCatalogService.method;
+  let saved: Partial<WorkbenchPreferences> = {};
+
+  return {
+    modelContext: {},
+    postWorkbenchPreferences(input: Message) {
+      switch (input.method) {
+        case read.name:
+          return toBinary(read.output, create(read.output, { preferences: saved }));
+        case update.name: {
+          const bytes = Uint8Array.from(atob(String(input.body)), (value) => value.charCodeAt(0));
+          const { changes } = fromBinary(update.input, bytes);
+          saved = { ...saved, ...changes };
+          return toBinary(update.output, create(update.output));
+        }
+      }
+    },
+    read: () => saved,
+  };
+}
+
+async function renderWorkbench(bridge: Bridge, fixture: ReturnType<typeof createControlFixture>) {
+  const { preferences } = bridge;
+  await preferences.initialize(createWorkbenchPreferencesService(bridge.postProtobuf));
+  await act(async () =>
+    fixture.render(
+      <StudioApp
+        catalog={catalog}
+        service={service}
+        navigation={bridge.navigation}
+        preferences={{ ...preferences.read(), ...preferences }}
+        createCommandId={() => 'command'}
+      />,
+    ),
+  );
+}
+
+function workbenchButton(fixture: ReturnType<typeof createControlFixture>, label: string) {
+  const button = fixture.host.querySelector<HTMLButtonElement>(
+    'button[aria-label="' + label + '"]',
+  );
+
+  if (!button) {
+    throw new Error('Expected workbench control: ' + label);
+  }
+
+  return button;
+}
+
+test('restores the chosen workbench layout, theme and fixed scope in a new MCP panel', async () => {
+  const savedPreferences = workbenchPreferencesFixture();
+  await withBridge(async (bridge) => {
+    const fixture = createControlFixture();
+    try {
+      await renderWorkbench(bridge, fixture);
+      await act(async () => workbenchButton(fixture, '切换为列表视图').click());
+      await act(async () => workbenchButton(fixture, '切换为暗色主题').click());
+      await act(async () => workbenchButton(fixture, '筛选作品').click());
+      const pinned = Array.from(
+        fixture.host.querySelectorAll<HTMLButtonElement>('[role=menuitemradio]'),
+      ).find((button) => button.textContent === '已固定');
+      expect(pinned).toBeDefined();
+      await act(async () => pinned?.click());
+    } finally {
+      fixture.dispose();
+    }
+  }, savedPreferences);
+  expect(savedPreferences.read()).toMatchObject({
+    layout: 'list',
+    theme: 'dark',
+    pinnedOnly: true,
+  });
+
+  await withBridge(async (bridge, host) => {
+    const fixture = createControlFixture();
+    try {
+      await renderWorkbench(bridge, fixture);
+      expect(workbenchButton(fixture, '切换为卡片视图')).toBeTruthy();
+      expect(workbenchButton(fixture, '切换为明亮主题')).toBeTruthy();
+      expect(fixture.host.querySelector('h1')?.textContent).toBe('已固定');
+      await act(async () =>
+        host.notify('ui/notifications/host-context-changed', { theme: 'light' }),
+      );
+      expect(workbenchButton(fixture, '切换为明亮主题')).toBeTruthy();
+      expect(fixture.host.querySelector('[aria-label="搜索作品名称"]')).toBeNull();
+    } finally {
+      fixture.dispose();
+    }
+  }, savedPreferences);
+});
+
+test('retains the MCP transport across a browser page-cache round trip', async () => {
+  await withBridge(async (bridge, host) => {
+    window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
+    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+    await expect(bridge.postProtobuf(boardScenePath, new Uint8Array())).resolves.toEqual(
+      new Uint8Array(),
+    );
+    expect(host.tools.some(({ action }) => action === 'close')).toBe(false);
+  });
+});
+
+test('advertises its bundled icon and opens fullscreen when the conversation host offers it', async () => {
+  const icon = document.createElement('link');
+  icon.rel = 'icon';
+  icon.href = 'data:image/png;base64,iVBORw0KGgo=';
+  document.head.append(icon);
+
+  try {
+    await withBridge(
+      async (_bridge, host) => {
+        expect(host.readInitialize()).toMatchObject({
+          method: 'ui/initialize',
+          params: {
+            appInfo: {
+              name: 'Luming Studio II',
+              title: '鹿鸣 · Luming Studio II',
+              icons: [{ src: icon.href, mimeType: 'image/png', sizes: ['64x64'] }],
+            },
+          },
+        });
+        await expect
+          .poll(() => host.recorder)
+          .toMatchObject([{ method: 'ui/request-display-mode', params: { mode: 'fullscreen' } }]);
+      },
+      { availableDisplayModes: ['inline', 'fullscreen'] },
+    );
+  } finally {
+    icon.remove();
+  }
+});
+
 const downloadFile = {
   filename: '发布白板.svg',
-  mimeType: 'image/svg+xml',
+  mimeType: 'image/svg+xml' as const,
   content: new TextEncoder().encode('<svg/>'),
 };
 
@@ -191,6 +358,8 @@ const feedbackReference = {
   sourceId: 'source-1',
   comment: '把节点移到标题下方',
   excerpt: '节点原文',
+  targetLabel: '图形 A',
+  selectedTargets: [{ objectId: cardId, kind: 'shape', label: '图形 A' }],
   capturedBoardRevision: 2n,
   targetsBoardRevision: 5n,
   targets: [{ objectId: cardId, kind: 'shape', geometryVersion: 3n, payloadVersion: 4n }],
@@ -214,7 +383,19 @@ test('attaches only the chosen note as an unsent draft in the active Codex conve
       await attach(feedbackReference);
 
       const context = {
-        ...feedbackReference,
+        boardId,
+        feedbackThreadId: feedbackReference.feedbackThreadId,
+        sourceId: feedbackReference.sourceId,
+        sourceRef: {
+          kind: 'feedback',
+          boardId,
+          feedbackThreadId: feedbackReference.feedbackThreadId,
+        },
+        read: { boardId, mode: 'context', feedbackId: feedbackReference.feedbackThreadId },
+        comment: feedbackReference.comment,
+        excerpt: feedbackReference.excerpt,
+        targetLabel: feedbackReference.targetLabel,
+        selectedTargets: feedbackReference.selectedTargets,
         capturedBoardRevision: '2',
         targetsBoardRevision: '5',
         targets: [{ objectId: cardId, kind: 'shape', geometryVersion: '3', payloadVersion: '4' }],
@@ -233,7 +414,7 @@ test('attaches only the chosen note as an unsent draft in the active Codex conve
                   JSON.stringify(context),
                   '以用户在当前对话中发送的任务为准。',
                 ].join('\n'),
-                _meta: { 'openai/title': '白板备注' },
+                _meta: { 'openai/title': '白板备注 · 图形 A' },
               },
             ],
           },
@@ -302,6 +483,7 @@ test('hands board bytes to the declared host download capability and reports acc
 
 test('reports unavailable host downloads and propagates a cancelled or rejected request', async () => {
   await withBridge(async (bridge, host) => {
+    expect(bridge.downloadFile.confirmation).toBeUndefined();
     await expect(bridge.downloadFile(downloadFile)).resolves.toMatchObject({ kind: 'unavailable' });
     expect(host.recorder).toHaveLength(0);
   });
@@ -311,6 +493,81 @@ test('reports unavailable host downloads and propagates a cancelled or rejected 
       await expect(bridge.downloadFile(downloadFile)).rejects.toThrow('宿主未完成下载');
     },
     { hostCapabilities: { ...capabilities, downloadFile: {} }, downloadError: true },
+  );
+});
+
+test('uses only the host confirmation and retries the same prepared bytes after cancellation', async () => {
+  let cancelled = true;
+  await withBridge(
+    async (bridge, host) => {
+      expect(bridge.downloadFile.confirmation).toBe('host');
+      const fixture = createControlFixture();
+      let preparations = 0;
+      try {
+        fixture.render(
+          <WhiteboardExportSurface
+            anchor={null}
+            inline
+            context={{ boardId, title: '发布白板', revision: 0n, selectedIds: [] }}
+            exportBoard={async () => {
+              preparations += 1;
+              return { kind: 'file', file: { ...downloadFile, revision: 0n } };
+            }}
+            download={bridge.downloadFile}
+            onRequestClose={() => undefined}
+          />,
+        );
+        const svg = fixture.host.querySelector<HTMLButtonElement>('button[aria-label="SVG 图片"]');
+        if (!svg) {
+          throw new Error('Expected the SVG export action.');
+        }
+
+        await act(async () => {
+          svg.click();
+          svg.click();
+        });
+        expect(fixture.host.querySelector('dialog')).toBeNull();
+        expect(preparations).toBe(1);
+        expect(host.recorder).toHaveLength(1);
+        expect(host.recorder[0]?.method).toBe('ui/download-file');
+        expect(fixture.host.textContent).toContain('宿主未完成下载');
+        expect(fixture.host.textContent).not.toContain('已发起下载');
+
+        const retry = [...fixture.host.querySelectorAll('button')].find(
+          (button) => button.textContent === '重试下载',
+        );
+
+        if (!retry) {
+          throw new Error('The export did not offer a download retry.');
+        }
+
+        cancelled = false;
+        await act(async () => {
+          retry.click();
+          retry.click();
+        });
+        expect(preparations).toBe(1);
+        expect(host.recorder).toHaveLength(2);
+        expect(host.recorder[1]?.params).toEqual(host.recorder[0]?.params);
+        expect(fixture.host.querySelector('dialog')).toBeNull();
+        expect(fixture.host.textContent).not.toContain('宿主未完成下载');
+      } finally {
+        fixture.dispose();
+      }
+    },
+    { hostCapabilities: { ...capabilities, downloadFile: {} }, downloadError: () => cancelled },
+  );
+});
+
+test('does not request a host confirmation for an empty download', async () => {
+  await withBridge(
+    async (bridge, host) => {
+      await expect(
+        bridge.downloadFile({ ...downloadFile, content: new Uint8Array() }),
+      ).rejects.toThrow('导出文件为空');
+      expect(host.recorder).toHaveLength(0);
+    },
+    { hostCapabilities: { ...capabilities, downloadFile: {} } },
   );
 });
 
@@ -359,7 +616,7 @@ test('restores a permitted board, current selection, camera and object focus aft
       expect(host.recorder[0]?.params).toMatchObject({
         structuredContent: {
           boardId,
-          viewId: savedView.viewId,
+          viewId: expect.stringMatching(/^[a-f0-9]{32}$/u),
           selectedIds: [cardId],
           viewport: camera,
           focusedObjectId: cardId,
@@ -390,6 +647,41 @@ test('restores a permitted board, current selection, camera and object focus aft
     } finally {
       fixture.dispose();
     }
+  });
+});
+
+test('publishes the current canvas through its panel lease and clears it on returning to workbench', async () => {
+  await withBridge(async (bridge, host) => {
+    const original = { boardId, selectedIds: [cardId], viewport: camera, focusedObjectId: cardId };
+    bridge.updateViewContext(original);
+    await expect
+      .poll(() => host.tools.find(({ action }) => action === 'view'))
+      .toMatchObject({
+        action: 'view',
+        sessionId: 'fixture-session',
+        viewId: expect.stringMatching(/^[a-f0-9]{32}$/u),
+        sequence: 1,
+        state: { ...original, selectedCount: 1 },
+      });
+    const sent = host.tools.find(({ action }) => action === 'view');
+    expect(sent?.viewId).not.toBe(savedView.viewId);
+    expect(host.recorder[0]?.params).toMatchObject({
+      structuredContent: { boardId, viewId: sent?.viewId },
+    });
+
+    bridge.navigation.write({ kind: 'workbench' });
+    bridge.updateViewContext(undefined);
+    await expect
+      .poll(() => host.tools.at(-1))
+      .toMatchObject({
+        action: 'view',
+        sessionId: 'fixture-session',
+        viewId: sent?.viewId,
+        sequence: 2,
+      });
+    expect(host.tools.at(-1)?.state).toBeUndefined();
+    await bridge.close();
+    expect(host.tools.at(-1)).toMatchObject({ action: 'close', sessionId: 'fixture-session' });
   });
 });
 

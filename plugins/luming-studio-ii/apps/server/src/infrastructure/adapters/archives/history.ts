@@ -37,6 +37,7 @@ export interface ArchiveHistorySnapshot {
     | 'trash'
     | 'restoreTrash';
   readonly actorId?: string;
+  readonly agentName?: string;
   readonly savedAtMillis?: number;
   readonly sourceRevision?: bigint;
   readonly changedObjectCount: number;

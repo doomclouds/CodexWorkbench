@@ -84,6 +84,44 @@ test('expires presence, rejects late duplicates and accepts a fresh same-view he
   application.close();
 });
 
+test('removes only the last closed stream for a view and rejects its in-flight heartbeat', () => {
+  const { application, events } = fixture();
+  const secondTab = { ...peer, viewId: 'tab-2' };
+  const listener = () => ({ deliver: () => undefined, close: () => undefined });
+  const first = application.subscribeAfter(boardId, peer, undefined, listener(), 'stream');
+  const replacement = application.subscribeAfter(boardId, peer, undefined, listener(), 'stream');
+  const other = application.subscribeAfter(boardId, secondTab, undefined, listener(), 'stream');
+  const wait = application.subscribeAfter(boardId, secondTab, undefined, listener());
+  const sample = { viewId: peer.viewId, sequence: 1n, following: false };
+  expect(application.publishPresence(boardId, peer.actorId, sample)).toBe(true);
+  expect(
+    application.publishPresence(boardId, peer.actorId, { ...sample, viewId: secondTab.viewId }),
+  ).toBe(true);
+
+  wait.release();
+  first.release();
+  expect(events).toHaveLength(2);
+  replacement.release();
+  expect(events[2]?.payload).toMatchObject({
+    kind: 'participants',
+    changes: { removals: [peer], upserts: [] },
+  });
+  expect(application.onlineActorIds(boardId)).toEqual(new Set([peer.actorId]));
+
+  const next = { ...sample, sequence: 2n };
+  expect(application.publishPresence(boardId, peer.actorId, next)).toBe(false);
+  const reconnected = application.subscribeAfter(boardId, peer, undefined, listener(), 'stream');
+  first.release();
+  expect(application.publishPresence(boardId, peer.actorId, sample)).toBe(false);
+  expect(application.publishPresence(boardId, peer.actorId, next)).toBe(true);
+  reconnected.release();
+  expect(application.onlineActorIds(boardId)).toEqual(new Set([peer.actorId]));
+  other.release();
+  expect(application.onlineActorIds(boardId)).toEqual(new Set());
+
+  application.close();
+});
+
 test('replaces the editing targets with each accepted presence sample without a durable write', () => {
   const { application, advance, events } = fixture();
   const sample = {

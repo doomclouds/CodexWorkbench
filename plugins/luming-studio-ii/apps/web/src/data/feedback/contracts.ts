@@ -29,10 +29,25 @@ export interface FeedbackContentTarget extends FeedbackObjectPosition {
   readonly content: FeedbackContentUnit;
 }
 
+export interface FeedbackSourceObject {
+  readonly objectId: string;
+  readonly geometryVersion: bigint;
+  readonly payloadVersion?: bigint;
+}
+
+export interface FeedbackSelectionTarget {
+  readonly kind: 'selection';
+  readonly point: FeedbackPoint;
+  readonly bounds?: FeedbackPoint & { readonly width: number; readonly height: number };
+  readonly objects: readonly FeedbackSourceObject[];
+  readonly expectedBoardRevision: bigint;
+}
+
 export type FeedbackTarget =
   | { readonly kind: 'board'; readonly point: FeedbackPoint }
   | FeedbackObjectTarget
-  | FeedbackContentTarget;
+  | FeedbackContentTarget
+  | FeedbackSelectionTarget;
 
 export interface FrozenFeedbackObject extends FeedbackPoint {
   readonly kind: string;
@@ -47,6 +62,10 @@ export interface FeedbackAnchor {
   readonly sourceRevision: bigint;
   readonly frozenPoint: FeedbackPoint;
   readonly frozenObject?: FrozenFeedbackObject;
+  readonly frozenTargets?: readonly {
+    readonly reference: FeedbackSourceObject;
+    readonly object: FrozenFeedbackObject;
+  }[];
   readonly frozenExcerpt?: string;
   readonly targetMissing: boolean;
 }
@@ -75,6 +94,11 @@ export interface FeedbackThread {
   readonly replyCount: number;
   readonly canResolve: boolean;
   readonly canDelete: boolean;
+  readonly attachment?: {
+    readonly requestId: string;
+    readonly state: 'pending' | 'claimed' | 'attached';
+    readonly threadVersion: bigint;
+  };
 }
 
 export interface FeedbackPage<T> {
@@ -97,6 +121,7 @@ export interface FeedbackListRequest extends FeedbackPageRequest {
   readonly status?: FeedbackStatus;
   readonly authorId?: string;
   readonly authoredByViewer?: boolean;
+  readonly pendingAttachment?: boolean;
 }
 
 export interface FeedbackThreadRequest extends FeedbackPageRequest {
@@ -106,6 +131,22 @@ export interface FeedbackThreadRequest extends FeedbackPageRequest {
 export type FeedbackOperation =
   | { readonly kind: 'create'; readonly anchor: FeedbackTarget; readonly text: string }
   | { readonly kind: 'reply'; readonly threadId: string; readonly text: string }
+  | {
+      readonly kind: 'requestAttachment';
+      readonly threadId: string;
+      readonly expectedVersion: bigint;
+    }
+  | {
+      readonly kind: 'claimAttachment' | 'resetAttachmentClaim';
+      readonly threadId: string;
+      readonly requestId: string;
+    }
+  | {
+      readonly kind: 'confirmAttachment';
+      readonly threadId: string;
+      readonly requestId: string;
+      readonly claimId: string;
+    }
   | {
       readonly kind: 'edit';
       readonly threadId: string;
@@ -132,7 +173,8 @@ export type FeedbackRejection =
   | 'notFound'
   | 'forbidden'
   | 'versionChanged'
-  | 'commandIdReuse';
+  | 'commandIdReuse'
+  | 'attachmentClaimed';
 
 export type FeedbackReceipt =
   | {

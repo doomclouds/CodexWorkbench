@@ -73,7 +73,7 @@ const backupRows = {
     columns: `thread_id, status, source_board_revision, frozen_x, frozen_y,
       object_id, object_u, object_v, object_geometry_version, object_kind, object_label,
       object_x, object_y, object_width, object_height, object_rotation,
-      version, updated_at_millis, reply_count`,
+      version, updated_at_millis, reply_count, selection_json`,
     order: 'thread_id',
   },
   feedback_messages: {
@@ -119,7 +119,7 @@ function readPortableRows(
     );
 }
 
-function readBackupActors(connection: SqliteConnection, boardId: string) {
+export function readBackupActors(connection: SqliteConnection, boardId: string) {
   const actors = new Map<string, BoardBackupActor>();
   const local = connection.prepare(`
     SELECT m.actor_id, m.can_edit, l.owner_actor_id
@@ -183,6 +183,29 @@ export function retainBackupGuest(
       FROM board_sharing_members WHERE board_id = ? AND actor_id = ?
     `)
     .run(boardId, actorId);
+}
+
+export function historyAgentName(actorId: string): string {
+  return 'Agent · ' + actorId.slice(-8);
+}
+
+export function retainBackupAgent(
+  connection: SqliteConnection,
+  boardId: string,
+  actorId: string,
+): void {
+  if (!hasTable(connection, 'board_archive_actors')) {
+    return;
+  }
+
+  connection
+    .prepare(`
+      INSERT INTO board_archive_actors (board_id, actor_id, name, kind, role)
+      VALUES (?, ?, ?, 'agent', 'editor')
+      ON CONFLICT (board_id, actor_id) DO UPDATE SET name = excluded.name, kind = 'agent'
+      WHERE board_archive_actors.kind <> 'agent'
+    `)
+    .run(boardId, actorId, historyAgentName(actorId));
 }
 
 export function readBackupDetails(

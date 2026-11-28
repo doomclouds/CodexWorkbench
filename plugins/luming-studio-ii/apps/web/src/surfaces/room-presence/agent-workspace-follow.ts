@@ -1,4 +1,5 @@
-import type { BoardRoomAgentWorkspace } from '../../data/rooms/index.js';
+import type { BoardRoomAgentWorkspace, BoardRoomGestureGeometry } from '../../data/rooms/index.js';
+import type { AgentWorkspaceView } from './agent-workspace-view.js';
 import type { RoomPresenceCamera, RoomPresenceViewport } from './follow.js';
 
 type WorkspaceArea = BoardRoomAgentWorkspace['areas'][number];
@@ -17,6 +18,66 @@ export interface AgentWorkspaceFollowFrame {
 const minimumFitZoom = 0.1;
 const maximumFitZoom = 1;
 const maximumMargin = 48;
+const declaredAreaId = '@area';
+
+function objectBounds({
+  x,
+  y,
+  width,
+  height,
+  rotation,
+}: BoardRoomGestureGeometry): WorkspaceBounds {
+  const angle = (rotation * Math.PI) / 180;
+  const sine = Math.abs(Math.sin(angle));
+  const cosine = Math.abs(Math.cos(angle));
+  const wrappedWidth = Math.max(1, cosine * width + sine * height);
+  const wrappedHeight = Math.max(1, sine * width + cosine * height);
+
+  return {
+    x: x + (width - wrappedWidth) / 2,
+    y: y + (height - wrappedHeight) / 2,
+    width: wrappedWidth,
+    height: wrappedHeight,
+  };
+}
+
+function contains(outer: WorkspaceBounds, inner: WorkspaceBounds) {
+  const epsilon = 1e-6;
+  return (
+    inner.x >= outer.x - epsilon &&
+    inner.y >= outer.y - epsilon &&
+    inner.x + inner.width <= outer.x + outer.width + epsilon &&
+    inner.y + inner.height <= outer.y + outer.height + epsilon
+  );
+}
+
+export function projectWorkspaceGeometry(
+  workspaces: readonly AgentWorkspaceView[],
+  objects: ReadonlyMap<string, BoardRoomGestureGeometry> | undefined,
+) {
+  if (!objects) {
+    return workspaces;
+  }
+
+  return workspaces.map((workspace) => {
+    const declared = workspace.areas.find(({ id }) => id === declaredAreaId);
+    const areas = workspace.areas.flatMap((area) => {
+      if (area === declared) {
+        return [area];
+      }
+
+      const object = objects.get(area.id);
+      if (!object) {
+        return [];
+      }
+
+      const bounds = objectBounds(object);
+      return !declared || contains(declared.bounds, bounds) ? [{ ...area, bounds }] : [];
+    });
+
+    return { ...workspace, areas };
+  });
+}
 
 function followAreas(workspaces: readonly BoardRoomAgentWorkspace[]): readonly FollowArea[] {
   return workspaces.flatMap(({ agentId, taskId, generation, areas }) =>

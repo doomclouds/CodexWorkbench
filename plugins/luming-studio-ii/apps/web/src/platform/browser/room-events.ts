@@ -83,4 +83,42 @@ export const boardRoomClock = {
 
     return () => window.clearTimeout(timer);
   },
+  scheduleFrame(task: (time: number) => void) {
+    const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (reducedMotion !== false || !window.requestAnimationFrame) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(task);
+
+    return () => window.cancelAnimationFrame(frame);
+  },
 };
+
+export function observeBoardRoomVisibility(listener: (visible: boolean) => void) {
+  let pageHidden = false;
+  function sync() {
+    listener(!pageHidden && document.visibilityState !== 'hidden');
+  }
+
+  function hide() {
+    pageHidden = true;
+    sync();
+  }
+
+  function restore() {
+    pageHidden = false;
+    sync();
+  }
+
+  document.addEventListener('visibilitychange', sync);
+  window.addEventListener('pagehide', hide, true);
+  window.addEventListener('pageshow', restore);
+  sync();
+
+  return () => {
+    document.removeEventListener('visibilitychange', sync);
+    window.removeEventListener('pagehide', hide, true);
+    window.removeEventListener('pageshow', restore);
+  };
+}

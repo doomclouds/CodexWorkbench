@@ -29,5 +29,6 @@ export interface WhiteboardHistorySurfaceProps {
   readonly onRestored: (receipt: BoardEditReceipt) => void;
   readonly download: RequestBoardDownload;
   readonly renderPreview: (frame: BoardHistoryPreviewFrame) => ReactNode;
+  readonly colorForAuthor?: (actorId: string) => string;
   readonly onPreviewChange?: (active: boolean) => void;
 }

@@ -605,16 +605,126 @@ test('authorizes Agent activity separately from viewing and exposes only the sco
     case: 'ended',
     value: { generation, reason: AgentActivityEndReason.RELEASED },
   });
+  const current = await callWhiteboard(server.owner, owner, getBoardRoom, { boardId });
+  expect(current.event?.payload).toMatchObject({
+    case: 'snapshot',
+    value: {
+      agentWorkspaces: [
+        {
+          generation,
+          endReason: AgentActivityEndReason.RELEASED,
+          areas: [{ id: '@area', active: false }],
+        },
+      ],
+      boardRevision: 0n,
+    },
+  });
 
   const late = await callWhiteboard(server.owner, agentActor, changeAgentActivity, begin);
   expect(late.result).toEqual({
     case: 'rejected',
     value: AgentActivityRejection.WORKSPACE_RELEASED,
   });
-  const current = await callWhiteboard(server.owner, owner, getBoardRoom, { boardId });
-  expect(current.event?.payload).toMatchObject({
+});
+
+test('keeps idle Agents in the room roster and pushes only the disconnected Agent out', async () => {
+  const boardId = await board('Agent online roster');
+  const agentActor = agentPrincipalPrefix + owner;
+  const original = {
+    boardId,
+    agentId: 'agent-first',
+    taskId: 'scope',
+  };
+  async function begin(agentId: string, x: number) {
+    const { result } = await callWhiteboard(server.owner, agentActor, changeAgentActivity, {
+      ...original,
+      agentId,
+      action: {
+        case: 'begin',
+        value: {
+          label: agentId,
+          scope: { target: { case: 'area', value: { x, y: 100, width: 100, height: 100 } } },
+        },
+      },
+    });
+    assert.ok(result.case === 'workspace');
+
+    return result.value.generation;
+  }
+  const generation = await begin(original.agentId, 0);
+  await begin('agent-second', 500);
+  await callWhiteboard(server.owner, agentActor, changeAgentActivity, {
+    ...original,
+    action: { case: 'end', value: { generation } },
+  });
+  const { event } = await callWhiteboard(server.owner, owner, getBoardRoom, { boardId });
+  assert.ok(event?.payload.case === 'snapshot');
+  expect(event.payload.value.onlineAgents?.agentIds).toEqual([original.agentId, 'agent-second']);
+  const disconnect = {
+    agentId: original.agentId,
+    action: { case: 'disconnect' as const, value: {} },
+  };
+  expect(
+    (await sendWhiteboardRequest(server.owner, owner, changeAgentActivity, disconnect)).status,
+  ).toBe(403);
+  expect(
+    (await callWhiteboard(server.owner, agentActor, changeAgentActivity, disconnect)).result.case,
+  ).toBe('disconnected');
+  const wait = BoardRoomService.method.waitBoardRoomEvents;
+  const { events } = await callWhiteboard(server.owner, owner, wait, {
+    boardId,
+    viewId: 'owner-view',
+    after: { roomInstanceId: event.roomInstanceId, sequence: event.sequence },
+  });
+  expect(events.map(({ payload }) => payload)).toContainEqual(
+    expect.objectContaining({
+      case: 'agentWorkspaces',
+      value: expect.objectContaining({
+        onlineAgents: expect.objectContaining({ agentIds: ['agent-second'] }),
+      }),
+    }),
+  );
+});
+
+test('accepts protected Agent read presence without granting a workspace', async () => {
+  const boardId = await board('Agent read presence');
+  const actor = agentPrincipalPrefix + owner;
+  const agentId = 'agent-reader';
+  const input = {
+    boardId,
+    agentId,
+    action: { case: 'readPresence' as const, value: { activityId: 'read-one', reading: true } },
+  };
+  expect(
+    (await sendWhiteboardRequest(server.owner, owner, changeAgentActivity, input)).status,
+  ).toBe(403);
+  expect(
+    (
+      await sendWhiteboardRequest(
+        server.owner,
+        agentPrincipalPrefix + stranger,
+        changeAgentActivity,
+        input,
+      )
+    ).status,
+  ).toBe(403);
+  await callWhiteboard(server.owner, actor, changeAgentActivity, input);
+  const reading = await callWhiteboard(server.owner, owner, getBoardRoom, { boardId });
+  expect(reading.event?.payload).toMatchObject({
     case: 'snapshot',
-    value: { agentWorkspaces: [], boardRevision: 0n },
+    value: {
+      agentWorkspaces: [],
+      onlineAgents: { agentIds: [agentId], readingAgentIds: [agentId] },
+    },
+  });
+  await callWhiteboard(server.owner, actor, changeAgentActivity, {
+    ...input,
+    action: { ...input.action, value: { ...input.action.value, reading: false } },
+  });
+  const idle = await callWhiteboard(server.owner, owner, getBoardRoom, { boardId });
+  expect(idle.event?.payload).toMatchObject({
+    case: 'snapshot',
+    value: { agentWorkspaces: [], onlineAgents: { agentIds: [agentId], readingAgentIds: [] } },
   });
 });
 

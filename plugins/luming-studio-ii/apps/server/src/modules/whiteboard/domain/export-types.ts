@@ -8,6 +8,18 @@ export type BoardExportScope =
   | { readonly kind: 'whole' }
   | { readonly kind: 'selection'; readonly objectIds: readonly string[] };
 
+export interface BoardExportRectangle {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+export interface PngExportOptions {
+  readonly rectangle?: BoardExportRectangle;
+  readonly scale?: number;
+}
+
 export interface ExportBoardCommand {
   readonly boardId: string;
   readonly expectedRevision: bigint;
@@ -15,7 +27,7 @@ export interface ExportBoardCommand {
   readonly format: 'json' | 'svg' | 'html' | 'html-source';
 }
 
-export interface ExportRenderCommand extends Omit<ExportBoardCommand, 'format'> {
+export interface ExportRenderCommand extends Omit<ExportBoardCommand, 'format'>, PngExportOptions {
   readonly format: ExportBoardCommand['format'] | 'png';
 }
 

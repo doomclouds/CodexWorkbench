@@ -507,13 +507,16 @@ test("[WB-SAVE-07] 首次放置期间改选，迟到回执保留当前对象与�
   try {
     await button(page, "便签").click();
     const { bounds } = await readCanvas(page, studio);
-    await page.mouse.click(bounds.x + bounds.width * 0.68, bounds.y + bounds.height * 0.52);
+    await page.mouse.click(bounds.x + bounds.width * 0.2, bounds.y + bounds.height * 0.2);
     await fault.observed;
     await expect(page.getByText(/^保存中…?$/u).first()).toBeVisible();
 
     await selectObject(page, studio, shapeB.id);
     const { selection, focused } = await readCanvas(page, studio);
     expect(selection).toBeTruthy();
+    const target = await objectPoint(page, studio, shapeB.id);
+    expect(selection.x + selection.width / 2).toBeCloseTo(target.x, 0);
+    expect(selection.y + selection.height / 2).toBeCloseTo(target.y, 0);
     expect(focused).toBe(true);
     await screenshot(page, testInfo, "selection-during-first-placement");
 
@@ -524,6 +527,7 @@ test("[WB-SAVE-07] 首次放置期间改选，迟到回执保留当前对象与�
     expect(confirmed).toBeDefined();
     await expectVisibleObject(page, studio, confirmed.id);
     expect(await readCanvas(page, studio)).toMatchObject({ selection, focused });
+    await expect(page.getByRole("textbox", { name: "编辑文字", exact: true })).toHaveCount(0);
     await screenshot(page, testInfo, "selection-after-first-placement");
 
     await page.keyboard.press("Delete");

@@ -20,6 +20,7 @@ import {
   changeFingerprint,
   planSuggestionOption,
   suggestionWrittenIds,
+  type SuggestionChangeGuard,
 } from './board-suggestion-plans.js';
 
 type Digest = (input: string) => string;
@@ -336,6 +337,7 @@ interface ReviewOptions {
   readonly decodeEdit: DecodeBoardSuggestionEdit;
   readonly digest: Digest;
   readonly applying: boolean;
+  readonly authorizeChanges?: SuggestionChangeGuard;
 }
 
 export function prepareSuggestionDecision({
@@ -346,6 +348,7 @@ export function prepareSuggestionDecision({
   decodeEdit,
   digest,
   applying,
+  authorizeChanges,
 }: ReviewOptions): SuggestionDecisionPlan {
   const option = proposal.options.find(({ optionId }) => optionId === choice.optionId);
   if (!option) {
@@ -364,14 +367,23 @@ export function prepareSuggestionDecision({
   }
 
   return prepareFromSource(
-    { reader, board, proposal, choice, decodeEdit, digest, applying },
+    { reader, board, proposal, choice, decodeEdit, digest, applying, authorizeChanges },
     new Set(source.objectIds),
     option,
   );
 }
 
 function prepareFromSource(
-  { reader, board, proposal, choice, decodeEdit, digest, applying }: ReviewOptions,
+  {
+    reader,
+    board,
+    proposal,
+    choice,
+    decodeEdit,
+    digest,
+    applying,
+    authorizeChanges,
+  }: ReviewOptions,
   sourceIds: ReadonlySet<string>,
   option: StoredBoardSuggestion['options'][number],
 ): SuggestionDecisionPlan {
@@ -410,6 +422,10 @@ function prepareFromSource(
   );
 
   for (const application of reversed) {
+    if (authorizeChanges?.(working.reader, application.inverse) === false) {
+      return { decision: { kind: 'rejected', reason: 'forbidden' } };
+    }
+
     working.stage(application.inverse);
   }
 
@@ -429,7 +445,7 @@ function prepareFromSource(
   }
 
   return prepareCandidate(
-    { reader, board, proposal, choice, decodeEdit, digest, applying },
+    { reader, board, proposal, choice, decodeEdit, digest, applying, authorizeChanges },
     sourceIds,
     option,
     { working, state, reversed, logicalRevision, restored },
@@ -445,7 +461,7 @@ interface CandidateStage {
 }
 
 function prepareCandidate(
-  { reader, board, choice, decodeEdit, digest }: ReviewOptions,
+  { reader, board, choice, decodeEdit, digest, authorizeChanges }: ReviewOptions,
   sourceIds: ReadonlySet<string>,
   option: StoredBoardSuggestion['options'][number],
   { working, state, reversed, logicalRevision, restored }: CandidateStage,
@@ -457,6 +473,7 @@ function prepareCandidate(
     option,
     sourceIds,
     decodeEdit,
+    authorizeChanges,
   );
 
   if (decision.kind !== 'changes') {

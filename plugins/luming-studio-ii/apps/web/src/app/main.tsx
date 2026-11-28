@@ -27,6 +27,7 @@ import {
   createRoomStreamTransport,
   downloadBoardFile,
   isGuestAccessDenied,
+  observeBoardRoomVisibility,
   postArchive,
   postGuestProtobuf,
   postProtobuf,
@@ -40,6 +41,7 @@ import {
   readStudioGuestEntry,
   readStudioLocation,
   rememberLayout,
+  rememberPinnedOnly,
   rememberTheme,
   renderBrowserVectorExport,
   replaceStudioGuestLocation,
@@ -86,6 +88,7 @@ function roomFactory(service: BoardRoomService) {
       viewId: createCommandId(),
       service,
       clock: boardRoomClock,
+      visibility: observeBoardRoomVisibility,
     });
 }
 
@@ -137,6 +140,12 @@ createRoot(container).render(
       write: writeStudioLocation,
       subscribe: subscribeStudioLocation,
     }}
-    preferences={{ ...readPreferences(), rememberLayout, rememberTheme, subscribeTheme }}
+    preferences={{
+      ...readPreferences(),
+      rememberLayout,
+      rememberPinnedOnly,
+      rememberTheme,
+      subscribeTheme,
+    }}
   />,
 );

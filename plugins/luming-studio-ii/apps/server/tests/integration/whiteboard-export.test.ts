@@ -87,6 +87,37 @@ test('rasterizes native content as a real PNG and exports the same saved histori
   expect(version.result).toEqual(live.result);
 });
 
+test('keeps the world crop in the browser plan and applies scale only to output pixels', async () => {
+  const crop = { x: 104.5, y: 26.25, width: 30.5, height: 25 };
+  const result = await callWhiteboard(server.address, viewerId, exportBoard, {
+    ...request,
+    format: BoardExportFormat.PNG,
+    rectangle: crop,
+    scale: 2,
+  });
+  assert.equal(result.result.case, 'browserPng');
+  expect(result.result.value).toMatchObject({
+    width: 61,
+    height: 50,
+    regions: [{ width: 100, height: 80 }],
+  });
+  const svg = result.result.value.svgTemplate;
+  expect(svg).toContain('width="61" height="50" viewBox="104.5 26.25 30.5 25"');
+  expect(svg).toContain('preserveAspectRatio="none"');
+  expect(svg).not.toContain('translate(300 44)');
+
+  const oversize = await callWhiteboard(server.address, viewerId, exportBoard, {
+    ...request,
+    format: BoardExportFormat.PNG,
+    rectangle: { ...crop, width: 10_000 },
+    scale: 2,
+  });
+  expect(oversize.result).toMatchObject({
+    case: 'rejected',
+    value: { reason: BoardExportRejectionReason.TOO_LARGE },
+  });
+});
+
 test('exports the todo progress, checkbox shapes and task sources in SVG and renders its PNG', async () => {
   const objectId = 'todo-export-card';
   const create = await callWhiteboard(

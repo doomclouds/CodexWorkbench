@@ -14,6 +14,7 @@ export interface FeedbackPageQuery {
 }
 
 export interface FeedbackListQuery extends FeedbackPageQuery {
+  readonly pendingAttachment?: boolean;
   readonly status?: FeedbackThreadStatus;
   readonly authorActorId?: string;
 }

@@ -4,6 +4,7 @@ import type { SQLOutputValue } from 'node:sqlite';
 export { loadGuestWebAssets } from './guest-web-assets.js';
 export { loadMcpRuntime } from './mcp-runtime.js';
 export { createMcpSpool } from './mcp-spool.js';
+export { createMcpFileAccess } from './mcp-files.js';
 export { renderSvgPng, validateSvgUpload } from './png-renderer.js';
 
 export type SqliteConnection = Pick<DatabaseSync, 'exec' | 'prepare'>;

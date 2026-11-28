@@ -21,13 +21,24 @@ export interface McpRestoredView extends Omit<McpViewContext, 'viewport'> {
   readonly viewport?: McpViewport;
 }
 
-type McpViewSummary = Readonly<Record<string, unknown>>;
+type McpViewSummary = Readonly<{
+  appId: string;
+  panelOpen: true;
+  boardId: string | null;
+  viewId: string;
+  selectedIds: readonly string[];
+  selectedCount: number;
+  viewport?: McpViewport;
+  focusedObjectId?: string;
+  returnViewport?: McpViewport;
+}>;
 
 const appId = 'luming-studio-ii';
 const maximumSelectedIds = 40;
 const maximumTextLength = 6 * 1024;
 const maximumCoordinate = 1_000_000_000;
 const contextInterval = 150;
+const refreshInterval = 20_000;
 
 function contextValue(host: OpenAIModelContextHostState | undefined) {
   if (host?.structuredContent) {
@@ -83,6 +94,7 @@ export function createViewPublisher(
   send: (summary: McpViewSummary) => Promise<unknown>,
 ) {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let heartbeat: ReturnType<typeof setTimeout> | undefined;
   let sending = false;
   let stopped = false;
   let latestKey: string | undefined;
@@ -92,7 +104,21 @@ export function createViewPublisher(
     stopped = true;
     pending = undefined;
     clearTimeout(timer);
+    clearTimeout(heartbeat);
     timer = undefined;
+    heartbeat = undefined;
+  }
+
+  function keepAlive(current: McpViewSummary) {
+    if (stopped || pending || !current.boardId) {
+      return;
+    }
+
+    heartbeat = setTimeout(() => {
+      heartbeat = undefined;
+      pending = current;
+      schedule();
+    }, refreshInterval);
   }
 
   function schedule() {
@@ -126,6 +152,7 @@ export function createViewPublisher(
       throw error;
     } finally {
       sending = false;
+      keepAlive(current);
       schedule();
     }
   }
@@ -141,7 +168,7 @@ export function createViewPublisher(
     const viewport = boardId && context ? readViewport(context.viewport) : undefined;
     const focus =
       boardId && isIdentifier(context?.focusedObjectId) ? context.focusedObjectId : undefined;
-    const next = {
+    const next: McpViewSummary = {
       appId,
       panelOpen: true,
       boardId,
@@ -154,6 +181,8 @@ export function createViewPublisher(
     };
     const key = JSON.stringify(next);
     if (key !== latestKey) {
+      clearTimeout(heartbeat);
+      heartbeat = undefined;
       latestKey = key;
       pending = next;
       schedule();

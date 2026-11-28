@@ -34,6 +34,7 @@ const viewer = 'src/surfaces/whiteboard-viewing/WhiteboardViewingSurface.tsx';
 const exportPanel = 'src/surfaces/whiteboard-export/WhiteboardExportSurface.tsx';
 const history = 'src/surfaces/whiteboard-history/WhiteboardHistorySurface.tsx';
 const feedback = 'src/surfaces/whiteboard-feedback/WhiteboardFeedbackSurface.tsx';
+const feedbackPinCluster = 'src/surfaces/whiteboard-feedback/FeedbackPinCluster.tsx';
 const media = 'src/surfaces/whiteboard-media/WhiteboardMediaSurface.tsx';
 const feedbackData = 'src/data/feedback/client.ts';
 const editsProtocol = '@codexworkbench/luming-studio-ii-contracts/whiteboard/edits';
@@ -75,6 +76,7 @@ const actualPages = [
 ].join('\n');
 
 const accepted = [
+  ['src/data/catalog/preferences.ts', `import { BoardCatalogService } from '${catalogProtocol}';`],
   [connectorGeometry, `import { routeConnector } from '${connectorRoute}';`],
   [connectorPath, `import { routeConnector, type ConnectorRouteInput } from '${connectorRoute}';`],
   [
@@ -163,8 +165,14 @@ const accepted = [
   [page, "import { WhiteboardMediaSurface } from '../../surfaces/whiteboard-media/index.js';"],
   [history, "import type { ReadBoardHistory } from '../../data/whiteboard/index.js';"],
   [history, "import { History } from 'lucide-react';"],
+  [
+    'src/surfaces/whiteboard-history/HistoryRecord.tsx',
+    "import type { BoardHistoryVersion } from '../../data/whiteboard/index.js';",
+  ],
   [feedback, "import type { FeedbackClient } from '../../data/feedback/index.js';"],
   [feedback, "import type { CanvasPoint } from '../../ui/domain/canvas/index.js';"],
+  [feedbackPinCluster, "import type { FeedbackThread } from '../../data/feedback/index.js';"],
+  [feedbackPinCluster, "import { FeedbackPopup } from './FeedbackPopup.js';"],
   [media, "import type { AttachBoardImage } from '../../data/whiteboard/index.js';"],
   [media, "import type { AttachBoardVideoCommand } from '../../data/whiteboard/index.js';"],
   [media, 'const video = await prepareVideo(file);'],
@@ -256,6 +264,11 @@ const accepted = [
 ];
 
 const rejected = [
+  [
+    'the workbench preference UI cannot call the generated protocol',
+    workbench,
+    `import { BoardCatalogService } from '${catalogProtocol}';`,
+  ],
   [
     'a whiteboard surface consumes the shared connector geometry directly',
     surface,
@@ -844,6 +857,11 @@ const rejected = [
     "import { createBoardHistory } from '../../data/whiteboard/index.js';",
   ],
   [
+    'history reads author fields from the public view data instead of the generated protocol',
+    'src/surfaces/whiteboard-history/HistoryRecord.tsx',
+    `import type { BoardVersionSummary } from '${historyProtocol}';`,
+  ],
+  [
     'feedback constructs its own service',
     feedback,
     "import { createFeedbackService } from '../../data/feedback/index.js';",
@@ -882,6 +900,16 @@ const rejected = [
     'the feedback surface uses the generated feedback protocol',
     feedback,
     `import { FeedbackService } from '${feedbackProtocol}';`,
+  ],
+  [
+    'the feedback pin cluster constructs its own service',
+    feedbackPinCluster,
+    "import { createFeedbackService } from '../../data/feedback/index.js';",
+  ],
+  [
+    'the feedback pin cluster reads from the platform',
+    feedbackPinCluster,
+    "import { post } from '../../platform/browser/index.js';",
   ],
   [
     'the media surface uses the generated editing protocol',

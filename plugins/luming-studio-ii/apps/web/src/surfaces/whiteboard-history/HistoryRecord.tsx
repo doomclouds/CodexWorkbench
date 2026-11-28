@@ -1,6 +1,8 @@
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { BoardHistoryVersion } from '../../data/whiteboard/index.js';
+import { HistoryAgentAvatar } from './HistoryAgentAvatar.js';
+import { historyAuthorName } from './history-records.js';
 
 interface HistoryRecordProps {
   readonly entry: BoardHistoryVersion;
@@ -31,11 +33,12 @@ export function HistoryRecord({
   controls,
   onToggle,
 }: HistoryRecordProps) {
-  const { revision, savedAtMillis, actorId, kind, changedObjectCount, sourceRevision } = entry;
+  const { revision, savedAtMillis, kind, changedObjectCount, sourceRevision } = entry;
   const boardTitle = (current || kind === 'baseline') && entry.title.trim();
   const savedAt = savedAtMillis === undefined ? undefined : new Date(savedAtMillis);
-  const actor = actorId || (kind === 'baseline' ? '' : '协作者');
+  const actor = historyAuthorName(entry) || (kind === 'baseline' ? '' : '协作者');
   const avatar = actor || boardTitle || '白板';
+  const agent = entry.actorKind === 'agent';
 
   return (
     <article
@@ -50,9 +53,13 @@ export function HistoryRecord({
         aria-expanded={expanded}
         onClick={onToggle}
       >
-        <span className="whiteboard-history__avatar" aria-hidden="true">
-          {avatar.slice(0, 1)}
-        </span>
+        {agent ? (
+          <HistoryAgentAvatar actorId={entry.actorId} />
+        ) : (
+          <span className="whiteboard-history__avatar" aria-hidden="true">
+            {avatar.slice(0, 1)}
+          </span>
+        )}
         <span className="whiteboard-history__record-body">
           <span className="whiteboard-history__record-top">
             {actor && <strong title={actor}>{actor}</strong>}

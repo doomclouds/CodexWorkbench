@@ -1,6 +1,7 @@
 import { toBinary, type MessageInitShape } from '@bufbuild/protobuf';
 import {
   BoardHistoryService,
+  BoardVersionActorKind,
   BoardVersionKind,
   type BoardVersionSummarySchema,
   type ExportBoardVersionResponseSchema,
@@ -13,7 +14,7 @@ import type {
   RestoreBoardVersionCommand,
 } from '../../modules/whiteboard/application/index.js';
 import { toBoardEditReceipt } from './board-edit-receipt.js';
-import { toExportFormat, toExportResponse, toExportScope } from './export-route.js';
+import { toExportOptions, toExportResponse, toExportScope } from './export-route.js';
 import { toPayloadResult } from './payload.js';
 import { HttpRequestError, requireId } from './request.js';
 import type { ObserveEdit } from './room-changes.js';
@@ -50,11 +51,12 @@ function requirePayloadIds(ids: readonly string[]): readonly string[] {
 function toVersionSummary(
   version: BoardVersionSummary,
 ): MessageInitShape<typeof BoardVersionSummarySchema> {
-  const { kind, savedAtMillis, ...summary } = version;
+  const { kind, savedAtMillis, actorKind, ...summary } = version;
 
   return {
     ...summary,
     kind: versionKind[kind],
+    actorKind: actorKind === 'agent' ? BoardVersionActorKind.AGENT : undefined,
     savedAtMillis: savedAtMillis === undefined ? undefined : BigInt(savedAtMillis),
   };
 }
@@ -148,8 +150,7 @@ export function createBoardHistoryRoutes(
       const result = await application.exportVersionFile(actor, {
         boardId: requireId(request.boardId),
         expectedRevision: requireRevision(request.revision),
-        scope: toExportScope(request.scope),
-        format: toExportFormat(request.format),
+        ...toExportOptions(request),
       });
 
       if (result.kind === 'file' || result.kind === 'browserPng') {

@@ -185,9 +185,9 @@ Web 根路径进入工作台。搜索、排序和分页从 `BoardCatalogService`
 
 `BoardCatalogService` 提供 `ListTrashedBoards`、`ManageBoard` 和 `PurgeBoards`。写入校验目录条目版本，通过原命令 ID 查询回执。清空先收齐确认时的作品和版本，每批最多提交 100 项。服务端逐项检查所有者、回收状态和版本，并在 SQLite 事务中保存批次结果。
 
-## 两代产品 E2E
+## Studio II E2E
 
-`e2e/` 按用户流程组织。每组在 `initial` 和 `ii` 两个 Playwright 项目中分别启动仓库内的初代与 Studio II 运行包。每个用例有单独的浏览器上下文、本机端口和临时数据目录。回收站组从工作台入口开始，覆盖浏览、选择、恢复、永久删除、清空和重启验证。
+`e2e/` 按用户流程组织，默认在 `ii` Playwright 项目运行 Studio II 预构建包。每个用例有单独的浏览器上下文、本机端口和临时数据目录。回收站组从工作台入口开始，覆盖浏览、选择、恢复、永久删除、清空和重启验证。
 
 `e2e/support/` 管理运行时、测试数据和截图。用例通过共享夹具创建合成白板，再使用可访问名称操作页面。两代通过同名观测记录实际表现，报告根据观测和测试结果判断一致性。
 
@@ -199,6 +199,14 @@ pnpm --filter @codexworkbench/luming-studio-ii test:e2e recycle-bin
 pnpm --filter @codexworkbench/luming-studio-ii test:e2e workbench
 ```
 
-工作台按浏览与导航、展示与偏好、新建白板、作品管理、复制分享链接和文件导入六个业务区验收。两版分别断言工作台的版本名称，再比较操作和保存结果。导入回执丢失的用例会分别断言初代和 Studio II 的恢复路径，并检查同一归档只导入一份。
+初代可作为显式对照。将 `LUMING_STUDIO_E2E_INITIAL_ROOT` 设为任意可独立运行的初代插件包根路径，包内包含 `runtime/server.mjs`。追加 `--project initial` 单跑初代，追加 `--with-initial` 跑两版。以下是 PowerShell 示例。
+
+```powershell
+$env:LUMING_STUDIO_E2E_INITIAL_ROOT = 'C:/studio-baselines/luming-studio'
+pnpm --filter @codexworkbench/luming-studio-ii test:e2e workbench --project initial
+pnpm --filter @codexworkbench/luming-studio-ii test:e2e workbench --with-initial
+```
+
+工作台按浏览与导航、展示与偏好、新建白板、作品管理、复制分享链接和文件导入六个业务区验收。各版本断言自己的工作台名称、操作和保存结果。导入回执丢失的用例验证各版本的恢复路径，并检查同一归档只导入一份。
 
 指定分组的截图、失败 trace 和 Playwright JSON 写入 `artifacts/luming-studio-ii/v1.0.0/e2e/<分组>/run/`。离线对照报告保存在对应分组的 `report.html`。

@@ -62,7 +62,13 @@ async function openPresenceBoard(
     return guest;
   }
 
-  return { board, addEditor, close: () => probe.close() };
+  return {
+    board,
+    addEditor,
+    openGuestTab: (guest) => probe.openGuestTab(board, guest),
+    guestViews: (name) => probe.guestViews(board, name),
+    close: () => probe.close(),
+  };
 }
 
 function projectPoint(view, point) {
@@ -422,11 +428,27 @@ test("[COLLAB-PRESENCE-06] 分享面板保持打开时更新成员在线和最�
     await expect(online).toBeVisible({ timeout: roomExpiryTimeout });
     await screenshot(page, testInfo, "open-share-member-reconnects");
 
-    await guest.close();
-    await expect(online).toBeHidden({ timeout: roomExpiryTimeout + 5000 });
+    let finalTab = guest;
+    if (studio.edition === "ii") {
+      finalTab = await room.openGuestTab(guest);
+      await expect(finalTab.getByText(sample.label, { exact: true })).toBeVisible();
+      await expect.poll(() => room.guestViews(editorName)).toEqual({ actors: 1, views: 2 });
+      await screenshot(page, testInfo, "open-share-member-two-tabs");
+      await guest.close();
+      await expect
+        .poll(() => room.guestViews(editorName), { timeout: 2500 })
+        .toEqual({ actors: 1, views: 1 });
+      await expect(online).toBeVisible();
+    }
+
+    await finalTab.close();
+    await expect(online).toBeHidden({
+      timeout: studio.edition === "ii" ? 2500 : roomExpiryTimeout + 5000,
+    });
     await expect(offline).toBeVisible();
     await expect(member).toBeVisible();
     await expect(sharing).toBeVisible();
+    await screenshot(page, testInfo, "open-share-member-last-tab-closed");
     await observe(testInfo, "open-share-members-follow-active-session", {
       joinAppears: true,
       networkLossShowsOffline: true,

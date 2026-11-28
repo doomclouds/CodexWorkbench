@@ -90,6 +90,7 @@ export type BoardVersionKind =
 
 export interface BoardVersionCommit {
   readonly actorId: string;
+  readonly actorKind?: 'agent';
   readonly kind: BoardVersionKind;
   readonly savedAtMillis: number;
   readonly sourceRevision?: bigint;
@@ -101,6 +102,8 @@ export interface BoardVersionSummary {
   readonly title: string;
   readonly kind: BoardVersionKind | 'baseline';
   readonly actorId?: string;
+  readonly actorKind?: 'agent';
+  readonly actorName?: string;
   readonly savedAtMillis?: number;
   readonly sourceRevision?: bigint;
   readonly changedObjectCount: number;

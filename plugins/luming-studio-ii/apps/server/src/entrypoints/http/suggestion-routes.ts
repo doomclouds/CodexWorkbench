@@ -7,6 +7,7 @@ import {
   type PreviewBoardSuggestionResponseSchema,
 } from '@codexworkbench/luming-studio-ii-contracts/suggestions/service';
 import type {
+  BoardEditReceipt,
   BoardReviewActor,
   BoardReviewOrigin,
   BoardReviewSource,
@@ -31,6 +32,7 @@ const {
   listBoardSuggestions,
   previewBoardSuggestion,
   acceptBoardSuggestion,
+  chooseAgentBoardSuggestion,
   rejectBoardSuggestion,
 } = BoardSuggestionService.method;
 
@@ -38,6 +40,25 @@ const { editBoardGeometry, editObjectContent } = BoardEditService.method;
 
 export const boardSuggestionSubmitPath =
   '/' + BoardSuggestionService.typeName + '/' + submitBoardSuggestion.name;
+export const agentSuggestionChoosePath =
+  '/' + BoardSuggestionService.typeName + '/' + chooseAgentBoardSuggestion.name;
+
+const agentChoiceIdentifier = /^[A-Za-z0-9_.:-]{1,160}$/u;
+
+function toAgentChoiceReceipt(receipt: BoardEditReceipt) {
+  const { outcome } = receipt;
+  if (outcome.kind === 'rejected') {
+    return toBoardEditReceipt(receipt);
+  }
+  if (outcome.kind === 'conflict') {
+    return toBoardEditReceipt({ ...receipt, outcome: { ...outcome, payloads: undefined } });
+  }
+
+  return toBoardEditReceipt({
+    ...receipt,
+    outcome: { ...outcome, payloads: [], removedPayloadObjectIds: undefined, order: undefined },
+  });
+}
 
 function reviewActor(actor: HttpActor): BoardReviewActor {
   return { id: actor.id, kind: actor.kind ?? 'human' };
@@ -270,6 +291,46 @@ export function createBoardSuggestionRoutes(
       observe?.(receipt);
 
       return { receipt: toBoardEditReceipt(receipt) };
+    }),
+    unaryRoute(chooseAgentBoardSuggestion, (actor, request) => {
+      const {
+        boardId,
+        commandId,
+        proposalId,
+        optionId,
+        expectedProposalVersion,
+        agentId,
+        taskId,
+        generation,
+      } = request;
+      const validBinding = [agentId, taskId, generation].every((value) =>
+        agentChoiceIdentifier.test(value),
+      );
+
+      if (!validBinding || !agentId.startsWith('agent-') || agentId === actor.id) {
+        throw new HttpRequestError(400, 'A current Agent suggestion workspace is required.');
+      }
+
+      const receipt = application.acceptAgent(
+        reviewActor(actor),
+        {
+          boardId: requireId(boardId),
+          commandId: requireId(commandId),
+          proposalId: requireId(proposalId),
+          optionId: requireId(optionId),
+          expectedProposalVersion: compareVersion(expectedProposalVersion),
+          agentId,
+          taskId,
+          generation,
+          signature:
+            'agent-suggestion-choose:' +
+            digest(toBinary(chooseAgentBoardSuggestion.input, request)),
+        },
+        decodeEdit,
+      );
+      observe?.(receipt);
+
+      return { receipt: toAgentChoiceReceipt(receipt) };
     }),
     unaryRoute(rejectBoardSuggestion, (actor, request) => ({
       suggestion: toSuggestion(

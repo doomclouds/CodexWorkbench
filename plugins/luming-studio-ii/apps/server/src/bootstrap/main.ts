@@ -100,8 +100,15 @@ const runtime: ReturnType<typeof createWhiteboardServer> = createWhiteboardServe
     if (matchesToken(supplied, token)) {
       return { id: actorId, kind: 'human' as const };
     }
+
     if (matchesToken(supplied, agentToken)) {
-      return { id: actorId, kind: 'agent' as const };
+      const author = request.headers['x-studio-feedback-agent-id'];
+      const feedbackAuthorId =
+        typeof author === 'string' && /^agent-[A-Za-z0-9_-]{1,128}$/u.test(author)
+          ? author
+          : undefined;
+
+      return { id: actorId, kind: 'agent' as const, feedbackAuthorId };
     }
 
     return undefined;

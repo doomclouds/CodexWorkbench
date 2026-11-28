@@ -6,7 +6,7 @@ const MAX_REQUEST_BYTES = 1024 * 1024;
 
 export class HttpRequestError extends Error {
   constructor(
-    readonly status: 400 | 413,
+    readonly status: 400 | 403 | 409 | 413,
     message: string,
     options?: ErrorOptions,
   ) {

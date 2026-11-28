@@ -25,12 +25,18 @@ interface PresenceSlot {
   readonly updatedAt: number;
   readonly releaseAt: number;
   readonly participant?: Participant;
+  readonly streamCount?: number;
 }
 
 export interface RoomListener {
   readonly deliver: (event: RoomEvent) => void;
   readonly close: () => void;
   readonly recheck?: () => void;
+}
+
+interface PresenceConnection {
+  readonly key: ParticipantKey;
+  readonly now: () => number;
 }
 
 function moved(previous: Participant, next: PresenceInput): boolean {
@@ -51,7 +57,13 @@ function peerKey({ actorId, viewId }: ParticipantKey): string {
 }
 
 function absent(old: PresenceSlot, now: number, sequence = old.sequence): PresenceSlot {
-  return { key: old.key, sequence, updatedAt: now, releaseAt: now + tombstoneTtlMs };
+  return {
+    key: old.key,
+    sequence,
+    updatedAt: now,
+    releaseAt: now + tombstoneTtlMs,
+    streamCount: old.streamCount,
+  };
 }
 
 function acceptUpdate(previous: PresenceSlot, sequence: bigint, now: number): boolean {
@@ -72,6 +84,8 @@ export class RoomMemory {
   private publicSequence = 0n;
   public baselineRevision: bigint;
   public agentWorkspaces: readonly AgentWorkspace[] = [];
+  public onlineAgentIds: readonly string[] = [];
+  public readingAgentIds: readonly string[] = [];
   public feedbackVersion = 0n;
   public suggestionsVersion = 0n;
 
@@ -167,24 +181,65 @@ export class RoomMemory {
     }
   }
 
-  listen(listener: RoomListener, owner = true): (() => void) | undefined {
+  private retainStream(key: ParticipantKey, now: number): boolean {
+    const id = peerKey(key);
+    const previous = this.slots.get(id);
+    if (!previous && this.slots.size >= maxPresenceSlots) {
+      return false;
+    }
+
+    const slot: PresenceSlot = previous ?? { key, sequence: 0n, updatedAt: now, releaseAt: now };
+    this.slots.set(id, { ...slot, streamCount: (slot.streamCount ?? 0) + 1 });
+
+    return true;
+  }
+
+  private releaseStream(key: ParticipantKey, now: number): void {
+    const id = peerKey(key);
+    const previous = this.slots.get(id);
+    if (!previous?.streamCount) {
+      return;
+    }
+
+    if (previous.streamCount > 1) {
+      this.slots.set(id, { ...previous, streamCount: previous.streamCount - 1 });
+      return;
+    }
+
+    this.slots.set(id, { ...absent(previous, now), streamCount: 0 });
+    if (previous.participant) {
+      this.change({ upserts: [], removals: [key] }, now);
+    }
+  }
+
+  listen(
+    listener: RoomListener,
+    owner = true,
+    connection?: PresenceConnection,
+  ): (() => void) | undefined {
     if (this.listeners.size >= maxSubscriptions) {
+      return undefined;
+    }
+    if (connection && !this.retainStream(connection.key, connection.now())) {
       return undefined;
     }
 
     this.listeners.set(listener, owner);
 
     return () => {
-      this.listeners.delete(listener);
+      if (this.listeners.delete(listener) && connection) {
+        this.releaseStream(connection.key, connection.now());
+      }
     };
   }
 
   close(): void {
-    for (const listener of [...this.listeners.keys()]) {
+    const listeners = [...this.listeners.keys()];
+    this.listeners.clear();
+    for (const listener of listeners) {
       listener.close();
     }
 
-    this.listeners.clear();
     this.slots.clear();
     this.pending.length = 0;
   }
@@ -207,7 +262,7 @@ export class RoomMemory {
           this.slots.set(id, absent(slot, now));
           removals.push(slot.key);
         }
-      } else if (slot.releaseAt <= now) {
+      } else if (!slot.streamCount && slot.releaseAt <= now) {
         this.slots.delete(id);
       }
     }
@@ -222,6 +277,9 @@ export class RoomMemory {
     const key = { actorId, viewId: input.viewId };
     const id = peerKey(key);
     const previous = this.slots.get(id);
+    if (previous?.streamCount === 0) {
+      return false;
+    }
     if (previous && !acceptUpdate(previous, input.sequence, now)) {
       return false;
     }
@@ -256,6 +314,7 @@ export class RoomMemory {
       updatedAt: now,
       releaseAt: participant.expiresAtUnixMs + tombstoneTtlMs,
       participant,
+      streamCount: previous?.streamCount,
     });
     this.change({ upserts: [participant], removals: [] }, now);
 
@@ -273,7 +332,10 @@ export class RoomMemory {
       return false;
     }
 
-    this.slots.set(id, { key, sequence, updatedAt: now, releaseAt: now + tombstoneTtlMs });
+    const next = previous
+      ? absent(previous, now, sequence)
+      : { key, sequence, updatedAt: now, releaseAt: now + tombstoneTtlMs };
+    this.slots.set(id, next);
     if (previous?.participant) {
       this.change({ upserts: [], removals: [key] }, now);
     }

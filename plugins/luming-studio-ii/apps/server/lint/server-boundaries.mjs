@@ -202,7 +202,19 @@ const roomsProtocol = '@codexworkbench/luming-studio-ii-contracts/rooms/service'
 const roomStreamRoute = 'src/entrypoints/http/room-event-stream';
 const roomStreamTest = 'tests/integration/room-event-stream.test';
 const mcpActivity = 'src/entrypoints/mcp/agent-activity';
+const mcpContext = 'src/entrypoints/mcp/artifact-context';
 const mcpActivityTest = 'tests/integration/mcp-agent-activity.test';
+const mcpContextTest = 'tests/integration/mcp-artifact-context.test';
+const mcpIntegrationTests = new Set([
+  'tests/integration/board-suggestions.test',
+  mcpActivityTest,
+  mcpContextTest,
+  'tests/integration/mcp-artifact-tools.test',
+  'tests/integration/mcp-artifact-list.test',
+  'tests/integration/mcp-artifact-manage.test',
+  'tests/integration/mcp-artifact-share.test',
+  'tests/integration/mcp-artifact-read.test',
+]);
 const mcpTestLibraries = new Set([
   '@modelcontextprotocol/sdk/client/index.js',
   '@modelcontextprotocol/sdk/inMemory.js',
@@ -216,15 +228,38 @@ const protocols = new Set([
   '@bufbuild/protobuf',
 ]);
 const protocolLayers = new Set(['http', 'mcp', 'contracts', 'integration', 'support']);
+const historyProtocol = protocolPrefix + 'history';
+const feedbackProtocol = '@codexworkbench/luming-studio-ii-contracts/feedback/service';
+const archiveProtocol = '@codexworkbench/luming-studio-ii-contracts/archives/service';
+const sharingProtocol = '@codexworkbench/luming-studio-ii-contracts/sharing/service';
+const suggestionProtocol = '@codexworkbench/luming-studio-ii-contracts/suggestions/service';
+const agentWriteProtocol = '@codexworkbench/luming-studio-ii-contracts/agent-write/service';
+const mcpOperationProtocols = new Map([
+  ['src/entrypoints/mcp/artifact-list', new Set([catalogProtocol])],
+  [mcpActivity, new Set([roomsProtocol])],
+  ['src/entrypoints/mcp/panel-view', new Set([roomsProtocol])],
+  [mcpContext, new Set([historyProtocol, feedbackProtocol])],
+  ['src/entrypoints/mcp/artifact-apply', new Set([agentWriteProtocol])],
+  ['src/entrypoints/mcp/artifact-manage-tool', new Set([catalogProtocol, archiveProtocol])],
+  ['src/entrypoints/mcp/artifact-share-tool', new Set([sharingProtocol])],
+  ['src/entrypoints/mcp/artifact-feedback-input', new Set([feedbackProtocol])],
+  ['src/entrypoints/mcp/artifact-feedback-tool', new Set([feedbackProtocol, suggestionProtocol])],
+  ['src/entrypoints/mcp/artifact-export-tool', new Set([historyProtocol])],
+  [
+    'src/entrypoints/mcp/artifact-read-data',
+    new Set([archiveProtocol, feedbackProtocol, historyProtocol]),
+  ],
+]);
 const httpProtocols = new Set([
   protocolPrefix + 'edits',
-  protocolPrefix + 'history',
+  historyProtocol,
   catalogProtocol,
-  '@codexworkbench/luming-studio-ii-contracts/archives/service',
-  '@codexworkbench/luming-studio-ii-contracts/feedback/service',
-  '@codexworkbench/luming-studio-ii-contracts/sharing/service',
+  archiveProtocol,
+  feedbackProtocol,
+  sharingProtocol,
   roomsProtocol,
-  '@codexworkbench/luming-studio-ii-contracts/suggestions/service',
+  suggestionProtocol,
+  agentWriteProtocol,
 ]);
 const mcpLibraries = new Set([
   '@modelcontextprotocol/sdk/server/mcp.js',
@@ -284,10 +319,22 @@ const privateLibraries = new Map([
   ['@connectrpc/connect-node', new Set([roomStreamRoute, roomStreamTest])],
   ['proper-lockfile', new Set([mcpRuntime])],
   ['@resvg/resvg-wasm', new Set(['src/infrastructure/platform/png-renderer'])],
-  ['parse5', new Set([feedbackAdapters + 'content-source', catalogAdapters + 'thumbnail-html'])],
+  [
+    'parse5',
+    new Set([
+      feedbackAdapters + 'content-source',
+      catalogAdapters + 'thumbnail-html',
+      'src/entrypoints/mcp/artifact-context-content',
+      'src/entrypoints/mcp/artifact-read-search',
+    ]),
+  ],
   [
     protocolPrefix + 'rich-text',
-    new Set([whiteboard + 'domain/export-html-content', whiteboard + 'domain/export-svg-content']),
+    new Set([
+      whiteboard + 'domain/export-html-content',
+      whiteboard + 'domain/export-svg-content',
+      'src/entrypoints/mcp/artifact-read-search',
+    ]),
   ],
   [
     protocolPrefix + 'stickers',
@@ -308,7 +355,7 @@ function allowsLocal(sourceLayer, targetPath, typeOnly, from) {
   if (sourceLayer === targetLayer) {
     return true;
   }
-  if (from === mcpActivityTest && targetPath === entries.get('mcp')) {
+  if (mcpIntegrationTests.has(from) && targetPath === entries.get('mcp')) {
     return true;
   }
   if (!dependencies.get(sourceLayer)?.includes(targetLayer)) {
@@ -323,15 +370,14 @@ function allowsLocal(sourceLayer, targetPath, typeOnly, from) {
 
 function allowsLibrary(layer, specifier, from) {
   if (mcpTestLibraries.has(specifier)) {
-    return from === mcpActivityTest;
+    return mcpIntegrationTests.has(from);
   }
   if (mcpLibraries.has(specifier)) {
     return layer === 'mcp';
   }
   if (httpProtocols.has(specifier)) {
     return layer === 'mcp'
-      ? (specifier === catalogProtocol && from === entries.get('mcp')) ||
-          (specifier === roomsProtocol && from === mcpActivity)
+      ? (mcpOperationProtocols.get(from)?.has(specifier) ?? false)
       : protocolLayers.has(layer);
   }
   if (protocols.has(specifier)) {

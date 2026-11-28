@@ -1,6 +1,7 @@
 import {
   expect,
   observe,
+  readCanvas,
   screenshot,
   seedTopbarAgentWorkspace,
   seedTopbarSuggestion,
@@ -19,6 +20,23 @@ const object = {
 
 function button(page, name) {
   return page.getByRole("button", { name, exact: true });
+}
+
+async function expectAgentRangeCentered(page, studio, objectId) {
+  await expect
+    .poll(async () => {
+      const { bounds, objects } = await readCanvas(page, studio);
+      const area = objects.find(({ id }) => id === objectId);
+      if (!area) {
+        return Infinity;
+      }
+
+      return Math.hypot(
+        area.box.x + area.box.width / 2 - (bounds.x + bounds.width / 2),
+        area.box.y + area.box.height / 2 - (bounds.y + bounds.height / 2),
+      );
+    })
+    .toBeLessThan(3);
 }
 
 test("[TOPBAR-OVERLAY-01] 备注列表中的私人建议可预览和清除，未选方案不修改白板", async ({
@@ -96,8 +114,14 @@ test("[TOPBAR-OVERLAY-02] Agent 工作区出现后可跟随、停止并由房主
     return;
   }
 
-  const label = await seedTopbarAgentWorkspace(studio, board, object.id);
+  const { label, progress, complete, disconnect } = await seedTopbarAgentWorkspace(
+    studio,
+    board,
+    object.id,
+  );
   const presence = button(page, "此刻在这里");
+  const working = page.getByRole("status").filter({ hasText: "准备中 · " + label });
+  await expect(working).toBeVisible();
   await presence.click();
   const panel = page.getByRole("dialog", { name: "此刻在这里", exact: true });
   await expect(panel.getByText("准备中 · " + label, { exact: true })).toBeVisible();
@@ -105,16 +129,53 @@ test("[TOPBAR-OVERLAY-02] Agent 工作区出现后可跟随、停止并由房主
   await screenshot(page, testInfo, "topbar-agent-present");
 
   await button(panel, "跟随 Agent：" + label).click();
-  await expect(page.getByRole("status").filter({ hasText: /正在跟随.*工作区/u })).toBeVisible();
+  const following = page.getByRole("status").filter({ hasText: /正在跟随.*工作区/u });
+  await expect(following).toBeVisible();
+  await expectAgentRangeCentered(page, studio, object.id);
   await screenshot(page, testInfo, "topbar-agent-follow");
-  await button(page, "停止跟随").click();
-  await expect(page.getByRole("status").filter({ hasText: /正在跟随.*工作区/u })).toHaveCount(0);
+
+  await page.setViewportSize({ width: 640, height: 620 });
+  await expectAgentRangeCentered(page, studio, object.id);
+  await screenshot(page, testInfo, "topbar-agent-follow-narrow");
+  const zoom = button(page, "缩放菜单");
+  await zoom.click();
+  const viewMenu = page.getByRole("menu", { name: "缩放与视图", exact: true });
+  await viewMenu.getByRole("menuitem", { name: "75%", exact: true }).click();
+  await expect(zoom).toHaveText("75%");
+  await expect(following).toHaveCount(0);
+  await screenshot(page, testInfo, "topbar-agent-manual-zoom-detaches");
 
   await presence.click();
-  await button(panel, "结束此工作区：" + label).click();
+  await button(panel, "跟随 Agent：" + label).click();
+  await expect(following).toBeVisible();
+  await progress();
+  await expect(page.getByRole("status").filter({ hasText: "修改中 · " + label })).toBeVisible();
+  await button(page, "停止跟随").click();
+  await expect(following).toHaveCount(0);
+
+  await complete();
+  await expect(page.getByRole("status").filter({ hasText: "已完成 · " + label })).toBeVisible();
   await expect(release).toHaveCount(0);
+
+  await seedTopbarAgentWorkspace(studio, board, object.id);
+  const canvasRelease = button(page, "结束此工作区：" + label);
+  await expect(canvasRelease).toBeEnabled();
+  await screenshot(page, testInfo, "topbar-agent-canvas-release");
+  await canvasRelease.click();
+  await expect(release).toHaveCount(0);
+  await expect(
+    page.getByRole("region", { name: "顶栏 Agent 工作区验收", exact: true }),
+  ).toBeFocused();
   await page.reload();
   await expect(page.getByText(object.label, { exact: true })).toBeVisible();
+  await expect(presence).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: label })).toHaveCount(0);
+  await expect(release).toHaveCount(0);
+  await presence.click();
+  await expect(panel.getByText("空闲", { exact: true })).toBeVisible();
+  await expect(button(panel, "跟随 Agent")).toBeDisabled();
+  await screenshot(page, testInfo, "topbar-agent-idle-after-reload");
+  await disconnect();
   await expect(presence).toHaveCount(0);
   await observe(testInfo, "agent-workspace", { followed: true, endedAfterReload: true });
 });

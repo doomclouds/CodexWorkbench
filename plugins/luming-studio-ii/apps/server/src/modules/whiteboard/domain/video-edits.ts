@@ -19,7 +19,7 @@ const maximumDisplayName = 160;
 const maximumVideoBytes = 20 * 1024 * 1024;
 const webmSignature = 0x1a45dfa3;
 
-function inspectVideo(content: Uint8Array) {
+export function inspectVideo(content: Uint8Array) {
   const view = new DataView(content.buffer, content.byteOffset, content.byteLength);
   if (view.byteLength >= 4 && view.getUint32(0) === webmSignature) {
     return isWebmVideo(content) ? 'video/webm' : undefined;

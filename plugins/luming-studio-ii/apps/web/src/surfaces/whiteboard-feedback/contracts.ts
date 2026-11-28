@@ -7,6 +7,7 @@ import type {
 import type {
   BoardFeedbackService,
   FeedbackContentTarget,
+  FeedbackSelectionTarget,
   FeedbackPoint,
 } from '../../data/feedback/index.js';
 
@@ -30,6 +31,7 @@ export interface FeedbackViewport extends FeedbackPoint {
 export interface FeedbackAttachmentRequest {
   readonly boardId: string;
   readonly threadId: string;
+  readonly threadVersion: bigint;
   readonly commandId: string;
   readonly signal: AbortSignal;
 }
@@ -74,6 +76,10 @@ export interface WhiteboardFeedbackSurfaceProps {
     readonly v?: number;
   };
   readonly pointAnnotationRequest?: { readonly sequence: number; readonly point: FeedbackPoint };
+  readonly selectionAnnotationRequest?: {
+    readonly sequence: number;
+    readonly target: FeedbackSelectionTarget;
+  };
   readonly hostPicking?: boolean;
   readonly focusedObjectId?: string;
   readonly contentAnnotationRequest?: {

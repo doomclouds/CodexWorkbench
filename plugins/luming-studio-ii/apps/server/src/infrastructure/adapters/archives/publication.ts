@@ -9,7 +9,11 @@ import {
 } from '../../platform/archives/index.js';
 import type { SqliteConnection } from '../../platform/index.js';
 import { isTrashedBoardOwner, readBoardAccess } from '../authorization/index.js';
-import { writeArchiveHistory, type ArchiveHistoryObject } from './history.js';
+import {
+  writeArchiveHistory,
+  type ArchiveHistoryObject,
+  type ArchiveHistorySnapshot,
+} from './history.js';
 import { prepareArchiveScene, type ValidateNativeObject } from './restore-scene.js';
 import { prepareRestoredMetadata, writeRestoredMetadata } from './restored-metadata.js';
 import { ArchiveObjectError } from './scene.js';
@@ -34,6 +38,20 @@ const webMediaTypes = new Set([
   'audio/wav',
   'audio/webm',
 ]);
+
+function legacyVersionAuthors(history: readonly ArchiveHistorySnapshot[]) {
+  const names = new Map<string, string>();
+  for (const { actorId, agentName } of history) {
+    if (actorId && agentName) {
+      names.set(actorId, agentName);
+    }
+  }
+  if (names.size) {
+    return {
+      actors: Array.from(names, ([id, name]) => ({ id, name, kind: 'agent', role: 'editor' })),
+    };
+  }
+}
 
 export function preparePublication(
   archive: StagedCurrentArchive,
@@ -68,7 +86,7 @@ export function preparePublication(
     validate,
     archive.restoration,
   );
-  const details = archive.restoration?.details;
+  const details = archive.restoration?.details ?? legacyVersionAuthors(scene.history);
   const metadata = details ? prepareRestoredMetadata(details, actorId) : undefined;
 
   return { ...scene, assetIds, metadata };
@@ -149,7 +167,7 @@ function writeScene(
   }
 }
 
-function publicMimeType(value: string): string {
+export function publicMimeType(value: string): string {
   const lower = value.trim().toLowerCase();
   return webMediaTypes.has(lower) ? lower : 'application/octet-stream';
 }

@@ -53,9 +53,12 @@ function mergeBoards(
   return [...byId.values()];
 }
 
-export function createCatalogDirectory(service: BoardCatalogService): CatalogDirectory {
+export function createCatalogDirectory(
+  service: BoardCatalogService,
+  initialPinnedOnly = false,
+): CatalogDirectory {
   const listeners = new Set<() => void>();
-  let snapshot = loading('', 'recent', false);
+  let snapshot = loading('', 'recent', initialPinnedOnly);
   let owner: symbol | undefined;
   let active: AbortController | undefined;
   let scheduled: ReturnType<typeof setTimeout> | undefined;

@@ -5,6 +5,7 @@ import {
   validViewId,
   type AgentActivityOperation,
   type AgentActivityResult,
+  type AgentWorkspace,
   type ParticipantKey,
   type PresenceInput,
   type RoomAccess,
@@ -91,6 +92,7 @@ export interface RoomsApplication {
     key: ParticipantKey,
     cursor: RoomEventCursor | undefined,
     listener: RoomListener,
+    connection?: 'stream',
   ): RoomEventSubscription;
   tick(boardId: string, boardRevision: bigint): void;
   notifyAccessChanged(boardId: string): void;
@@ -102,6 +104,13 @@ export interface RoomsApplication {
     operation: AgentActivityOperation,
   ): AgentActivityResult;
   releaseAgentActivity(request: ReleaseAgentActivity): AgentActivityResult;
+  disconnectAgent(ownerId: string, agentId: string): void;
+  setAgentReadPresence(
+    principal: AgentActivityPrincipal,
+    activityId: string,
+    reading: boolean,
+  ): void;
+  agentWriteWorkspaces(boardId: string, ownerId: string): readonly AgentWorkspace[];
   publishContentChange(change: RoomContentChange): void;
   publishDiscussionChange(boardId: string, kind: 'feedbackChanged' | 'suggestionsChanged'): void;
   close(): void;
@@ -119,6 +128,13 @@ function requireAccess(access: RoomAccess | undefined): RoomAccess {
   }
 
   return access;
+}
+
+function sameItems<T>(previous: readonly T[], incoming: readonly T[]) {
+  return (
+    previous.length === incoming.length &&
+    previous.every((entry, index) => entry === incoming[index])
+  );
 }
 
 function limitedChange(change: RoomContentChange): RoomContentChange {
@@ -185,13 +201,18 @@ export function createRoomsApplication(
       return;
     }
 
-    const workspaces = agentActivity.snapshot(boardId);
-    if (
-      workspaces.length !== room.agentWorkspaces.length ||
-      workspaces.some((workspace, index) => workspace !== room.agentWorkspaces[index])
-    ) {
+    const workspaces = agentActivity.visibleSnapshot(boardId);
+    const onlineAgentIds = agentActivity.onlineAgentIds(boardId);
+    const readingAgentIds = agentActivity.readingAgentIds(boardId);
+    const samePresence =
+      sameItems(room.onlineAgentIds, onlineAgentIds) &&
+      sameItems(room.readingAgentIds, readingAgentIds);
+
+    if (!samePresence || !sameItems(room.agentWorkspaces, workspaces)) {
       room.agentWorkspaces = workspaces;
-      room.publish({ kind: 'agentWorkspaces', workspaces }, now);
+      room.onlineAgentIds = onlineAgentIds;
+      room.readingAgentIds = readingAgentIds;
+      room.publish({ kind: 'agentWorkspaces', workspaces, onlineAgentIds, readingAgentIds }, now);
     }
   }
 
@@ -230,6 +251,8 @@ export function createRoomsApplication(
           participants: room.currentParticipants(now),
           timer: timerView(stored.timer, now),
           agentWorkspaces: room.agentWorkspaces,
+          onlineAgentIds: agentActivity ? room.onlineAgentIds : undefined,
+          readingAgentIds: agentActivity ? room.readingAgentIds : undefined,
           canReleaseAgentActivity: agentActivity !== undefined && stored.access.role === 'owner',
           feedbackVersion: room.feedbackVersion,
           suggestionsVersion: owner ? room.suggestionsVersion : undefined,
@@ -252,8 +275,14 @@ export function createRoomsApplication(
     room.publish({ kind: 'contentChanged', change: limitedChange(change) }, clock.nowMillis());
   }
 
-  function listen(room: RoomMemory, listener: RoomListener, access: RoomAccess): () => void {
-    const release = room.listen(listener, access.role === 'owner');
+  function listen(
+    room: RoomMemory,
+    listener: RoomListener,
+    access: RoomAccess,
+    streamView?: ParticipantKey,
+  ): () => void {
+    const presence = streamView && { key: streamView, now: () => clock.nowMillis() };
+    const release = room.listen(listener, access.role === 'owner', presence);
     if (!release) {
       throw new RoomCapacityError('Too many room connections');
     }
@@ -304,7 +333,7 @@ export function createRoomsApplication(
       const { room, event, access } = readSnapshot(boardId, key.actorId, clock.nowMillis());
       return { initial: event, access, release: listen(room, listener, access) };
     },
-    subscribeAfter(boardId, key, cursor, listener) {
+    subscribeAfter(boardId, key, cursor, listener, connection) {
       if (!validViewId(key.viewId)) {
         throw new RoomInputError('Invalid room presence identity');
       }
@@ -323,7 +352,12 @@ export function createRoomsApplication(
       const replay = cursor && room.replay(cursor, currentAccess.role === 'owner');
       const events = replay ?? [readSnapshot(boardId, key.actorId, now).event];
 
-      return { events, access: currentAccess, release: listen(room, listener, currentAccess) };
+      const streamView = connection === 'stream' ? key : undefined;
+      return {
+        events,
+        access: currentAccess,
+        release: listen(room, listener, currentAccess, streamView),
+      };
     },
     tick(boardId, boardRevision) {
       rooms.get(boardId)?.sweep(clock.nowMillis());
@@ -362,6 +396,9 @@ export function createRoomsApplication(
 
       return result;
     },
+    agentWriteWorkspaces(boardId, ownerId) {
+      return agentActivity?.snapshot(boardId, ownerId) ?? [];
+    },
     releaseAgentActivity(request) {
       const { boardId, ownerId } = request;
       const activity = authorizeAgentActivity(boardId, ownerId);
@@ -369,6 +406,16 @@ export function createRoomsApplication(
       publishAgentWorkspaces(boardId);
 
       return result;
+    },
+    disconnectAgent(ownerId, agentId) {
+      for (const boardId of agentActivity?.withdraw({ ownerId, agentId }) ?? []) {
+        publishAgentWorkspaces(boardId);
+      }
+    },
+    setAgentReadPresence(principal, activityId, reading) {
+      const { boardId, ownerId } = principal;
+      authorizeAgentActivity(boardId, ownerId).setReadPresence(principal, activityId, reading);
+      publishAgentWorkspaces(boardId);
     },
     publishContentChange,
     publishDiscussionChange(boardId, kind) {

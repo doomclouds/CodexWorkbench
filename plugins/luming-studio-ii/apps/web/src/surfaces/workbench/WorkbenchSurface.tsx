@@ -396,8 +396,13 @@ export function WorkbenchSurface({
     archiveInput.current?.click();
   }
 
+  function handleScopeChange(pinnedOnly: boolean, clearQuery = false) {
+    directory.setPinnedOnly(pinnedOnly, clearQuery);
+    preferences.onPinnedOnlyChange?.(pinnedOnly);
+  }
+
   function handleBackFromPinned() {
-    directory.setPinnedOnly(false, true);
+    handleScopeChange(false, true);
     filterButton.current?.focus();
   }
 
@@ -481,7 +486,7 @@ export function WorkbenchSurface({
             createBusy={creation.createBusy}
             createBlocked={createBlocked}
             onQueryChange={directory.setQuery}
-            onPinnedOnlyChange={directory.setPinnedOnly}
+            onPinnedOnlyChange={handleScopeChange}
             onCreate={creation.create}
             onImport={archiveImport ? openArchivePicker : undefined}
             onOpenTrash={onOpenTrash}

@@ -101,7 +101,7 @@ export function createFeedbackApplication(
     listThreads: (actor, boardId, query) =>
       repository.read((reader) => {
         const access = requireAccess(reader, actor, boardId);
-        const { cursor, status, authorActorId } = query;
+        const { cursor, status, authorActorId, pendingAttachment } = query;
         const limit = pageLimit(query.pageSize);
         const position = readThreadPosition(cursor);
         const rows = reader.listThreads({
@@ -110,6 +110,7 @@ export function createFeedbackApplication(
           position,
           status,
           authorActorId,
+          pendingAttachment,
         });
         const page = rows.slice(0, limit);
         const last = page.at(-1);

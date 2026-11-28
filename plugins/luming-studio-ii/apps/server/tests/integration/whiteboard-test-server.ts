@@ -12,7 +12,15 @@ function isBlockedFetchPort(error: unknown): boolean {
   return cause instanceof Error && cause.message === 'bad port';
 }
 
-export function useWhiteboardTestServer() {
+type ResolveTestActor = Parameters<typeof createWhiteboardServer>[0]['resolveActor'];
+
+function resolveTestActor(request: Parameters<ResolveTestActor>[0]) {
+  const actorId = request.headers[actorHeader];
+
+  return typeof actorId === 'string' ? { id: actorId } : undefined;
+}
+
+export function useWhiteboardTestServer(resolveActor: ResolveTestActor = resolveTestActor) {
   let database: ReturnType<typeof createTemporaryDatabase> | undefined;
   let server: ReturnType<typeof createWhiteboardServer> | undefined;
   let address: URL | undefined;
@@ -21,11 +29,7 @@ export function useWhiteboardTestServer() {
   function openServer(databasePath: string) {
     return createWhiteboardServer({
       databasePath,
-      resolveActor(request) {
-        const actorId = request.headers[actorHeader];
-
-        return typeof actorId === 'string' ? { id: actorId } : undefined;
-      },
+      resolveActor,
       onError(error) {
         errors.push(error);
       },

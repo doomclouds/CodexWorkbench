@@ -59,9 +59,66 @@ function workspace(result: AgentActivityResult) {
   return result.workspace;
 }
 
+test('keeps idle Agent presence for twenty seconds independently of the ending workspace', () => {
+  const { activity, advance } = fixture();
+  const boardId = principal.boardId;
+  expect(activity.onlineAgentIds(boardId)).toEqual([]);
+  const { generation } = workspace(activity.change(principal, start));
+  expect(activity.onlineAgentIds(boardId)).toEqual([principal.agentId]);
+  activity.change(principal, { kind: 'end', taskId, generation });
+  advance(19_999);
+  expect(activity.visibleSnapshot(boardId)).toEqual([]);
+  expect(activity.onlineAgentIds(boardId)).toEqual([principal.agentId]);
+  advance(1);
+  expect(activity.onlineAgentIds(boardId)).toEqual([]);
+});
+
+test('disconnecting one Agent clears its own idle presence and workspaces without removing its peer', () => {
+  const { activity } = fixture();
+  const boardId = principal.boardId;
+  const first = workspace(
+    activity.change(principal, { ...start, scope: { kind: 'objects', objectIds: ['left'] } }),
+  );
+  activity.change(principal, { kind: 'end', taskId, generation: first.generation });
+  const second = workspace(
+    activity.change(otherAgent, { ...start, scope: { kind: 'objects', objectIds: ['right'] } }),
+  );
+  expect(activity.onlineAgentIds(boardId)).toEqual([principal.agentId, otherAgent.agentId]);
+  expect(activity.withdraw({ ownerId: 'outsider', agentId: principal.agentId })).toEqual([]);
+  expect(activity.withdraw(principal)).toEqual([boardId]);
+  expect(activity.onlineAgentIds(boardId)).toEqual([otherAgent.agentId]);
+  expect(activity.change(principal, { ...start, taskId: 'late' })).toEqual({
+    kind: 'rejected',
+    reason: 'workspaceReleased',
+  });
+  expect(activity.snapshot(boardId)).toEqual([second]);
+  expect(activity.withdraw(otherAgent)).toEqual([boardId]);
+  expect(activity.onlineAgentIds(boardId)).toEqual([]);
+  expect(activity.snapshot(boardId)).toEqual([]);
+});
+
+test('keeps concurrent reads active until the last finishes without opening an editing scope', () => {
+  const { activity, advance } = fixture();
+  const boardId = principal.boardId;
+  activity.setReadPresence(principal, 'read-one', true);
+  activity.setReadPresence(principal, 'read-two', true);
+  activity.setReadPresence(principal, 'read-one', false);
+  expect(activity.onlineAgentIds(boardId)).toEqual([principal.agentId]);
+  expect(activity.readingAgentIds(boardId)).toEqual([principal.agentId]);
+  expect(activity.snapshot(boardId)).toEqual([]);
+
+  activity.setReadPresence(principal, 'read-two', false);
+  advance(19_999);
+  expect(activity.readingAgentIds(boardId)).toEqual([]);
+  expect(activity.onlineAgentIds(boardId)).toEqual([principal.agentId]);
+  advance(1);
+  expect(activity.onlineAgentIds(boardId)).toEqual([]);
+});
+
 test('keeps duplicate begin and no-op progress on the same generation and deadline', () => {
   const { activity, advance, reads } = fixture();
   const first = workspace(activity.change(principal, start));
+  expect(first.lastProgressAtUnixMs).toBe(1000);
   advance(250);
 
   const retry = { ...start, scope: { kind: 'objects', objectIds: ['right', 'left'] } } as const;
@@ -78,6 +135,7 @@ test('keeps duplicate begin and no-op progress on the same generation and deadli
   } as const;
   const next = workspace(activity.change(principal, progress));
   expect(next.expiresAtUnixMs).toBe(first.expiresAtUnixMs + 250);
+  expect(next.lastProgressAtUnixMs).toBe(1250);
   expect(next.areas.find(({ id }) => id === 'right')).toMatchObject({ active: true });
   expect(next.areas.find(({ id }) => id === 'left')).toMatchObject({ active: false });
   advance(100);
@@ -90,6 +148,11 @@ test('requires the expired generation to restart and never lets an old generatio
   const first = workspace(activity.change(principal, start));
   advance(600_000);
   expect(activity.snapshot(principal.boardId)).toEqual([]);
+  expect(activity.visibleSnapshot(principal.boardId)[0]).toMatchObject({
+    generation: first.generation,
+    endReason: 'expired',
+    endedAtUnixMs: first.expiresAtUnixMs,
+  });
   expect(activity.change(principal, { kind: 'status', taskId })).toEqual({
     kind: 'ended',
     generation: first.generation,
@@ -137,6 +200,11 @@ test('binds release to board, owner, Agent and generation and remembers the owne
   expect(ended).toEqual({ kind: 'ended', generation: first.generation, reason: 'released' });
   expect(activity.release(release)).toEqual(ended);
   expect(activity.snapshot(principal.boardId)).toEqual([]);
+  expect(activity.visibleSnapshot(principal.boardId)[0]).toMatchObject({
+    generation: first.generation,
+    endReason: 'released',
+    endedAtUnixMs: 1000,
+  });
 
   advance(86_400_000);
   expect(
@@ -145,6 +213,25 @@ test('binds release to board, owner, Agent and generation and remembers the owne
     kind: 'rejected',
     reason: 'workspaceReleased',
   });
+});
+
+test('shows a completed lease briefly without keeping its editing grant', () => {
+  const { activity, advance } = fixture();
+  const first = workspace(activity.change(principal, start));
+  advance(200);
+  const end = { kind: 'end', taskId, generation: first.generation } as const;
+  expect(activity.change(principal, end)).toEqual({
+    kind: 'ended',
+    generation: first.generation,
+    reason: 'completed',
+  });
+  expect(activity.snapshot(principal.boardId, principal.ownerId)).toEqual([]);
+  expect(activity.visibleSnapshot(principal.boardId)).toEqual([
+    { ...first, endedAtUnixMs: 1200, endReason: 'completed' },
+  ]);
+  advance(4_000);
+  expect(activity.visibleSnapshot(principal.boardId)).toEqual([]);
+  expect(activity.change(principal, end)).toMatchObject({ kind: 'ended', reason: 'completed' });
 });
 
 test('resolves rectangle focus through board metadata and rejects outside objects or overlapping leases', () => {

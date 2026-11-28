@@ -135,6 +135,23 @@ function ExportFormatButton({ option, buttonRef, disabled, onExport }: ExportFor
   );
 }
 
+function ExportProgress({
+  busy,
+  message,
+  notice,
+}: {
+  readonly busy: boolean;
+  readonly message: string;
+  readonly notice: ExportNotice | undefined;
+}) {
+  return (
+    <>
+      {busy && <StatusText message={message} announcement="polite" busy />}
+      {notice && <StatusText message={notice.message} tone={notice.tone} announcement="polite" />}
+    </>
+  );
+}
+
 function OpenExport({
   anchor,
   context,
@@ -153,6 +170,7 @@ function OpenExport({
   const pending = useRef<AbortController>(undefined);
   const firstFormat = useRef<HTMLButtonElement>(null);
   const cancel = useRef<ButtonHandle>(null);
+  const hostConfirms = download.confirmation === 'host';
   const selectionCount = context.selectedIds.length;
   const selectionUnavailable = scope === 'selection' && selectionCount === 0;
   const exportHtmlSource =
@@ -187,26 +205,31 @@ function OpenExport({
     setBusy(true);
     setNotice(undefined);
     cancel.current?.focus();
+    let ready = preparedFile;
 
     async function completeExport() {
-      if (preparedFile) {
-        const delivery = await download(preparedFile, signal);
+      if (!ready) {
+        const result = await exportBoard(request, signal);
         signal.throwIfAborted();
-        if (delivery?.kind === 'unavailable') {
-          setNotice({ tone: 'warning', message: delivery.message });
-        } else {
-          setSelection(undefined);
-          setFile(undefined);
+        if (result.kind !== 'file') {
+          setNotice(resultNotice(result));
+          return;
         }
-        return;
+
+        ready = result.file;
+        if (!hostConfirms) {
+          setFile(ready);
+          return;
+        }
       }
 
-      const result = await exportBoard(request, signal);
+      const delivery = await download(ready, signal);
       signal.throwIfAborted();
-      if (result.kind === 'file') {
-        setFile(result.file);
+      if (delivery?.kind === 'unavailable') {
+        setNotice({ tone: 'warning', message: delivery.message });
       } else {
-        setNotice(resultNotice(result));
+        setSelection(undefined);
+        setFile(undefined);
       }
     }
 
@@ -217,8 +240,8 @@ function OpenExport({
             tone: 'error',
             message: error instanceof Error ? error.message : '导出未能完成。',
             retry: {
-              label: preparedFile ? '重试下载' : '重试导出',
-              onActivate: () => runExport(request, preparedFile),
+              label: ready ? '重试下载' : '重试导出',
+              onActivate: () => runExport(request, ready),
             },
           });
         }
@@ -251,7 +274,11 @@ function OpenExport({
           ? { kind: 'selection', objectIds: [...selectedIds] }
           : { kind: 'whole' },
     };
-    setSelection({ option, request, trigger });
+
+    if (!hostConfirms) {
+      setSelection({ option, request, trigger });
+    }
+
     runExport(request);
   }
 
@@ -280,6 +307,17 @@ function OpenExport({
     );
   }
 
+  const webProgress = file ? '正在打开下载…' : '正在生成导出文件…';
+  const status = (
+    <ExportProgress
+      busy={busy}
+      message={hostConfirms ? '正在导出…' : webProgress}
+      notice={notice}
+    />
+  );
+  const retry = notice?.retry && (
+    <Button label={notice.retry.label} variant="primary" onActivate={notice.retry.onActivate} />
+  );
   const content = (
     <section className="whiteboard-export">
       {!inline && (
@@ -318,6 +356,12 @@ function OpenExport({
         {exportHtmlSource && renderFormat(htmlSource)}
       </div>
       {canBackup && renderFormat(backup)}
+      {hostConfirms && (
+        <>
+          {status}
+          {retry}
+        </>
+      )}
       {selection && (
         <Dialog
           open
@@ -329,25 +373,10 @@ function OpenExport({
           onRequestClose={handleCloseDownload}
         >
           {file && <p className="whiteboard-export__filename">{file.filename}</p>}
-          {busy && (
-            <StatusText
-              message={file ? '正在打开下载…' : '正在生成导出文件…'}
-              announcement="polite"
-              busy
-            />
-          )}
-          {notice && (
-            <StatusText message={notice.message} tone={notice.tone} announcement="polite" />
-          )}
+          {status}
           <div className="whiteboard-export__actions">
             <Button ref={cancel} label="取消" onActivate={handleCloseDownload} />
-            {notice?.retry ? (
-              <Button
-                label={notice.retry.label}
-                variant="primary"
-                onActivate={notice.retry.onActivate}
-              />
-            ) : (
+            {retry || (
               <Button
                 label="下载"
                 variant="primary"

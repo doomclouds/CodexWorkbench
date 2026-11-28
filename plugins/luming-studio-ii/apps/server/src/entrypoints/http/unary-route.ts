@@ -12,6 +12,7 @@ import type { SharingScope } from '../../modules/sharing/application/index.js';
 export interface HttpActor {
   readonly id: string;
   readonly kind?: 'human' | 'agent';
+  readonly feedbackAuthorId?: string;
   readonly guestScope?: SharingScope;
   readonly authorize?: (request: object) => void;
   readonly authorizeRead?: (boardId: string) => void;

@@ -105,22 +105,50 @@ async function privateHttpStatus(service, token, method, body) {
   return response.status;
 }
 
-async function openWorkbench(client) {
-  const uri = 'ui://luming-studio-ii/app';
+async function verifyAppTools(client) {
   const { tools } = await client.listTools();
+  const expectedTools = [
+    'artifact_activity',
+    'artifact_apply',
+    'artifact_context',
+    'artifact_export',
+    'artifact_feedback',
+    'artifact_list',
+    'artifact_manage',
+    'artifact_read',
+    'artifact_share',
+    'artifact_suggest',
+    'studio_app_request',
+    'studio_open',
+  ];
+  assert.deepEqual(tools.map(({ name }) => name).sort(), expectedTools);
   const openTool = tools.find(({ name }) => name === 'studio_open');
   const requestTool = tools.find(({ name }) => name === 'studio_app_request');
+  assert.deepEqual(openTool?._meta?.ui?.visibility, ['app']);
   assert.deepEqual(openTool?._meta?.['openai/ui']?.entrypoints, [{ type: 'thread' }]);
   assert.deepEqual(requestTool?._meta?.ui?.visibility, ['app']);
+}
 
+async function verifyAppResource(client) {
+  const uri = 'ui://luming-studio-ii/app';
+  const iconSrc =
+    'data:image/png;base64,' +
+    (await readFile(join(pluginRoot, 'assets', 'icon64.png'))).toString('base64');
+  assert.equal(client.getServerVersion()?.icons?.[0]?.src, iconSrc);
   const resources = await client.listResources();
-  assert.ok(resources.resources.some((resource) => resource.uri === uri));
+  const resource = resources.resources.find((candidate) => candidate.uri === uri);
+  assert.equal(resource?.icons?.[0]?.src, iconSrc);
   const app = (await client.readResource({ uri })).contents[0];
   assert.equal(app?.mimeType, 'text/html;profile=mcp-app');
   assert.match(app?.text ?? '', /<script/);
+  assert.ok(app?.text?.includes(iconSrc));
   assert.deepEqual(app?._meta?.ui?.csp?.connectDomains, []);
   assert.equal(app?._meta?.['openai/ui']?.preferredDisplayMode, 'fullscreen');
+}
 
+async function openWorkbench(client) {
+  await verifyAppTools(client);
+  await verifyAppResource(client);
   const open = await client.callTool({ name: 'studio_open', arguments: {} });
   const { id } = decodeFrame(open, 'session');
   assert.deepEqual(Object.keys(open._meta.session).sort(), ['expiresAtMillis', 'id']);
@@ -168,7 +196,7 @@ async function verifyBoardRoundtrip(client, sessionId, rpc) {
     title: 'MCP runtime smoke',
   });
   assert.equal(receipt?.outcome.case, 'created');
-  const { boardId } = receipt.outcome.value;
+  const { boardId, entryVersion } = receipt.outcome.value;
   const { scene } = await rpc(WhiteboardService, WhiteboardService.method.getBoardScene, {
     boardId,
   });
@@ -207,9 +235,22 @@ async function verifyBoardRoundtrip(client, sessionId, rpc) {
   });
 
   const found = await client.callTool({ name: 'artifact_list', arguments: { query: 'runtime' } });
-  assert.deepEqual(found.structuredContent.data.artifacts, [
-    { id: boardId, title: 'MCP runtime smoke', type: 'whiteboard', pinned: false },
-  ]);
+  const { artifacts } = found.structuredContent.data;
+  assert.deepEqual(
+    artifacts.map(({ updatedAt, ...board }) => board),
+    [
+      {
+        id: boardId,
+        title: 'MCP runtime smoke',
+        type: 'whiteboard',
+        pinned: false,
+        canManage: true,
+        entryVersion: entryVersion.toString(),
+        revision: scene.boardRevision.toString(),
+      },
+    ],
+  );
+  assert.ok(Number.isFinite(Date.parse(artifacts[0].updatedAt)));
 
   const rejected = await client.callTool({
     name: 'studio_app_request',
@@ -495,7 +536,10 @@ async function verifyGuestAssetRefresh(rpc, boardId, install) {
   const web = join(install, 'runtime', 'web');
   const javascript = 'export const refreshed = true;\n';
   await writeFile(join(web, 'assets', filename), javascript);
-  await writeFile(join(web, 'index.html'), `<html><script src="/assets/${filename}"></script></html>`);
+  await writeFile(
+    join(web, 'index.html'),
+    `<html><script src="/assets/${filename}"></script></html>`,
+  );
   const replaced = await load(entry);
   assert.equal(replaced.status, 200);
   const html = await replaced.text();
@@ -506,12 +550,128 @@ async function verifyGuestAssetRefresh(rpc, boardId, install) {
   assert.equal(await updated.text(), javascript);
 }
 
+async function verifyLivePanelReading(invoke, boardId, objectId) {
+  const panel = await invoke('studio_app_request', { version: 1, action: 'connect', boardId });
+  const panelSession = panel._meta?.session?.id;
+  assert.ok(panelSession);
+  const view = { boardId, viewId: 'packaged-mcp-view', mode: 'context' };
+  const camera = { x: 80, y: -35, zoom: 0.75 };
+  const synced = await invoke('studio_app_request', {
+    version: 1,
+    action: 'view',
+    sessionId: panelSession,
+    viewId: view.viewId,
+    sequence: 1,
+    state: {
+      boardId,
+      selectedIds: [objectId],
+      selectedCount: 1,
+      viewport: camera,
+      focusedObjectId: objectId,
+    },
+  });
+  assert.equal(synced.structuredContent?.ok, true);
+  const focused = await invoke('artifact_read', view);
+  assert.equal(focused.structuredContent?.data?.source, 'live-panel');
+  assert.deepEqual(focused.structuredContent.data.contexts[0].selectedIds, [objectId]);
+  assert.deepEqual(focused.structuredContent.data.contexts[0].viewport, camera);
+  await invoke('studio_app_request', { version: 1, action: 'close', sessionId: panelSession });
+  const closed = await invoke('artifact_read', view);
+  assert.equal(closed.structuredContent?.error?.code, 'LIVE_CONTEXT_REQUIRED');
+}
+
+async function verifyModelReadingAndWriting(client, rpc, boardId) {
+  const { WhiteboardService } = requireServer(
+    '@codexworkbench/luming-studio-ii-contracts/whiteboard/service',
+  );
+  const objectId = 'release-scope';
+  const invoke = async (name, args) => client.callTool({ name, arguments: args });
+  const overview = await invoke('artifact_context', {
+    boardId,
+    scope: { kind: 'objects', objectIds: [objectId] },
+    include: ['overview', 'text'],
+  });
+  assert.equal(overview.structuredContent?.ok, true);
+  assert.deepEqual(
+    overview.structuredContent.data.objects.map(({ id }) => id),
+    [objectId],
+  );
+  assert.ok(overview.content.every(({ type }) => type !== 'image'));
+
+  const read = await invoke('artifact_read', { boardId, mode: 'objects', ids: [objectId] });
+  assert.equal(read.structuredContent?.ok, true);
+  const [target] = read.structuredContent.data.items;
+  assert.equal(target.id, objectId);
+  const expectedGeometryVersion = target.object.geometryVersion;
+  assert.match(expectedGeometryVersion, /^\d+$/u);
+  await verifyLivePanelReading(invoke, boardId, objectId);
+  const taskId = 'packaged-mcp-scoped-agent';
+  const activity = await invoke('artifact_activity', {
+    action: 'begin',
+    boardId,
+    taskId,
+    label: '检查已授权对象',
+    scope: { objectIds: [objectId] },
+  });
+  assert.equal(activity.structuredContent?.ok, true);
+  const { generation } = activity.structuredContent.data;
+  assert.ok(generation);
+  const command = {
+    boardId,
+    taskId,
+    generation,
+    commandId: 'packaged-mcp-agent-unlock',
+    operations: [
+      {
+        geometry: {
+          changeLock: { locked: false, targets: [{ objectId, expectedGeometryVersion }] },
+        },
+      },
+    ],
+  };
+  const lookup = { ...command, mode: 'operation-receipt' };
+  const missing = await invoke('artifact_read', lookup);
+  assert.equal(missing.structuredContent?.error?.code, 'COMMIT_RESULT_UNKNOWN');
+  const before = await rpc(WhiteboardService, WhiteboardService.method.getBoardScene, {
+    boardId,
+  });
+  assert.equal(
+    before.scene?.objects.find((candidate) => candidate.objectId === objectId)?.locked,
+    true,
+  );
+  const applied = await invoke('artifact_apply', command);
+  assert.equal(applied.structuredContent?.ok, true);
+  assert.ok(applied.structuredContent.data.receipt.applied);
+  const { scene } = await rpc(WhiteboardService, WhiteboardService.method.getBoardScene, {
+    boardId,
+  });
+  assert.equal(scene.objects.find((candidate) => candidate.objectId === objectId)?.locked, false);
+
+  const ended = await invoke('artifact_activity', { action: 'end', boardId, taskId, generation });
+  assert.equal(ended.structuredContent?.ok, true);
+  const committed = await invoke('artifact_read', lookup);
+  assert.equal(committed.structuredContent?.ok, true);
+  assert.deepEqual(
+    committed.structuredContent.data.receipt,
+    applied.structuredContent.data.receipt,
+  );
+  const replay = await invoke('artifact_apply', command);
+  assert.deepEqual(replay.structuredContent?.data?.receipt, applied.structuredContent.data.receipt);
+  const stale = await invoke('artifact_apply', {
+    ...command,
+    commandId: 'packaged-mcp-agent-ended',
+  });
+  assert.equal(stale.isError, true);
+  assert.equal(stale.structuredContent?.ok, false);
+}
+
 async function protocolSmoke(client, dataRoot, install) {
   const sessionId = await openWorkbench(client);
   const rpc = createAppRpc(client, sessionId);
   const boardId = await verifyBoardRoundtrip(client, sessionId, rpc);
   const reviewBoard = await verifyArchiveRoundtrip(client, sessionId);
   await verifySuggestionRoundtrip(client, sessionId, rpc, reviewBoard, dataRoot);
+  await verifyModelReadingAndWriting(client, rpc, reviewBoard);
   await verifyGuestAssetRefresh(rpc, boardId, install);
   await client.callTool({
     name: 'studio_app_request',
@@ -591,10 +751,13 @@ async function verifyRuntime() {
   try {
     await mkdir(install);
     await cp(runtime, join(install, 'runtime'), { recursive: true });
+    await cp(join(pluginRoot, 'assets'), join(install, 'assets'), { recursive: true });
+    await cp(join(pluginRoot, 'skills'), join(install, 'skills'), { recursive: true });
     await copyFile(join(pluginRoot, 'plugin.json'), join(install, 'plugin.json'));
     await copyFile(join(pluginRoot, 'mcp.json'), join(install, 'mcp.json'));
     await client.connect(transport());
-    assert.deepEqual(client.getServerVersion(), { name: 'luming-studio-ii', version });
+    assert.equal(client.getServerVersion()?.name, 'luming-studio-ii');
+    assert.equal(client.getServerVersion()?.version, version);
     const boardId = await protocolSmoke(client, data, install);
     assert.ok(boardId);
     const servicePath = join(data, 'service.json');

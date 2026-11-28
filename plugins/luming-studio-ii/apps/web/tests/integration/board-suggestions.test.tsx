@@ -1,12 +1,19 @@
 import { create, fromBinary, toBinary } from '@bufbuild/protobuf';
 import type { DescMessage, DescMethodUnary, MessageInitShape } from '@bufbuild/protobuf';
 import {
+  FeedbackAttachmentState,
+  FeedbackService,
+  FeedbackThreadStatus,
+  type FeedbackAttachmentSchema,
+  type FeedbackThreadSchema,
+} from '@codexworkbench/luming-studio-ii-contracts/feedback/service';
+import {
   BoardSuggestionService,
   type BoardSuggestionSchema,
 } from '@codexworkbench/luming-studio-ii-contracts/suggestions/service';
 import { act } from 'react';
 import { expect, test } from 'vitest';
-import type { BoardFeedbackService } from '../../src/data/feedback/index.js';
+import { createBoardFeedbackService } from '../../src/data/feedback/index.js';
 import {
   createSuggestionService,
   type AttachedReviewSource,
@@ -22,6 +29,9 @@ const {
   previewBoardSuggestion,
   acceptBoardSuggestion,
 } = BoardSuggestionService.method;
+const { listThreads, getThread, applyFeedback } = FeedbackService.method;
+const attachmentRequestId = 'stored-note-attachment';
+const attachmentCommands = ['queue-note', 'claim-note', 'confirm-note'];
 const suggestion = {
   proposalId: 'stored-suggestion',
   sourceId: 'frozen-selection',
@@ -46,46 +56,37 @@ const frozenTarget = {
 
 const notePoint = { x: 50, y: 40 };
 const note = {
-  id: 'owner-note',
-  status: 'open',
+  threadId: 'owner-note',
+  status: FeedbackThreadStatus.OPEN,
   anchor: {
-    target: { kind: 'object', objectId: 'rectangle', u: 0.1, v: 0.1, geometryVersion: 0n },
-    sourceRevision: 0n,
+    target: {
+      target: {
+        case: 'objectPoint',
+        value: { objectId: 'rectangle', u: 0.1, v: 0.1, geometryVersion: 0n },
+      },
+    },
+    sourceBoardRevision: 0n,
     frozenPoint: notePoint,
+    frozenObject: { kind: 'shape', label: previewedObject.label, ...frozenTarget.geometry },
     frozenExcerpt: '用户选中的原文摘录',
     targetMissing: false,
   },
   first: {
-    id: 'owner-message',
-    authorId: 'owner',
+    messageId: 'owner-message',
+    authorActorId: 'owner',
     authoredByViewer: true,
     text: '作者筛选仍然适用',
-    createdAt: 0,
-    updatedAt: 0,
+    createdAtMillis: 0n,
+    updatedAtMillis: 0n,
     version: 0n,
     canEdit: true,
   },
   version: 0n,
-  updatedAt: 0,
+  updatedAtMillis: 0n,
   replyCount: 0,
   canResolve: true,
   canDelete: true,
-} as const;
-
-const feedbackService = {
-  async listThreads() {
-    return { items: [note], canWrite: true };
-  },
-  async getThread() {
-    return { thread: note, items: [], canWrite: true };
-  },
-  async apply() {
-    throw new Error('Unexpected note edit during suggestion review.');
-  },
-  async getReceipt() {
-    return undefined;
-  },
-} satisfies BoardFeedbackService;
+} satisfies MessageInitShape<typeof FeedbackThreadSchema>;
 
 function route(method: DescMethodUnary): string {
   return '/' + method.parent.typeName + '/' + method.name;
@@ -95,13 +96,108 @@ function reply<Output extends DescMessage>(schema: Output, result: MessageInitSh
   return toBinary(schema, create(schema, result));
 }
 
+function feedbackRpc() {
+  const actions: string[] = [];
+  let attachment: MessageInitShape<typeof FeedbackAttachmentSchema>;
+
+  function post(path: string, bytes: Uint8Array) {
+    const thread = { ...note, attachment };
+    if (path === route(listThreads)) {
+      const query = fromBinary(listThreads.input, bytes);
+      expect(query.boardId).toBe(sampleBoardId);
+      const matchesAuthor =
+        !query.authorActorId || query.authorActorId === note.first.authorActorId;
+      const pending =
+        attachment?.state === FeedbackAttachmentState.PENDING ||
+        attachment?.state === FeedbackAttachmentState.CLAIMED;
+      const show = matchesAuthor && (!query.pendingAttachment || pending);
+
+      return reply(listThreads.output, { threads: show ? [thread] : [], canWrite: true });
+    }
+    if (path === route(getThread)) {
+      const query = fromBinary(getThread.input, bytes);
+      expect(query).toMatchObject({ boardId: sampleBoardId, threadId: note.threadId });
+
+      return reply(getThread.output, { thread, canWrite: true });
+    }
+    if (path !== route(applyFeedback)) {
+      return undefined;
+    }
+
+    const request = fromBinary(applyFeedback.input, bytes);
+    expect(request.boardId).toBe(sampleBoardId);
+    const operation = request.operation;
+    switch (operation.case) {
+      case 'requestAttachment':
+        expect(operation.value).toMatchObject({
+          threadId: note.threadId,
+          expectedThreadVersion: note.version,
+        });
+        expect(attachment).toBeUndefined();
+        attachment = {
+          requestId: attachmentRequestId,
+          threadVersion: note.version,
+          state: FeedbackAttachmentState.PENDING,
+        };
+        break;
+      case 'claimAttachment':
+        expect(operation.value).toMatchObject({
+          threadId: note.threadId,
+          requestId: attachmentRequestId,
+        });
+        expect(attachment?.state).toBe(FeedbackAttachmentState.PENDING);
+        attachment = { ...attachment, state: FeedbackAttachmentState.CLAIMED };
+        break;
+      case 'confirmAttachment':
+        expect(operation.value).toMatchObject({
+          threadId: note.threadId,
+          requestId: attachmentRequestId,
+          claimId: 'claim-note',
+        });
+        expect(attachment?.state).toBe(FeedbackAttachmentState.CLAIMED);
+        attachment = { ...attachment, state: FeedbackAttachmentState.ATTACHED };
+        break;
+      case 'create':
+      case 'delete':
+      case 'edit':
+      case 'reopen':
+      case 'reply':
+      case 'resetAttachmentClaim':
+      case 'resolve':
+      case undefined:
+        throw new Error('Unexpected note edit during suggestion review.');
+    }
+    actions.push(operation.case);
+    expect(request.commandId).toBe(attachmentCommands[actions.length - 1]);
+
+    return reply(applyFeedback.output, {
+      receipt: {
+        boardId: request.boardId,
+        commandId: request.commandId,
+        outcome: {
+          case: 'applied',
+          value: { threadId: note.threadId, threadVersion: note.version },
+        },
+      },
+    });
+  }
+
+  return { post, actions, state: () => attachment?.state };
+}
+
 function createSuggestionRpc() {
   const whiteboard = createWhiteboardRpcMock();
+  const feedback = feedbackRpc();
   const calls: string[] = [];
   let applied = false;
 
   const post: SuggestionPost = async (path, bytes) => {
     calls.push(path);
+    const response = feedback.post(path, bytes);
+    if (response) {
+      return response;
+    }
+
     if (path === route(listBoardSuggestions)) {
       const value = applied
         ? {
@@ -119,9 +215,10 @@ function createSuggestionRpc() {
       const query = fromBinary(createBoardReviewSource.input, bytes);
       expect(query).toMatchObject({
         boardId: sampleBoardId,
-        commandId: boardCommandId,
-        origin: { case: 'feedbackThreadId', value: note.id },
+        commandId: attachmentRequestId,
+        origin: { case: 'feedbackThreadId', value: note.threadId },
       });
+      expect(feedback.state()).toBe(FeedbackAttachmentState.CLAIMED);
 
       return reply(createBoardReviewSource.output, {
         source: {
@@ -131,7 +228,7 @@ function createSuggestionRpc() {
           targetsBoardRevision: 0n,
           objectIds: ['rectangle'],
           targets: [frozenTarget],
-          feedbackThreadId: note.id,
+          feedbackThreadId: note.threadId,
         },
       });
     }
@@ -177,7 +274,7 @@ function createSuggestionRpc() {
     return whiteboard.post(path, bytes);
   };
 
-  return { post, calls };
+  return { post, calls, feedback };
 }
 
 function rectangle(stage: ParentNode) {
@@ -200,10 +297,13 @@ test('opens suggestions inside the notes panel, filters by author, previews and 
     readonly excerpt?: string;
   };
   const attached: Attachment[] = [];
+  let issued = 0;
   const app = createAppMock(rpc.post, {
-    feedbackService,
+    feedbackService: createBoardFeedbackService(rpc.post),
+    createCommandId: () => attachmentCommands[issued++] ?? boardCommandId,
     suggestions,
     async onAttachReviewSource(reference) {
+      expect(rpc.feedback.state()).toBe(FeedbackAttachmentState.CLAIMED);
       attached.push(reference);
     },
   });
@@ -228,7 +328,7 @@ test('opens suggestions inside the notes panel, filters by author, previews and 
     const authorFilter = panel?.querySelector('select');
     await act(async () => {
       if (authorFilter) {
-        authorFilter.value = note.first.authorId;
+        authorFilter.value = note.first.authorActorId;
         authorFilter.dispatchEvent(new Event('change', { bubbles: true }));
       }
     });
@@ -249,15 +349,23 @@ test('opens suggestions inside the notes panel, filters by author, previews and 
     expect(attached).toEqual([
       {
         boardId: sampleBoardId,
-        feedbackThreadId: note.id,
+        feedbackThreadId: note.threadId,
         comment: note.first.text,
         excerpt: note.anchor.frozenExcerpt,
+        targetLabel: previewedObject.label,
+        selectedTargets: [],
         sourceId: suggestion.sourceId,
         capturedBoardRevision: 0n,
         targetsBoardRevision: 0n,
         targets: [frozenTarget],
       },
     ]);
+    expect(rpc.feedback.actions).toEqual([
+      'requestAttachment',
+      'claimAttachment',
+      'confirmAttachment',
+    ]);
+    expect(rpc.feedback.state()).toBe(FeedbackAttachmentState.ATTACHED);
 
     const option = app.host.querySelector<HTMLButtonElement>('[aria-label="右移矩形"]');
     expect(option).not.toBeNull();

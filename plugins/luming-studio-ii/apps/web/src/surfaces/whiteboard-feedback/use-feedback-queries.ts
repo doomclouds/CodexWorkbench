@@ -42,7 +42,9 @@ export function useFeedbackQueries({
   threadId,
 }: FeedbackQueryOptions) {
   const [authorId, setAuthorId] = useState('');
-  const [mine, setMine] = useState(false);
+  const [scope, setScope] = useState<'all' | 'mine' | 'pending'>('all');
+  const mine = scope === 'mine';
+  const pendingAttachment = scope === 'pending';
   const [showResolved, setShowResolved] = useState(false);
   const [localVersion, setLocalVersion] = useState(0);
   const requestVersion = (updateKey ?? '') + '/' + localVersion;
@@ -59,8 +61,8 @@ export function useFeedbackQueries({
     enabled ? baseQuery : undefined,
     requestVersion,
   );
-  const selectedAuthor = mine ? undefined : authorId;
-  const filtering = mine || Boolean(selectedAuthor);
+  const selectedAuthor = scope === 'all' ? authorId : undefined;
+  const filtering = scope !== 'all' || Boolean(selectedAuthor);
   const openQuery = useMemo(
     () => ({
       load(cursor: string | undefined, signal: AbortSignal) {
@@ -77,12 +79,20 @@ export function useFeedbackQueries({
     () => ({
       load(cursor: string | undefined, signal: AbortSignal) {
         return service.listThreads(
-          { boardId, pageSize, status, cursor, authorId: selectedAuthor, authoredByViewer: mine },
+          {
+            boardId,
+            pageSize,
+            status: pendingAttachment ? undefined : status,
+            cursor,
+            authorId: selectedAuthor,
+            authoredByViewer: mine,
+            pendingAttachment,
+          },
           signal,
         );
       },
     }),
-    [selectedAuthor, boardId, mine, service, status],
+    [selectedAuthor, boardId, mine, pendingAttachment, service, status],
   );
   const detailQuery = useMemo(() => {
     if (!threadId) {
@@ -119,7 +129,8 @@ export function useFeedbackQueries({
     authorId,
     setAuthorId,
     mine,
-    setMine,
+    scope,
+    setScope,
     showResolved,
     setShowResolved,
     pinnedThreads: baseList.items,

@@ -84,6 +84,22 @@ function assertRoundTrip(type, value) {
   assert.deepEqual(decode(type, wire), value);
 }
 
+test('keeps the online Agent roster independent of completed workspaces and private disconnect', () => {
+  const agentId = 'agent-one';
+  assertRoundTrip('BoardRoomSnapshot', {
+    actorId: 'owner',
+    onlineAgents: { agentIds: [agentId], readingAgentIds: [agentId] },
+  });
+  assertRoundTrip('RoomAgentWorkspaceList', { onlineAgents: {} });
+  assertRoundTrip('ChangeAgentActivityRequest', { agentId, disconnect: {} });
+  assertRoundTrip('ChangeAgentActivityResponse', { disconnected: {} });
+  assertRoundTrip('ChangeAgentActivityRequest', {
+    agentId,
+    boardId,
+    readPresence: { activityId: 'read-one', reading: true },
+  });
+});
+
 test('declares the request, response and streaming direction of every Studio RPC', () => {
   const descriptor = JSON.parse(
     runBuf([
@@ -99,7 +115,11 @@ test('declares the request, response and streaming direction of every Studio RPC
     .filter((file) => file.package === protoPackage)
     .flatMap((file) => file.service ?? []);
   const methodsByService = new Map([
-    ['BoardArchiveService', ['GetArchiveImportReceipt']],
+    ['BoardAgentWriteService', ['ApplyAgentBoardEdit', 'GetAgentBoardEditReceipt']],
+    [
+      'BoardArchiveService',
+      ['GetArchiveImportReceipt', 'ListBoardAssets', 'ImportBoardAsset', 'DeleteBoardAsset'],
+    ],
     [
       'BoardCatalogService',
       [
@@ -111,6 +131,8 @@ test('declares the request, response and streaming direction of every Studio RPC
         'ManageBoard',
         'PurgeBoards',
         'GetCatalogCommandReceipt',
+        'GetWorkbenchPreferences',
+        'UpdateWorkbenchPreferences',
       ],
     ],
     [
@@ -166,10 +188,12 @@ test('declares the request, response and streaming direction of every Studio RPC
         'ListBoardSuggestions',
         'PreviewBoardSuggestion',
         'AcceptBoardSuggestion',
+        'ChooseAgentBoardSuggestion',
         'RejectBoardSuggestion',
       ],
     ],
     ['FeedbackService', ['ListThreads', 'GetThread', 'ApplyFeedback', 'GetFeedbackReceipt']],
+    ['McpPanelViewService', ['UpdatePanelView', 'ReadPanelView']],
     [
       'WhiteboardService',
       ['GetBoardScene', 'GetObjectPayloads', 'MoveObjects', 'GetCommandReceipt', 'ExportBoard'],
@@ -199,6 +223,20 @@ test('declares the request, response and streaming direction of every Studio RPC
       })),
     );
   }
+});
+
+test('keeps the workspace generation and ordered Agent edits together in one command', () => {
+  assertRoundTrip('ApplyAgentBoardEditRequest', {
+    boardId,
+    agentId: 'agent-editor',
+    taskId: 'work-section',
+    generation: 'generation-1',
+    commandId,
+    operations: [
+      { geometry: { changeLock: { targets: [{ objectId, expectedGeometryVersion: '0' }], locked: true } } },
+      { content: { objectId, expectedPayloadVersion: '0', text: { text: 'Scoped write' } } },
+    ],
+  });
 });
 
 test('preserves the expected sharing version and keeps invitations separate from guest sessions', () => {
@@ -397,8 +435,20 @@ test('preserves the source board and command identity when duplicating', () => {
   assertRoundTrip('DuplicateBoardRequest', { commandId, sourceBoardId: boardId });
 });
 
-test('preserves the pin filter and explicitly requested preview revision zero', () => {
-  assertRoundTrip('ListBoardsRequest', { query: 'Architecture', pageSize: 10, pinnedOnly: true });
+test('preserves list filters, offsets and explicitly requested preview revision zero', () => {
+  assertRoundTrip('ListBoardsRequest', {
+    query: 'Architecture',
+    pageSize: 10,
+    pinnedOnly: true,
+    offset: 0,
+  });
+  assertRoundTrip('ListTrashedBoardsRequest', {
+    query: 'Architecture',
+    order: 'BOARD_SORT_ORDER_TITLE',
+    pageSize: 10,
+    pinnedOnly: true,
+    offset: 1,
+  });
   assertRoundTrip('GetBoardThumbnailRequest', { boardId, revision: '0', trashed: true });
 });
 

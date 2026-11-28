@@ -1,6 +1,12 @@
 import { Bot } from 'lucide-react';
-import { useRef, useState, type CSSProperties } from 'react';
+import { useEffectEvent, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import type { BoardRoomAgentWorkspace } from '../../data/rooms/index.js';
+import {
+  workspaceIsActive,
+  workspaceName,
+  workspaceStatus,
+  type AgentWorkspaceView,
+} from './agent-workspace-view.js';
 import { participantColor } from './follow.js';
 import './agent-workspace.css';
 
@@ -10,7 +16,9 @@ export type AgentWorkspaceTarget = Pick<
 >;
 
 export interface AgentWorkspaceRowsProps {
-  readonly workspaces: readonly BoardRoomAgentWorkspace[];
+  readonly workspaces: readonly AgentWorkspaceView[];
+  readonly onlineAgentIds?: readonly string[];
+  readonly readingAgentIds?: readonly string[];
   readonly followedAgentId?: string;
   readonly canFollow: boolean;
   readonly preview: boolean;
@@ -19,12 +27,6 @@ export interface AgentWorkspaceRowsProps {
 }
 
 type ReleaseWorkspace = NonNullable<AgentWorkspaceRowsProps['onRelease']>;
-
-const phases: Record<BoardRoomAgentWorkspace['phase'], string> = {
-  preparing: '准备中',
-  writing: '修改中',
-  verifying: '检查中',
-};
 
 const releaseLabels = {
   idle: '结束此工作区',
@@ -36,17 +38,17 @@ function workspaceKey({ taskId, generation }: AgentWorkspaceTarget) {
   return JSON.stringify([taskId, generation]);
 }
 
-function workspaceName({ label, taskId }: BoardRoomAgentWorkspace) {
-  return label || taskId;
-}
+function workspacesByAgent(
+  workspaces: readonly AgentWorkspaceView[],
+  onlineAgentIds: readonly string[] | undefined,
+) {
+  const groups = new Map<string, AgentWorkspaceView[]>(onlineAgentIds?.map((id) => [id, []]));
 
-function workspacesByAgent(workspaces: readonly BoardRoomAgentWorkspace[]) {
-  const groups = new Map<string, BoardRoomAgentWorkspace[]>();
   for (const workspace of workspaces) {
     const group = groups.get(workspace.agentId);
     if (group) {
       group.push(workspace);
-    } else {
+    } else if (!onlineAgentIds) {
       groups.set(workspace.agentId, [workspace]);
     }
   }
@@ -80,17 +82,33 @@ export function AgentWorkspaceAvatar({
   );
 }
 
-function WorkspaceRelease({
+export function WorkspaceRelease({
   workspace,
   onRelease,
+  canvas = false,
+  onCanvasFocus,
 }: {
   readonly workspace: BoardRoomAgentWorkspace;
   readonly onRelease: ReleaseWorkspace;
+  readonly canvas?: boolean;
+  readonly onCanvasFocus?: () => void;
 }) {
   const { agentId, taskId, generation } = workspace;
+  const trigger = useRef<HTMLButtonElement>(null);
   const requestActive = useRef(false);
   const [state, setState] = useState<keyof typeof releaseLabels>('idle');
   const [failed, setFailed] = useState<string>();
+  const restoreFocus = useEffectEvent((button: HTMLButtonElement) => {
+    if (button.ownerDocument.activeElement === button) {
+      onCanvasFocus?.();
+    }
+  });
+  useLayoutEffect(() => {
+    const button = trigger.current;
+    if (canvas && button) {
+      return () => restoreFocus(button);
+    }
+  }, [canvas]);
 
   async function release() {
     if (requestActive.current) {
@@ -111,14 +129,22 @@ function WorkspaceRelease({
   }
 
   return (
-    <div className="room-agent-release">
+    <div
+      className="room-agent-release"
+      onPointerDown={canvas ? (event) => event.stopPropagation() : undefined}
+      onDoubleClick={canvas ? (event) => event.stopPropagation() : undefined}
+      onClick={canvas ? (event) => event.stopPropagation() : undefined}
+    >
       <button
+        ref={trigger}
         className="room-agent-release-button"
         type="button"
         data-agent-task-release={taskId}
+        data-canvas-native={canvas ? '' : undefined}
         aria-label={'结束此工作区：' + workspaceName(workspace)}
-        title="结束此工作区，停止显示当前活动。"
-        disabled={state !== 'idle'}
+        title="结束此工作区并撤销本任务的后续写入。模型仍可继续运行。"
+        disabled={!canvas && state !== 'idle'}
+        aria-disabled={(canvas && state !== 'idle') || undefined}
         aria-busy={state === 'submitting' || undefined}
         onClick={() => void release()}
       >
@@ -135,8 +161,9 @@ function WorkspaceRelease({
 
 interface AgentRowProps {
   readonly agentId: string;
-  readonly workspaces: readonly BoardRoomAgentWorkspace[];
+  readonly workspaces: readonly AgentWorkspaceView[];
   readonly followed: boolean;
+  readonly reading: boolean;
   readonly canFollow: boolean;
   readonly preview: boolean;
   readonly onFollow: AgentWorkspaceRowsProps['onFollow'];
@@ -147,12 +174,14 @@ function AgentRow({
   agentId,
   workspaces,
   followed,
+  reading,
   canFollow,
   preview,
   onFollow,
   onRelease,
 }: AgentRowProps) {
-  const hasAreas = workspaces.some(({ areas }) => areas.length > 0);
+  const activeWorkspaces = workspaces.filter(workspaceIsActive);
+  const hasAreas = activeWorkspaces.some(({ areas }) => areas.length > 0);
   const canUseFollow = followed || (canFollow && hasAreas);
   let followTitle: string | undefined;
   if (preview) {
@@ -161,7 +190,7 @@ function AgentRow({
     followTitle = '当前没有可跟随的工作区域';
   }
 
-  const leadWorkspace = workspaces[0];
+  const leadWorkspace = activeWorkspaces[0] ?? workspaces[0];
   const followName = leadWorkspace ? ' Agent：' + workspaceName(leadWorkspace) : ' Agent';
   const followAction = followed ? '停止跟随' : '跟随';
   return (
@@ -169,13 +198,14 @@ function AgentRow({
       <AgentWorkspaceAvatar agentId={agentId} followed={followed} />
       <div className="room-presence-identity room-agent-identity">
         <strong>Agent</strong>
+        {workspaces.length === 0 && <span>{reading ? '正在读取' : '空闲'}</span>}
         {workspaces.length > 1 && <span>{workspaces.length}个工作区</span>}
         {workspaces.map((workspace) => (
           <div className="room-agent-workspace" key={workspaceKey(workspace)}>
             <span>
-              {phases[workspace.phase]} · {workspaceName(workspace)}
+              {workspaceStatus(workspace)} · {workspaceName(workspace)}
             </span>
-            {onRelease && !preview && (
+            {onRelease && !preview && workspaceIsActive(workspace) && (
               <WorkspaceRelease workspace={workspace} onRelease={onRelease} />
             )}
           </div>
@@ -197,15 +227,18 @@ function AgentRow({
 
 export function AgentWorkspaceRows({
   workspaces,
+  onlineAgentIds,
+  readingAgentIds,
   followedAgentId,
   ...actions
 }: AgentWorkspaceRowsProps) {
-  return Array.from(workspacesByAgent(workspaces), ([agentId, entries]) => (
+  return Array.from(workspacesByAgent(workspaces, onlineAgentIds), ([agentId, entries]) => (
     <AgentRow
       key={agentId}
       agentId={agentId}
       workspaces={entries}
       followed={followedAgentId === agentId}
+      reading={readingAgentIds?.includes(agentId) ?? false}
       {...actions}
     />
   ));

@@ -6,6 +6,7 @@ import type {
   FeedbackThreadStatus,
 } from '../../../modules/feedback/ports/index.js';
 import type { SqliteConnection, SqliteRow } from '../../platform/index.js';
+import { feedbackJson, readAttachment, readSelectionSnapshot } from './attachment-values.js';
 import { decodeFeedbackContentUnit, encodeFeedbackContentUnit } from './content-source.js';
 import { insertMessage, messageColumns, readMessage } from './messages.js';
 import { readFinite, readText, readUnsigned } from './stored-values.js';
@@ -49,6 +50,14 @@ function readAnchor(row: SqliteRow): FeedbackAnchor {
     y: readFinite(row.frozen_y, 'frozen_y'),
   };
 
+  if (row.selection_json !== null) {
+    return {
+      ...readSelectionSnapshot(row.selection_json),
+      sourceBoardRevision,
+      frozenPoint,
+      targetMissing: false,
+    };
+  }
   if (row.object_id === null) {
     return {
       target: { kind: 'board', point: frozenPoint },
@@ -94,6 +103,7 @@ function readThread(row: SqliteRow): FeedbackThread {
     version: readUnsigned(row.version, 'version'),
     updatedAtMillis: readUnsigned(row.updated_at_millis, 'updated_at_millis'),
     replyCount: Number(readUnsigned(row.reply_count, 'reply_count')),
+    attachment: readAttachment(row.attachment_json),
   };
 }
 
@@ -127,6 +137,9 @@ export function listThreads(
     conditions.push('m.author_actor_id = ?');
     args.push(authorActorId);
   }
+  if (lookup.pendingAttachment) {
+    conditions.push("json_extract(t.attachment_json, '$.state') IN ('pending', 'claimed')");
+  }
   if (position) {
     conditions.push('(t.updated_at_millis, t.thread_id) < (?, ?)');
     args.push(position.updatedAtMillis, position.threadId);
@@ -145,7 +158,7 @@ export function listThreads(
 
 function objectFields(anchor: FeedbackAnchor): readonly (string | number | bigint | null)[] {
   const { target, frozenObject } = anchor;
-  if (target.kind === 'board') {
+  if (target.kind === 'board' || target.kind === 'selection') {
     return [null, null, null, null, null, null, null, null, null, null, null];
   }
   if (!frozenObject) {
@@ -182,8 +195,8 @@ export function insertThread(
         board_id, thread_id, status, source_board_revision, frozen_x, frozen_y,
         object_id, object_u, object_v, object_geometry_version,
         object_kind, object_label, object_x, object_y, object_width, object_height, object_rotation,
-        version, updated_at_millis, reply_count
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        version, updated_at_millis, reply_count, selection_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
     .run(
       boardId,
@@ -196,6 +209,11 @@ export function insertThread(
       version,
       updatedAtMillis,
       replyCount,
+      feedbackJson(
+        anchor.target.kind === 'selection'
+          ? { target: anchor.target, frozenTargets: anchor.frozenTargets }
+          : undefined,
+      ),
     );
   insertMessage(connection, boardId, threadId, 0, thread.first);
   if (anchor.target.kind === 'content') {
@@ -223,10 +241,18 @@ export function updateThread(
   connection
     .prepare(`
       UPDATE feedback_threads
-      SET status = ?, version = ?, updated_at_millis = ?, reply_count = ?
+      SET status = ?, version = ?, updated_at_millis = ?, reply_count = ?, attachment_json = ?
       WHERE board_id = ? AND thread_id = ?
     `)
-    .run(status, version, updatedAtMillis, replyCount, boardId, threadId);
+    .run(
+      status,
+      version,
+      updatedAtMillis,
+      replyCount,
+      feedbackJson(thread.attachment),
+      boardId,
+      threadId,
+    );
 }
 
 export function deleteThread(

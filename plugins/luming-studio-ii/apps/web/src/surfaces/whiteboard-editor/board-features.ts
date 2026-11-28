@@ -54,6 +54,7 @@ interface BoardPresenceFrame {
   readonly paused: boolean;
   readonly detachSequence: number;
   readonly onViewportRequest: (viewport: CanvasViewport) => void;
+  readonly onCanvasFocus: () => void;
   readonly onContentChanged: (change: WhiteboardContentChange) => void;
   readonly onAccessLost: () => void;
   readonly render: (slot: BoardPresenceSlot) => ReactNode;
@@ -138,6 +139,10 @@ export interface BoardFeedbackFrame {
     readonly v?: number;
   };
   readonly pointAnnotationRequest?: { readonly sequence: number; readonly point: CanvasPoint };
+  readonly selectionAnnotationRequest?: {
+    readonly sequence: number;
+    readonly target: BoardSelectionAnnotation;
+  };
   readonly hostPicking?: boolean;
   readonly focusedObjectId?: string;
   readonly contentAnnotationRequest?: {
@@ -147,6 +152,18 @@ export interface BoardFeedbackFrame {
   };
   readonly singleKeys?: boolean;
   readonly renderSuggestions?: (frame: BoardSuggestionListFrame) => ReactNode;
+}
+
+export interface BoardSelectionAnnotation {
+  readonly kind: 'selection';
+  readonly point: CanvasPoint;
+  readonly bounds?: CanvasPoint & { readonly width: number; readonly height: number };
+  readonly objects: readonly {
+    readonly objectId: string;
+    readonly geometryVersion: bigint;
+    readonly payloadVersion?: bigint;
+  }[];
+  readonly expectedBoardRevision: bigint;
 }
 
 export interface BoardSuggestionListFrame {

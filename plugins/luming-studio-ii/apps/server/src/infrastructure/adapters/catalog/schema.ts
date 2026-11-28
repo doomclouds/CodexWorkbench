@@ -1,4 +1,11 @@
 export const catalogSchema = `
+  CREATE TABLE IF NOT EXISTS workbench_preferences (
+    actor_id TEXT PRIMARY KEY,
+    layout TEXT CHECK (layout IN ('grid', 'list')),
+    theme TEXT CHECK (theme IN ('light', 'dark')),
+    pinned_only INTEGER CHECK (pinned_only IN (0, 1))
+  ) STRICT;
+
   CREATE TABLE IF NOT EXISTS catalog_entries (
     board_id TEXT PRIMARY KEY REFERENCES boards (board_id) ON DELETE CASCADE,
     updated_at_millis INTEGER NOT NULL CHECK (updated_at_millis >= 0),

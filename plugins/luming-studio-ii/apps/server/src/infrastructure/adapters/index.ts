@@ -357,7 +357,7 @@ function createReader(connection: SqliteConnection): BoardEditReader {
     getAccess: (boardId, actorId) => {
       const access = readBoardAccess(connection, boardId, actorId);
 
-      return access && { canEdit: access.canEdit };
+      return access && { canEdit: access.canEdit, isOwner: access.isOwner };
     },
     isTrashedOwner: (boardId, actorId) => isTrashedBoardOwner(connection, boardId, actorId),
     getBoard: (boardId) => readBoard(connection, boardId),

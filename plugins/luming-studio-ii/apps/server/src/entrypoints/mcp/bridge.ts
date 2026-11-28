@@ -2,6 +2,7 @@ import { fromBinary } from '@bufbuild/protobuf';
 import { WhiteboardService } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/service';
 import { BridgeError, invalidArgument, tooLarge } from './errors.js';
 import { appOperation, archiveMediaType } from './operations.js';
+import { createPanelViewBridge } from './panel-view.js';
 import type { BridgeInput } from './schema.js';
 import { createTransfers, decodeChunk, type TransferFile } from './transfers.js';
 
@@ -59,10 +60,11 @@ async function validateBoard(
 export function createAppBridge(options: AppBridgeOptions) {
   const sessions = new Map<string, Session>();
   const transfers = createTransfers(options.allocateId, options.createFile);
+  const panelViews = createPanelViewBridge(options);
 
   async function closeSession(id: string) {
     sessions.delete(id);
-    await transfers.closeSession(id);
+    await Promise.all([transfers.closeSession(id), panelViews.close(id)]);
   }
 
   async function connect(boardId?: string) {
@@ -145,6 +147,9 @@ export function createAppBridge(options: AppBridgeOptions) {
     switch (input.action) {
       case 'request':
         return { response: await request(session, input, signal) };
+      case 'view':
+        await panelViews.update(session, input, signal);
+        return {};
       case 'asset': {
         if (session.boardId && session.boardId !== input.boardId) {
           throw invalidArgument('素材不属于当前面板的白板。');

@@ -263,6 +263,35 @@ describe('LinkObject', () => {
 describe('legacy media canvas controls', () => {
   const geometry = { x: 0, y: 0, width: 100, height: 55, rotation: 0 };
 
+  it('hands video clicks to the canvas during annotations and restores the same player', () => {
+    const Video = videoExtension.View;
+    const props = {
+      object: { kind: 'video' as const, label: '播放器', geometry },
+      payload: { version: 1, value: { src: video } },
+      geometry,
+      zoom: 1,
+      selected: true,
+      interactive: true,
+      readOnly: false,
+      request: vi.fn<Parameters<typeof Video>[0]['request']>(),
+    };
+
+    fixture.render(<Video {...props} />);
+    const player = element<HTMLVideoElement>('video');
+    expect(player.controls).toBe(true);
+
+    fixture.render(<Video {...props} annotationActive />);
+    expect(element('video')).toBe(player);
+    expect(player.controls).toBe(false);
+    expect(player.tabIndex).toBe(-1);
+    expect(player.dataset.interactive).toBe('false');
+
+    fixture.render(<Video {...props} />);
+    expect(element('video')).toBe(player);
+    expect(player.getAttribute('src')).toBe(video);
+    expect(player.controls).toBe(true);
+  });
+
   it('keeps zoomed-out link cards compact and enables media controls when expanded', () => {
     const Link = linkExtension.View;
     const Video = videoExtension.View;

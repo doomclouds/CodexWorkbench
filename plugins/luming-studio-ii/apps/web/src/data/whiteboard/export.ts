@@ -37,10 +37,10 @@ export interface BoardDownloadNotice {
 
 type BoardDownloadResult = BoardDownloadNotice | void;
 
-export type RequestBoardDownload = (
-  file: ExportBoardFile,
-  signal?: AbortSignal,
-) => BoardDownloadResult | Promise<BoardDownloadResult>;
+export interface RequestBoardDownload {
+  (file: ExportBoardFile, signal?: AbortSignal): BoardDownloadResult | Promise<BoardDownloadResult>;
+  readonly confirmation?: 'host';
+}
 
 export type ExportBoardRejection =
   | 'invalidSelection'

@@ -89,6 +89,8 @@ function payloadWire(payload: RoomEventPayload): WirePayload {
         participants,
         timer,
         agentWorkspaces,
+        onlineAgentIds,
+        readingAgentIds,
         canReleaseAgentActivity,
         feedbackVersion,
         suggestionsVersion,
@@ -103,6 +105,10 @@ function payloadWire(payload: RoomEventPayload): WirePayload {
           participants: participants.map(participantWire),
           timer: timerWire(timer),
           agentWorkspaces: agentWorkspaces.map(agentWorkspaceWire),
+          onlineAgents: onlineAgentIds && {
+            agentIds: [...onlineAgentIds],
+            readingAgentIds: [...(readingAgentIds ?? [])],
+          },
           canReleaseAgentActivity,
           feedbackVersion,
           suggestionsVersion,
@@ -122,7 +128,13 @@ function payloadWire(payload: RoomEventPayload): WirePayload {
     case 'agentWorkspaces':
       return {
         case: 'agentWorkspaces',
-        value: { workspaces: payload.workspaces.map(agentWorkspaceWire) },
+        value: {
+          workspaces: payload.workspaces.map(agentWorkspaceWire),
+          onlineAgents: payload.onlineAgentIds && {
+            agentIds: [...payload.onlineAgentIds],
+            readingAgentIds: [...(payload.readingAgentIds ?? [])],
+          },
+        },
       };
     case 'contentChanged': {
       const { boardRevision, changedObjectIds, removedObjectIds, changedObjects, refreshScene } =

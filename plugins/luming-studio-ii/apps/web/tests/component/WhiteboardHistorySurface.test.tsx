@@ -154,7 +154,7 @@ function previewFrame({ scene: snapshot, onSelectionChange }: BoardHistoryPrevie
 }
 
 type HistoryOverrides = Partial<
-  Pick<WhiteboardHistorySurfaceProps, 'boardId' | 'revision' | 'canEdit'>
+  Pick<WhiteboardHistorySurfaceProps, 'boardId' | 'revision' | 'canEdit' | 'colorForAuthor'>
 >;
 
 async function mount(
@@ -171,6 +171,7 @@ async function mount(
     boardId: identity = boardId,
     revision = latestRevision,
     canEdit = true,
+    colorForAuthor,
   }: HistoryOverrides) {
     const [visible, setVisible] = useState(true);
 
@@ -199,6 +200,7 @@ async function mount(
           onRestored={onRestored}
           onPreviewChange={onPreviewChange}
           download={download}
+          colorForAuthor={colorForAuthor}
           renderPreview={renderPreview}
         />
       </>
@@ -487,6 +489,40 @@ test('shows stored titles for current and initial revisions and preserves the re
   expect(button('展开版本 0').textContent).toContain('初始白板标题');
   expect(button('展开版本 0').querySelector('time')?.dateTime).toBe(createdAt);
   expect(button('展开版本 3').querySelector('time')).toBeNull();
+});
+
+test('uses the saved Agent name and avatar in the version and its inspected change', async () => {
+  const service = changedHistoryMock();
+  const agent = {
+    ...version(sourceRevision),
+    actorId: 'agent-session-test',
+    actorKind: 'agent' as const,
+    actorName: 'Agent · 测试署名',
+  };
+  service.listVersions.mockResolvedValue({
+    currentRevision: latestRevision,
+    versions: [{ ...version(latestRevision), actorId: '协作者' }, agent, version(0n)],
+  });
+  await mount(service, {
+    colorForAuthor: (actorId) => (actorId === agent.actorId ? '#dc3c3d' : '#785ee8'),
+  });
+
+  const row = button('展开版本 1');
+  expect(row.querySelector('strong')?.textContent).toBe(agent.actorName);
+  expect(row.querySelector('[data-agent] svg')).not.toBeNull();
+  expect(row.querySelector<HTMLElement>('[data-agent]')?.style.backgroundColor).toBe(
+    'rgb(220, 60, 61)',
+  );
+  expect(button('展开版本 3').querySelector('[data-agent]')).toBeNull();
+  await selectButton('展开版本 1');
+  await selectButton('看改动');
+  const difference = fixture.host.querySelector('.whiteboard-history__difference-meta');
+  expect(difference?.textContent).toContain(agent.actorName);
+  expect(difference?.querySelector('[data-agent] svg')).not.toBeNull();
+  expect(difference?.querySelector<HTMLElement>('[data-agent]')?.style.backgroundColor).toBe(
+    'rgb(220, 60, 61)',
+  );
+  expect(difference?.textContent).not.toContain(agent.actorId);
 });
 
 test('confirms an inspected change as the single object restore scope', async () => {

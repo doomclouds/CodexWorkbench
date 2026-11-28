@@ -19,10 +19,17 @@ import type {
   SubmitBoardSuggestion,
 } from '../domain/index.js';
 import type {
+  BoardEditPlanningReader,
   BoardSuggestionReader,
   BoardSuggestionRepository,
   BoardSuggestionWriter,
 } from '../ports/index.js';
+import {
+  agentOwnsChanges,
+  agentWorkspacesDisjoint,
+  type AgentWriteWorkspace,
+} from './agent-board-write-scope.js';
+import { createSuggestionOverlay } from './board-suggestion-overlay.js';
 import {
   BoardSuggestionError,
   firstSubmission,
@@ -31,6 +38,7 @@ import {
   proposalLifetimeMillis,
   publicSuggestion,
   suggestionIdentifier,
+  type SuggestionChangeGuard,
 } from './board-suggestion-plans.js';
 import {
   finishSuggestionDecision,
@@ -44,6 +52,7 @@ export { BoardSuggestionError } from './board-suggestion-plans.js';
 interface FrozenFeedbackSource {
   readonly capturedBoardRevision: bigint;
   readonly objectId?: string;
+  readonly objectIds?: readonly string[];
 }
 
 interface BoardSuggestionDependencies {
@@ -51,11 +60,26 @@ interface BoardSuggestionDependencies {
   readonly newId: () => string;
   readonly digest: (input: string) => string;
   readonly onChanged?: (boardId: string) => void;
+  readonly resolveAgentWorkspaces?: (
+    boardId: string,
+    ownerId: string,
+  ) => readonly AgentWriteWorkspace[];
   readonly readFeedbackSource?: (
     actor: BoardReviewActor,
     boardId: string,
     feedbackThreadId: string,
   ) => FrozenFeedbackSource | undefined;
+}
+
+interface AgentSuggestionChoice extends AcceptBoardSuggestion {
+  readonly agentId: string;
+  readonly taskId: string;
+  readonly generation: string;
+}
+
+interface AgentDecisionAuthorization {
+  readonly agentId: string;
+  readonly authorize: (reader: BoardEditPlanningReader) => SuggestionChangeGuard | undefined;
 }
 
 interface ListBoardSuggestions {
@@ -80,6 +104,11 @@ export interface BoardSuggestionApplication {
   accept(
     actor: BoardReviewActor,
     request: AcceptBoardSuggestion,
+    decodeEdit: DecodeBoardSuggestionEdit,
+  ): BoardEditReceipt;
+  acceptAgent(
+    actor: BoardReviewActor,
+    request: AgentSuggestionChoice,
     decodeEdit: DecodeBoardSuggestionEdit,
   ): BoardEditReceipt;
   reject(actor: BoardReviewActor, request: RejectBoardSuggestion): BoardSuggestion;
@@ -196,7 +225,7 @@ function captureSource(
       throw new BoardSuggestionError(404, '这条批注已不存在。');
     }
 
-    const objectIds = frozen.objectId ? [frozen.objectId] : [];
+    const objectIds = frozen.objectIds ?? (frozen.objectId ? [frozen.objectId] : []);
 
     return {
       boardId: board.boardId,
@@ -270,6 +299,7 @@ function reviewChoice(
   time: number,
   digest: (input: string) => string,
   applying: boolean,
+  authorizeChanges?: SuggestionChangeGuard,
 ): ReturnType<typeof prepareSuggestionDecision> {
   if (!proposed || proposed.expiresAtMillis <= BigInt(time)) {
     return { decision: { kind: 'rejected', reason: 'versionUnavailable' } };
@@ -283,7 +313,36 @@ function reviewChoice(
     decodeEdit,
     digest,
     applying,
+    authorizeChanges,
   });
+}
+
+function authorizeAgentChoice(
+  reader: BoardEditPlanningReader,
+  { boardId, agentId, generation, taskId }: AgentSuggestionChoice,
+  workspaces: readonly AgentWriteWorkspace[],
+): SuggestionChangeGuard | undefined {
+  const active = workspaces.find(
+    (workspace) =>
+      workspace.agentId === agentId &&
+      workspace.generation === generation &&
+      workspace.taskId === taskId,
+  );
+
+  if (!active || !agentWorkspacesDisjoint(reader, boardId, active, workspaces)) {
+    return undefined;
+  }
+
+  return (stagedReader, changes) => {
+    if (!agentOwnsChanges(stagedReader, boardId, active.scope, changes)) {
+      return false;
+    }
+
+    const projected = createSuggestionOverlay(stagedReader, boardId, false);
+    projected.stage(changes);
+
+    return agentWorkspacesDisjoint(projected.reader, boardId, active, workspaces);
+  };
 }
 
 function acceptPending(
@@ -293,18 +352,29 @@ function acceptPending(
   decodeEdit: DecodeBoardSuggestionEdit,
   timeMillis: number,
   digest: (input: string) => string,
+  agent?: AgentDecisionAuthorization,
 ): { receipt: BoardEditReceipt; changed: boolean } {
-  const board = requireOwner(writer, actor, request.boardId, 'human');
+  const board = requireOwner(writer, actor, request.boardId, agent ? 'agent' : 'human');
   const { boardId, commandId, signature, proposalId, optionId } = request;
   const proposal = writer.getSuggestion(boardId, proposalId);
   const option = proposal?.options.find((entry) => entry.optionId === optionId);
   let review: SuggestionReviewDraft | undefined;
   const edit = runBoardEditInTransaction(
     writer,
-    actor,
+    agent ? { id: agent.agentId } : actor,
     { boardId, commandId },
-    { signature, savedAtMillis: timeMillis, kind: option?.edit.kind ?? 'geometry' },
+    {
+      signature,
+      savedAtMillis: timeMillis,
+      kind: option?.edit.kind ?? 'geometry',
+      ownerActorId: agent ? actor.id : undefined,
+    },
     () => {
+      const authorize = agent?.authorize(writer);
+      if (agent && !authorize) {
+        return { kind: 'rejected', reason: 'forbidden' };
+      }
+
       const prepared = reviewChoice(
         writer,
         board,
@@ -314,7 +384,16 @@ function acceptPending(
         timeMillis,
         digest,
         true,
+        authorize,
       );
+
+      if (
+        prepared.decision.kind === 'changes' &&
+        authorize?.(writer, prepared.decision) === false
+      ) {
+        return { kind: 'rejected', reason: 'forbidden' };
+      }
+
       review = prepared.review;
 
       return prepared.decision;
@@ -344,8 +423,32 @@ function acceptPending(
 
 export function createBoardSuggestionApplication(
   repository: BoardSuggestionRepository,
-  { now, newId, digest, readFeedbackSource, onChanged }: BoardSuggestionDependencies,
+  {
+    now,
+    newId,
+    digest,
+    readFeedbackSource,
+    onChanged,
+    resolveAgentWorkspaces,
+  }: BoardSuggestionDependencies,
 ): BoardSuggestionApplication {
+  function choose(
+    actor: BoardReviewActor,
+    request: AcceptBoardSuggestion,
+    decodeEdit: DecodeBoardSuggestionEdit,
+    agent?: AgentDecisionAuthorization,
+  ) {
+    const { receipt, changed } = repository.write((writer) =>
+      acceptPending(writer, actor, request, decodeEdit, now(), digest, agent),
+    );
+
+    if (changed) {
+      onChanged?.(request.boardId);
+    }
+
+    return receipt;
+  }
+
   return {
     createSource(actor, request) {
       const frozen = attachedFeedback(repository, actor, request, readFeedbackSource);
@@ -448,15 +551,18 @@ export function createBoardSuggestionApplication(
       });
     },
     accept(actor, request, decodeEdit) {
-      const { receipt, changed } = repository.write((writer) =>
-        acceptPending(writer, actor, request, decodeEdit, now(), digest),
-      );
-
-      if (changed) {
-        onChanged?.(request.boardId);
-      }
-
-      return receipt;
+      return choose(actor, request, decodeEdit);
+    },
+    acceptAgent(actor, request, decodeEdit) {
+      return choose(actor, request, decodeEdit, {
+        agentId: request.agentId,
+        authorize: (reader) =>
+          authorizeAgentChoice(
+            reader,
+            request,
+            resolveAgentWorkspaces?.(request.boardId, actor.id) ?? [],
+          ),
+      });
     },
     reject(actor, request) {
       let changed = false;

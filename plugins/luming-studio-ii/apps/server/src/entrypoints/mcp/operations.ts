@@ -86,6 +86,8 @@ const libraryMethods = [
       'ManageBoard',
       'PurgeBoards',
       'GetCatalogCommandReceipt',
+      'GetWorkbenchPreferences',
+      'UpdateWorkbenchPreferences',
     ],
   ],
   ['BoardArchiveService', ['GetArchiveImportReceipt']],

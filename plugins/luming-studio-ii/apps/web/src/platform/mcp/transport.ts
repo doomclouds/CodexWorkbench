@@ -1,4 +1,5 @@
 import { reportMcpWarning } from './diagnostics.js';
+import type { McpViewContext } from './context.js';
 import {
   chunkBytes,
   encodeChunk,
@@ -39,6 +40,12 @@ interface AssetTarget {
   readonly assetId: string;
 }
 
+interface ViewUpdate {
+  readonly viewId: string;
+  readonly sequence: number;
+  readonly state?: McpViewContext & { readonly selectedCount: number };
+}
+
 interface BinaryResult {
   readonly bytes: Uint8Array<ArrayBuffer>;
   readonly mimeType: string;
@@ -73,6 +80,7 @@ export function createMcpTransport({
   invalidateSession,
   lifetime,
 }: McpTransportOptions) {
+  let viewSessionId: string | undefined;
   async function exchange(
     id: string,
     input: Readonly<Record<string, unknown>>,
@@ -234,5 +242,22 @@ export function createMcpTransport({
     return withBinaryResponse(id, { action: 'asset', boardId, assetId }, signal);
   }
 
-  return { postProtobuf, postArchive, getAsset };
+  async function syncView(update: ViewUpdate) {
+    if (update.state) {
+      const lease = await session(lifetime);
+      if (lease.boardId && lease.boardId !== update.state.boardId) {
+        return;
+      }
+
+      viewSessionId = lease.id;
+    }
+    if (viewSessionId) {
+      await exchange(viewSessionId, { action: 'view', ...update }, lifetime);
+      if (!update.state) {
+        viewSessionId = undefined;
+      }
+    }
+  }
+
+  return { postProtobuf, postArchive, getAsset, syncView };
 }

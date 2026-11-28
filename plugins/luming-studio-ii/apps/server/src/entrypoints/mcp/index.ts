@@ -1,16 +1,17 @@
-import { create, fromBinary, toBinary } from '@bufbuild/protobuf';
-import {
-  BoardCatalogService,
-  BoardSortOrder,
-} from '@codexworkbench/luming-studio-ii-contracts/catalog/service';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { Buffer } from 'node:buffer';
 import { registerAgentActivity } from './agent-activity.js';
-import { createAppBridge, type AppBridgeOptions } from './bridge.js';
+import { createAgentReceiptLookup, registerArtifactApply } from './artifact-apply.js';
+import { registerArtifactContext } from './artifact-context.js';
+import { artifactListSchema, listArtifacts } from './artifact-list.js';
+import { registerArtifactRead } from './artifact-read.js';
+import { registerArtifactTools } from './artifact-tools.js';
+import { studioMcpIcon } from './branding.js';
+import { createAppBridge, type AppBridgeOptions, type LocalRequest } from './bridge.js';
 import { BridgeError } from './errors.js';
-import { protobufMediaType } from './operations.js';
+import type { ModelToolOptions } from './model-tool.js';
 import { bridgeSchema, openSchema } from './schema.js';
 
 export type { AppBridgeOptions, LocalRequest } from './bridge.js';
@@ -20,17 +21,7 @@ const appUri = 'ui://luming-studio-ii/app';
 const appMimeType = 'text/html;profile=mcp-app';
 const appTitle = '鹿鸣 · Luming Studio II';
 const name = 'luming-studio-ii';
-const boardListBytes = 16 * 1024;
-const defaultPageSize = 10;
 const maxAgentSuggestionBytes = 128 * 1024;
-
-const listSchema = z
-  .object({
-    query: z.string().max(200).optional(),
-    cursor: z.string().max(2048).optional(),
-    pageSize: z.number().int().min(1).max(20).optional(),
-  })
-  .strict();
 
 const suggestionId = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/u);
 const commandObject = z.record(z.string(), z.json());
@@ -63,15 +54,20 @@ type SuggestionInput = z.infer<typeof suggestionSchema>;
 type SuggestionResult = { readonly ok: boolean } & Readonly<Record<string, unknown>>;
 type SubmitSuggestion = (input: SuggestionInput, signal: AbortSignal) => Promise<SuggestionResult>;
 
-interface StudioMcpOptions extends AppBridgeOptions {
+interface StudioMcpOptions extends AppBridgeOptions, ModelToolOptions {
   readonly html: string;
   readonly pluginVersion: string;
-  readonly onError: (error: unknown) => void;
   readonly submitSuggestion?: SubmitSuggestion;
   readonly dispatchAgentActivity?: (body: Uint8Array, signal: AbortSignal) => Promise<Response>;
+  readonly dispatchAgentWrite?: (body: Uint8Array, signal: AbortSignal) => Promise<Response>;
+  readonly dispatchAgentReceipt?: (body: Uint8Array, signal: AbortSignal) => Promise<Response>;
+  readonly dispatchAgentChoice?: (body: Uint8Array, signal: AbortSignal) => Promise<Response>;
+  readonly dispatchAgentFeedback?: (
+    agentId: string,
+    request: LocalRequest,
+    signal: AbortSignal,
+  ) => Promise<Response>;
 }
-
-type ListInput = z.infer<typeof listSchema>;
 
 function appError(error: unknown, report: StudioMcpOptions['onError']) {
   if (error instanceof BridgeError) {
@@ -92,45 +88,6 @@ function appError(error: unknown, report: StudioMcpOptions['onError']) {
       error: { code: 'UNAVAILABLE', message: '本机白板服务暂时不可用，请重新连接。' },
     },
   };
-}
-
-async function listBoards(options: StudioMcpOptions, input: ListInput, signal: AbortSignal) {
-  const method = BoardCatalogService.method.listBoards;
-  const wire = create(method.input, {
-    query: input.query ?? '',
-    cursor: input.cursor,
-    order: BoardSortOrder.RECENT,
-    pageSize: input.pageSize ?? defaultPageSize,
-  });
-  const response = await options.dispatch(
-    {
-      route: '/' + BoardCatalogService.typeName + '/' + method.name,
-      method: 'POST',
-      mediaType: protobufMediaType,
-      body: toBinary(method.input, wire),
-    },
-    signal,
-  );
-  const contentLength = Number(response.headers.get('content-length'));
-  if (!response.ok || contentLength > boardListBytes) {
-    await response.body?.cancel();
-    throw new BridgeError('UNAVAILABLE', '当前无法读取作品列表。');
-  }
-
-  const body = new Uint8Array(await response.arrayBuffer());
-  if (body.byteLength > boardListBytes) {
-    throw new BridgeError('TOO_LARGE', '作品列表超过单页大小限制。');
-  }
-
-  const { boards, nextCursor } = fromBinary(method.output, body, { readUnknownFields: false });
-  const artifacts = boards.map(({ boardId, title, pinned }) => ({
-    id: boardId,
-    title,
-    pinned,
-    type: 'whiteboard',
-  }));
-
-  return { artifacts, nextCursor };
 }
 
 function registerSuggestions(server: McpServer, options: StudioMcpOptions): void {
@@ -165,15 +122,36 @@ function registerSuggestions(server: McpServer, options: StudioMcpOptions): void
 }
 
 export function createStudioMcpServer(options: StudioMcpOptions): McpServer {
-  const server = new McpServer({ name, version: options.pluginVersion });
+  const server = new McpServer({
+    name,
+    title: appTitle,
+    version: options.pluginVersion,
+    icons: [studioMcpIcon],
+  });
   const bridge = createAppBridge(options);
-  const { allocateId, dispatchAgentActivity, now, onError } = options;
-  const closeAgentActivity =
+  const {
+    allocateId,
+    dispatchAgentActivity,
+    dispatchAgentWrite,
+    dispatchAgentReceipt,
+    dispatchAgentChoice,
+    dispatchAgentFeedback,
+    onError,
+  } = options;
+  const usesAgentIdentity = Boolean(
+    dispatchAgentActivity ||
+    dispatchAgentWrite ||
+    dispatchAgentReceipt ||
+    dispatchAgentChoice ||
+    dispatchAgentFeedback,
+  );
+  const agentId = usesAgentIdentity ? 'agent-' + allocateId() : undefined;
+  const agentActivity =
     dispatchAgentActivity &&
     registerAgentActivity(server, {
       allocateId,
+      agentId,
       dispatch: dispatchAgentActivity,
-      now,
       reportError: onError,
     });
 
@@ -230,15 +208,16 @@ export function createStudioMcpServer(options: StudioMcpOptions): McpServer {
     'artifact_list',
     {
       title: '查找白板',
-      description: '按名称查找本机可读取的活跃白板，使用游标续读。',
-      inputSchema: listSchema,
+      description:
+        '按名称查找可读取的活跃白板，或用 trashed:true 查找自己的已回收白板。pinned:true 只看置顶；sort 可用 recent 或 title。默认每页 10 条，limit 或 pageSize 最多 20 条。翻页保留查询和筛选条件，使用 nextCursor 或 offset。',
+      inputSchema: artifactListSchema,
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     async (input, { signal }) => {
       try {
         return {
           content: [],
-          structuredContent: { ok: true, data: await listBoards(options, input, signal) },
+          structuredContent: { ok: true, data: await listArtifacts(options, input, signal) },
         };
       } catch (error) {
         return appError(error, options.onError);
@@ -246,11 +225,20 @@ export function createStudioMcpServer(options: StudioMcpOptions): McpServer {
     },
   );
   registerSuggestions(server, options);
+  const readOptions = { ...options, observeRead: agentActivity?.startRead };
+  registerArtifactContext(server, readOptions);
+  const lookupReceipt =
+    agentId && dispatchAgentReceipt && createAgentReceiptLookup(agentId, dispatchAgentReceipt);
+  registerArtifactRead(server, readOptions, lookupReceipt || undefined);
+  registerArtifactTools(server, { ...options, agentId });
+  if (dispatchAgentWrite && agentId) {
+    registerArtifactApply(server, { agentId, dispatch: dispatchAgentWrite, onError });
+  }
 
   server.registerResource(
     'studio-ui',
     appUri,
-    { title: appTitle, mimeType: appMimeType },
+    { title: appTitle, mimeType: appMimeType, icons: [studioMcpIcon] },
     async () => ({
       contents: [
         {
@@ -282,7 +270,7 @@ export function createStudioMcpServer(options: StudioMcpOptions): McpServer {
 
   async function close() {
     try {
-      await Promise.all([bridge.close(), closeAgentActivity?.()]);
+      await Promise.all([bridge.close(), agentActivity?.close()]);
     } finally {
       await closeServer();
     }

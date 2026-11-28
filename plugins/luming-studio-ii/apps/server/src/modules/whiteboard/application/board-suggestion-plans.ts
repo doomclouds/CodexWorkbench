@@ -15,6 +15,11 @@ import { createSuggestionOverlay } from './board-suggestion-overlay.js';
 import { planContentEdit } from './edit-content.js';
 import { planGeometryEdit } from './edit-geometry.js';
 
+export type SuggestionChangeGuard = (
+  reader: BoardEditPlanningReader,
+  changes: BoardChanges,
+) => boolean;
+
 export class BoardSuggestionError extends Error {
   constructor(
     readonly status: 400 | 403 | 404 | 409,
@@ -103,8 +108,14 @@ export function operationFitsSource(
   request: BoardSuggestionOperation,
   sourceIds: ReadonlySet<string>,
 ): boolean {
+  return scopedOperationTargets(request)?.every((id) => sourceIds.has(id)) === true;
+}
+
+export function scopedOperationTargets(
+  request: BoardSuggestionOperation,
+): readonly string[] | undefined {
   if (request.kind === 'content') {
-    return sourceIds.has(request.operation.objectId);
+    return [request.operation.objectId];
   }
 
   const operation = request.operation;
@@ -113,10 +124,10 @@ export function operationFitsSource(
     (operation.kind === 'style' && operation.rememberColor !== undefined);
 
   if (operation.kind === 'paste' || writesPalette) {
-    return false;
+    return undefined;
   }
 
-  return geometryTargets(operation).every((id) => sourceIds.has(id));
+  return geometryTargets(operation);
 }
 
 export function planSuggestion(
@@ -150,13 +161,20 @@ function planScopedSuggestion(
   board: BoardHeader,
   request: BoardSuggestionOperation,
   sourceIds: ReadonlySet<string>,
+  authorizeChanges?: SuggestionChangeGuard,
 ): BoardEditDecision {
   if (!operationFitsSource(request, sourceIds)) {
     return { kind: 'rejected', reason: 'forbidden' };
   }
 
   const decision = planSuggestion(reader, board, request);
-  if (decision.kind === 'changes' && !changesFitSource(decision, sourceIds)) {
+  if (decision.kind !== 'changes') {
+    return decision;
+  }
+
+  const withinSource = changesFitSource(decision, sourceIds);
+  const authorized = authorizeChanges?.(reader, decision);
+  if (!withinSource || authorized === false) {
     return { kind: 'rejected', reason: 'forbidden' };
   }
 
@@ -177,14 +195,28 @@ export function planSuggestionOption(
   option: BoardSuggestionOptionDraft,
   sourceIds: ReadonlySet<string>,
   decodeEdit: DecodeBoardSuggestionEdit,
+  authorizeChanges?: SuggestionChangeGuard,
 ): BoardEditDecision {
   if (!option.additionalEdits?.length) {
-    return planScopedSuggestion(reader, board, decodeEdit(option.edit), sourceIds);
+    return planScopedSuggestion(
+      reader,
+      board,
+      decodeEdit(option.edit),
+      sourceIds,
+      authorizeChanges,
+    );
   }
 
   const staged = createSuggestionOverlay(reader, board.boardId, true);
   for (const edit of [option.edit, ...option.additionalEdits]) {
-    const decision = planScopedSuggestion(staged.reader, board, decodeEdit(edit), sourceIds);
+    const decision = planScopedSuggestion(
+      staged.reader,
+      board,
+      decodeEdit(edit),
+      sourceIds,
+      authorizeChanges,
+    );
+
     if (decision.kind !== 'changes') {
       return decision;
     }

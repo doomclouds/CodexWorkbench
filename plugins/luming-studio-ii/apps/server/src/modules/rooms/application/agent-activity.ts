@@ -43,6 +43,10 @@ export interface AgentActivity {
   change(principal: AgentActivityPrincipal, operation: AgentActivityOperation): AgentActivityResult;
   release(request: ReleaseAgentActivity): AgentActivityResult;
   snapshot(boardId: string, ownerId?: string): readonly AgentWorkspace[];
+  visibleSnapshot(boardId: string): readonly AgentWorkspace[];
+  onlineAgentIds(boardId: string): readonly string[];
+  readingAgentIds(boardId: string): readonly string[];
+  setReadPresence(principal: AgentActivityPrincipal, activityId: string, reading: boolean): void;
   withdraw(principal: Pick<AgentActivityPrincipal, 'ownerId' | 'agentId'>): readonly string[];
 }
 
@@ -57,6 +61,19 @@ interface RetiredWorkspace {
   readonly kind: 'ended';
   readonly generation: string;
   readonly reason: AgentActivityEndReason;
+  readonly display?: AgentWorkspace;
+  readonly presence?: AgentPresence;
+}
+
+interface AgentPresence {
+  readonly agentId: string;
+  readonly ownerId: string;
+  readonly idleUntil: number;
+}
+
+interface ReadPresence extends AgentActivityPrincipal {
+  readonly reading: boolean;
+  readonly expiresAt: number;
 }
 
 type Workspace = LiveWorkspace | RetiredWorkspace;
@@ -64,6 +81,10 @@ type BoardWorkspaces = Map<string, Workspace>;
 type Rejection = Extract<AgentActivityResult, { readonly kind: 'rejected' }>['reason'];
 
 const leaseMs = 10 * 60_000;
+const idleMs = 20_000;
+const readPresenceMs = 120_000;
+const maxReads = 128;
+const terminalDisplayMs = 4_000;
 const maxBoardWorkspaces = 12;
 const maxAgentWorkspaces = 6;
 const maxBoardHistory = 256;
@@ -94,8 +115,18 @@ function resultOf(record: Workspace): AgentActivityResult {
   return { kind: 'ended', generation: record.generation, reason: record.reason };
 }
 
-function retire(generation: string, reason: AgentActivityEndReason): RetiredWorkspace {
-  return { kind: 'ended', generation, reason };
+function retire(
+  { ownerId, workspace }: LiveWorkspace,
+  reason: AgentActivityEndReason,
+  endedAtUnixMs: number,
+): RetiredWorkspace {
+  return {
+    kind: 'ended',
+    generation: workspace.generation,
+    reason,
+    display: { ...workspace, endedAtUnixMs, endReason: reason },
+    presence: { ownerId, agentId: workspace.agentId, idleUntil: endedAtUnixMs + idleMs },
+  };
 }
 
 function currentRecord(board: BoardWorkspaces, key: string, now: number) {
@@ -105,7 +136,7 @@ function currentRecord(board: BoardWorkspaces, key: string, now: number) {
     return record;
   }
 
-  const retired = retire(record.workspace.generation, 'expired');
+  const retired = retire(record, 'expired', record.workspace.expiresAtUnixMs);
   board.set(key, retired);
 
   return retired;
@@ -132,6 +163,50 @@ function liveWorkspaces(
   }
 
   return workspaces.length ? workspaces : emptyWorkspaces;
+}
+
+function visibleWorkspaces(board: BoardWorkspaces | undefined, now: number) {
+  if (!board) {
+    return emptyWorkspaces;
+  }
+
+  const active = liveWorkspaces(board, now);
+  const ended: AgentWorkspace[] = [];
+  for (const key of board.keys()) {
+    const record = currentRecord(board, key, now);
+    if (record?.kind !== 'ended' || !record.display) {
+      continue;
+    }
+
+    const { display, ...receipt } = record;
+    if ((display.endedAtUnixMs ?? 0) + terminalDisplayMs > now) {
+      ended.push(display);
+    } else {
+      board.set(key, receipt);
+    }
+  }
+
+  if (!ended.length) {
+    return active;
+  }
+
+  ended.sort((a, b) => (b.endedAtUnixMs ?? 0) - (a.endedAtUnixMs ?? 0));
+
+  return [...active, ...ended.slice(0, Math.max(0, maxBoardWorkspaces - active.length))];
+}
+
+function onlineAgentIds(board: BoardWorkspaces | undefined, now: number) {
+  const agents = new Set<string>();
+  for (const key of board?.keys() ?? []) {
+    const record = board && currentRecord(board, key, now);
+    if (record?.kind === 'active') {
+      agents.add(record.workspace.agentId);
+    } else if (record?.presence && record.presence.idleUntil > now) {
+      agents.add(record.presence.agentId);
+    }
+  }
+
+  return [...agents].sort();
 }
 
 function priorBegin(
@@ -186,6 +261,8 @@ function focusedAreas(areas: AgentWorkspace['areas'], focused: ReadonlySet<strin
 
 export function createAgentActivity(options: AgentActivityOptions): AgentActivity {
   const boards = new Map<string, BoardWorkspaces>();
+  const disconnected = new Map<string, number>();
+  const reads = new Map<string, ReadPresence>();
   let stored = 0;
 
   function boardFor(boardId: string): BoardWorkspaces {
@@ -260,6 +337,7 @@ export function createAgentActivity(options: AgentActivityOptions): AgentActivit
       phase: 'preparing',
       areas,
       expiresAtUnixMs: now + leaseMs,
+      lastProgressAtUnixMs: now,
     };
     board.set(key, {
       kind: 'active',
@@ -307,7 +385,13 @@ export function createAgentActivity(options: AgentActivityOptions): AgentActivit
       return rejected('overlap');
     }
 
-    const changed = { ...workspace, phase, areas, expiresAtUnixMs: now + leaseMs };
+    const changed = {
+      ...workspace,
+      phase,
+      areas,
+      expiresAtUnixMs: now + leaseMs,
+      lastProgressAtUnixMs: now,
+    };
     board.set(taskKey(principal, input.taskId), { ...record, workspace: changed });
 
     return { kind: 'active', workspace: changed } as const;
@@ -318,8 +402,9 @@ export function createAgentActivity(options: AgentActivityOptions): AgentActivit
     record: LiveWorkspace,
     key: string,
     reason: AgentActivityEndReason,
+    now: number,
   ) {
-    const terminal = retire(record.workspace.generation, reason);
+    const terminal = retire(record, reason, now);
     board.set(key, terminal);
 
     return resultOf(terminal);
@@ -335,6 +420,9 @@ export function createAgentActivity(options: AgentActivityOptions): AgentActivit
     }
 
     const now = options.now();
+    if (isDisconnected(principal, now)) {
+      return rejected('workspaceReleased');
+    }
     if (operation.kind === 'begin') {
       return begin(principal, operation, now);
     }
@@ -357,7 +445,7 @@ export function createAgentActivity(options: AgentActivityOptions): AgentActivit
       return operation.kind === 'end' ? resultOf(record) : rejected('generationChanged');
     }
     if (operation.kind === 'end') {
-      return close(board, record, key, 'completed');
+      return close(board, record, key, 'completed', now);
     }
 
     return update(principal, board, record, operation, now);
@@ -383,20 +471,26 @@ export function createAgentActivity(options: AgentActivityOptions): AgentActivit
       return rejected('generationChanged');
     }
 
-    return close(board, record, key, 'released');
+    return close(board, record, key, 'released', now);
   }
 
   function withdraw({ ownerId, agentId }: Pick<AgentActivityPrincipal, 'ownerId' | 'agentId'>) {
     const now = options.now();
+    rememberDisconnect(ownerId, agentId, now);
     const affected = new Set<string>();
+    for (const [key, read] of reads) {
+      if (read.ownerId === ownerId && read.agentId === agentId) {
+        reads.delete(key);
+        affected.add(read.boardId);
+      }
+    }
     for (const [boardId, board] of boards) {
-      for (const [key, record] of board) {
-        if (record.kind !== 'active' || record.workspace.agentId !== agentId) {
-          continue;
-        }
-
-        if (record.ownerId === ownerId && record.workspace.expiresAtUnixMs > now) {
-          close(board, record, key, 'released');
+      for (const key of board.keys()) {
+        const record = currentRecord(board, key, now);
+        const ended = disconnectWorkspace(record, ownerId, agentId, now);
+        if (ended) {
+          const { presence: _presence, ...receipt } = ended;
+          board.set(key, receipt);
           affected.add(boardId);
         }
       }
@@ -405,10 +499,105 @@ export function createAgentActivity(options: AgentActivityOptions): AgentActivit
     return [...affected];
   }
 
+  function isDisconnected({ ownerId, agentId }: AgentActivityPrincipal, now: number) {
+    return (disconnected.get(JSON.stringify([ownerId, agentId])) ?? 0) > now;
+  }
+
+  function setReadPresence(
+    principal: AgentActivityPrincipal,
+    activityId: string,
+    reading: boolean,
+  ) {
+    const now = options.now();
+    if (!validPrincipal(principal) || !validAgentActivityId(activityId)) {
+      return;
+    }
+    if (isDisconnected(principal, now)) {
+      return;
+    }
+
+    for (const [id, read] of reads) {
+      if (read.expiresAt <= now) {
+        reads.delete(id);
+      }
+    }
+
+    const { boardId, ownerId, agentId } = principal;
+    const key = JSON.stringify([boardId, ownerId, agentId, activityId]);
+    const previous = reads.get(key);
+    const starting = reading && !previous && reads.size < maxReads;
+    const finishing = !reading && previous?.reading;
+    if (starting || finishing) {
+      reads.set(key, {
+        ...principal,
+        reading,
+        expiresAt: now + (reading ? readPresenceMs : idleMs),
+      });
+    }
+  }
+
+  function readAgentIds(boardId: string, now: number, readingOnly = false) {
+    const ids = new Set<string>();
+    for (const read of reads.values()) {
+      const active = read.boardId === boardId && read.expiresAt > now;
+      if (active && (!readingOnly || read.reading)) {
+        ids.add(read.agentId);
+      }
+    }
+
+    return ids;
+  }
+
+  function roster(boardId: string) {
+    const now = options.now();
+    const present = readAgentIds(boardId, now);
+    for (const agentId of onlineAgentIds(boards.get(boardId), now)) {
+      present.add(agentId);
+    }
+
+    return [...present].sort();
+  }
+
+  function rememberDisconnect(ownerId: string, agentId: string, now: number) {
+    for (const [id, deadline] of disconnected) {
+      if (deadline <= now) {
+        disconnected.delete(id);
+      }
+    }
+
+    disconnected.set(JSON.stringify([ownerId, agentId]), now + leaseMs);
+    if (disconnected.size > maxStored) {
+      const earliest = disconnected.keys().next().value;
+      if (earliest !== undefined) {
+        disconnected.delete(earliest);
+      }
+    }
+  }
+
   return {
     change,
     release,
     snapshot: (boardId, ownerId) => liveWorkspaces(boards.get(boardId), options.now(), ownerId),
+    visibleSnapshot: (boardId) => visibleWorkspaces(boards.get(boardId), options.now()),
+    onlineAgentIds: roster,
+    readingAgentIds: (boardId) => [...readAgentIds(boardId, options.now(), true)].sort(),
+    setReadPresence,
     withdraw,
   };
+}
+
+function disconnectWorkspace(
+  workspace: Workspace | undefined,
+  ownerId: string,
+  agentId: string,
+  now: number,
+): RetiredWorkspace | undefined {
+  if (workspace?.kind === 'active') {
+    return workspace.ownerId === ownerId && workspace.workspace.agentId === agentId
+      ? retire(workspace, 'released', now)
+      : undefined;
+  }
+
+  const presence = workspace?.presence;
+  return presence?.ownerId === ownerId && presence.agentId === agentId ? workspace : undefined;
 }

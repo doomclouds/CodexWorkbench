@@ -1,5 +1,5 @@
 import { Users } from 'lucide-react';
-import { useEffect, useEffectEvent, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type {
   BoardRoomAgentWorkspace,
@@ -22,6 +22,9 @@ import {
   type RoomPresenceViewport,
 } from './follow.js';
 import { ParticipantControl } from './ParticipantControl.js';
+import { AgentWorkspaceOverlay } from './AgentWorkspaceOverlay.js';
+import { projectWorkspaceGeometry } from './agent-workspace-follow.js';
+import { useAgentWorkspaceView, workspaceIsActive } from './agent-workspace-view.js';
 import { PeerCursorOverlay } from './PeerCursorOverlay.js';
 import { PeerEditingOverlay } from './PeerEditingOverlay.js';
 import { useRoomChromeSnapshot } from './room-snapshot.js';
@@ -51,6 +54,7 @@ export interface RoomPresenceSurfaceProps {
   readonly paused: boolean;
   readonly detachSequence: number;
   readonly onViewportRequest: (viewport: RoomPresenceCamera) => void;
+  readonly onCanvasFocus?: () => void;
   readonly onContentChanged?: (change: BoardRoomContentChange) => void;
   readonly onAccessLost?: () => void;
   readonly render: (slot: RoomPresenceSlot) => ReactNode;
@@ -68,8 +72,6 @@ interface PublishedGesture {
   readonly session: BoardRoomSession;
   readonly preview: BoardRoomGesturePreview;
 }
-
-const emptyWorkspaces: readonly BoardRoomAgentWorkspace[] = [];
 
 function RoomPresenceNotice({
   status,
@@ -251,7 +253,9 @@ function activeFollow(
   const ownsSelection =
     selection?.session === session && selection.detachSequence === detachSequence;
   const peerGone = status === 'online' && !available;
-  return ownsSelection && !peerGone && status !== 'accessLost' ? selection : undefined;
+  const agentDisconnected = selection?.kind === 'agent' && status !== 'online';
+  const stopped = peerGone || agentDisconnected || status === 'accessLost';
+  return ownsSelection && !stopped ? selection : undefined;
 }
 
 interface FollowCandidates {
@@ -262,7 +266,10 @@ interface FollowCandidates {
 function followCandidate(selection: FollowSelection | undefined, candidates: FollowCandidates) {
   const { participants, workspaces } = candidates;
   if (selection?.kind === 'agent') {
-    const workspace = workspaces.find(({ agentId }) => agentId === selection.actorId);
+    const workspace = workspaces.find(
+      ({ agentId, areas }) => agentId === selection.actorId && areas.length > 0,
+    );
+
     return {
       available: workspace !== undefined,
       name: workspace?.label,
@@ -338,11 +345,14 @@ function useFollowSelection(
   };
 }
 
-function useRoomFollow(props: RoomPresenceSurfaceProps, snapshot: BoardRoomState) {
+function useRoomFollow(
+  props: RoomPresenceSurfaceProps,
+  snapshot: BoardRoomState,
+  workspaces: readonly BoardRoomAgentWorkspace[],
+) {
   const { session, viewport, cursor, paused, onViewportRequest, editingObjectIds } = props;
   const { status, actorId } = snapshot;
   const participants = presenceMembers(snapshot.participants, actorId);
-  const workspaces = snapshot.agentWorkspaces ?? emptyWorkspaces;
   const roomViewport = toRoomViewport(viewport);
   const canStartFollow = status === 'online' && !paused && roomViewport !== undefined;
   const follow = useFollowSelection(props, status, { participants, workspaces }, canStartFollow);
@@ -351,10 +361,11 @@ function useRoomFollow(props: RoomPresenceSurfaceProps, snapshot: BoardRoomState
   const next = canApply ? fitFollowViewport(peer?.viewport, viewport) : undefined;
   useFollowCamera(peer && participantKey(peer), next, onViewportRequest);
   useAgentWorkspaceCamera(
+    session.scheduleFrame,
     target?.kind === 'agent' ? target.actorId : undefined,
     workspaces,
     viewport,
-    canApply,
+    canApply && !editingObjectIds?.length,
     onViewportRequest,
   );
   const canPublishViewport = !paused && !target;
@@ -368,15 +379,25 @@ function useRoomFollow(props: RoomPresenceSurfaceProps, snapshot: BoardRoomState
     status === 'online' && snapshot.canEdit ? editingObjectIds : undefined,
   );
 
-  return { ...follow, participants, workspaces, canStartFollow, publish };
+  return { ...follow, participants, canStartFollow, publish };
 }
 
 export function RoomPresenceSurface(props: RoomPresenceSurfaceProps) {
   const { paused, viewport, render, session, objectGeometry } = props;
   const snapshot = useRoomSession(props);
   const { status } = snapshot;
-  const follow = useRoomFollow(props, snapshot);
+  const currentWorkspaces = useAgentWorkspaceView(session);
+  const workspaces = useMemo(
+    () => projectWorkspaceGeometry(currentWorkspaces, objectGeometry),
+    [currentWorkspaces, objectGeometry],
+  );
+  const activeWorkspaces = useMemo(() => workspaces.filter(workspaceIsActive), [workspaces]);
+  const follow = useRoomFollow(props, snapshot, activeWorkspaces);
   const remoteGestures = usePeerGestures(session);
+  const releaseWorkspace =
+    status === 'online' && snapshot.canReleaseAgentActivity
+      ? session.releaseAgentWorkspace?.bind(session)
+      : undefined;
 
   return render({
     accessLost: status === 'accessLost',
@@ -394,13 +415,12 @@ export function RoomPresenceSurface(props: RoomPresenceSurfaceProps) {
         reconnecting={status === 'reconnecting'}
         onFollow={follow.handleFollow}
         agents={{
-          workspaces: follow.workspaces,
+          workspaces,
+          onlineAgentIds: snapshot.onlineAgentIds,
+          readingAgentIds: snapshot.readingAgentIds,
           followedAgentId: follow.target?.kind === 'agent' ? follow.target.actorId : undefined,
           onFollow: follow.handleFollowAgent,
-          onRelease:
-            status === 'online' && snapshot.canReleaseAgentActivity
-              ? session.releaseAgentWorkspace?.bind(session)
-              : undefined,
+          onRelease: releaseWorkspace,
         }}
       />
     ),
@@ -416,6 +436,12 @@ export function RoomPresenceSurface(props: RoomPresenceSurfaceProps) {
     ),
     overlay: status === 'online' && !paused && viewport && (
       <>
+        <AgentWorkspaceOverlay
+          workspaces={workspaces}
+          viewport={viewport}
+          onRelease={releaseWorkspace}
+          onCanvasFocus={props.onCanvasFocus}
+        />
         <PeerEditingOverlay session={session} viewport={viewport} objectGeometry={objectGeometry} />
         <PeerCursorOverlay session={session} viewport={viewport} />
       </>

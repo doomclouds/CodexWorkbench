@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "@playwright/test";
+import { initialRootVariable } from "./support/initial-baseline.mjs";
 
 const manifest = JSON.parse(readFileSync(new URL("../plugin.json", import.meta.url), "utf8"));
 const artifacts = fileURLToPath(
@@ -11,6 +12,10 @@ const group = process.env.LUMING_STUDIO_E2E_GROUP ?? "";
 const scoped = /^[a-z][a-z0-9-]{0,49}$/u.test(group);
 const groupRoot = scoped ? join(artifacts, group) : artifacts;
 const run = join(groupRoot, "run");
+const projects = [{ name: "ii" }];
+if (process.env[initialRootVariable]) {
+  projects.unshift({ name: "initial" });
+}
 
 export default defineConfig({
   testDir: scoped ? "./" + group : ".",
@@ -38,5 +43,5 @@ export default defineConfig({
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
-  projects: [{ name: "initial" }, { name: "ii" }],
+  projects,
 });

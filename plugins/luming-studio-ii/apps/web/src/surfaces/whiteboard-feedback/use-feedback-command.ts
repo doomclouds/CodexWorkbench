@@ -38,6 +38,7 @@ const rejectionText: Record<FeedbackRejection, string> = {
   forbidden: '当前权限无法执行此操作。',
   versionChanged: '其他成员已修改这条备注，请刷新后再编辑。',
   commandIdReuse: '本次操作与已有回执不一致，请重新提交。',
+  attachmentClaimed: '这条备注已有附加操作，请先核对当前对话草稿。',
 };
 
 function errorText(error: unknown) {

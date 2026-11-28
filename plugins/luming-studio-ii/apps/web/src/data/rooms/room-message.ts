@@ -10,7 +10,7 @@ import {
 } from '@codexworkbench/luming-studio-ii-contracts/rooms/service';
 import { readObjects } from '../whiteboard/index.js';
 import type { WhiteboardObject } from '../whiteboard/index.js';
-import { readAgentWorkspaces } from './agent-workspaces.js';
+import { readAgentWorkspaces, readOnlineAgentIds } from './agent-workspaces.js';
 import type {
   BoardRoomEvent,
   BoardRoomParticipant,
@@ -176,6 +176,7 @@ export function readRoomEvent(event: WireRoomEvent | undefined, boardId: string)
         participants,
         timer,
         agentWorkspaces,
+        onlineAgents,
         canReleaseAgentActivity,
         feedbackVersion,
         suggestionsVersion,
@@ -190,6 +191,8 @@ export function readRoomEvent(event: WireRoomEvent | undefined, boardId: string)
         participants: participants.map(readParticipant),
         timer: readTimer(timer),
         agentWorkspaces: readAgentWorkspaces(agentWorkspaces),
+        onlineAgentIds: readOnlineAgentIds(onlineAgents?.agentIds),
+        readingAgentIds: readOnlineAgentIds(onlineAgents?.readingAgentIds),
         canReleaseAgentActivity,
         feedbackVersion,
         suggestionsVersion,
@@ -209,6 +212,8 @@ export function readRoomEvent(event: WireRoomEvent | undefined, boardId: string)
         ...header,
         kind: 'agentWorkspaces',
         workspaces: readAgentWorkspaces(payload.value.workspaces),
+        onlineAgentIds: readOnlineAgentIds(payload.value.onlineAgents?.agentIds),
+        readingAgentIds: readOnlineAgentIds(payload.value.onlineAgents?.readingAgentIds),
       };
     case 'contentChanged':
       return {

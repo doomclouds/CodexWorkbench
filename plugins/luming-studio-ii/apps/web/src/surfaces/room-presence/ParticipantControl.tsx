@@ -116,7 +116,9 @@ export function ParticipantControl({
   const [open, setOpen] = useState(false);
   const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
   const panel = useRef<HTMLElement>(null);
-  const agentIds = [...new Set(agents.workspaces.map(({ agentId }) => agentId))];
+  const agentIds = agents.onlineAgentIds ?? [
+    ...new Set(agents.workspaces.map(({ agentId }) => agentId)),
+  ];
   const total = participants.length + agentIds.length;
   if (total === 0 && !reconnecting) {
     return null;

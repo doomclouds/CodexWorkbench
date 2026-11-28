@@ -214,6 +214,12 @@
   font-weight: 650;
 }
 
+.whiteboard-history__avatar[data-agent] {
+  border-radius: 8px;
+  background: var(--history-accent);
+  color: var(--history-accent-text);
+}
+
 .whiteboard-history__record-button > svg {
   flex-shrink: 0;
   align-self: center;
@@ -412,6 +418,19 @@
   margin: 8px 0 12px;
   color: var(--studio-ui-muted, GrayText);
   font-size: 12px;
+}
+
+.whiteboard-history__difference-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.whiteboard-history__difference-meta .whiteboard-history__avatar {
+  inline-size: 20px;
+  block-size: 20px;
+  margin-block-start: 0;
+  border-radius: 5px;
 }
 
 .whiteboard-history__restore-unit {

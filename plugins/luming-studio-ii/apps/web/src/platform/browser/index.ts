@@ -11,6 +11,7 @@ const archiveTooLargeStatus = 413;
 const archiveAssetPath = /^\/studio-archive-assets\/[A-Za-z0-9_-]{1,128}\/[A-Za-z0-9_-]{1,128}$/u;
 const layoutKey = 'luming-studio-ii:library-layout';
 const themeKey = 'luming-studio-ii:theme';
+const pinnedOnlyKey = 'luming-studio-ii:library-pinned-only';
 const darkColorScheme = '(prefers-color-scheme: dark)';
 const guestAccessInterval = 3_000;
 const guestRequestHeaders = { 'x-luming-guest': '1', 'content-type': protobufContentType };
@@ -19,7 +20,12 @@ export { createBoardDraftStorage } from './board-drafts.js';
 export { prepareBoardImage } from './board-image.js';
 export { prepareBoardVideo } from './board-video.js';
 export { renderBrowserVectorExport } from './board-vector.js';
-export { boardRoomClock, subscribeGuestRoomEvents, subscribeRoomEvents } from './room-events.js';
+export {
+  boardRoomClock,
+  observeBoardRoomVisibility,
+  subscribeGuestRoomEvents,
+  subscribeRoomEvents,
+} from './room-events.js';
 export { createRoomStreamTransport } from './room-stream.js';
 
 type LibraryLayout = 'grid' | 'list';
@@ -161,16 +167,25 @@ function preferredTheme(systemPrefersDark: boolean): StudioTheme {
   return systemPrefersDark ? 'dark' : 'light';
 }
 
-export function readPreferences(): { layout: LibraryLayout; resolvedTheme: StudioTheme } {
+export function readPreferences(): {
+  layout: LibraryLayout;
+  resolvedTheme: StudioTheme;
+  pinnedOnly: boolean;
+} {
   const layout = window.localStorage.getItem(layoutKey);
   return {
     layout: layout === 'list' ? 'list' : 'grid',
     resolvedTheme: preferredTheme(window.matchMedia(darkColorScheme).matches),
+    pinnedOnly: window.localStorage.getItem(pinnedOnlyKey) === 'true',
   };
 }
 
 export function rememberLayout(layout: LibraryLayout) {
   window.localStorage.setItem(layoutKey, layout);
+}
+
+export function rememberPinnedOnly(pinnedOnly: boolean) {
+  window.localStorage.setItem(pinnedOnlyKey, String(pinnedOnly));
 }
 
 export function rememberTheme(theme: StudioTheme) {
@@ -194,6 +209,7 @@ async function postBinary(
   body: BodyInit,
   headers: Record<string, string>,
   signal?: AbortSignal,
+  keepalive?: boolean,
 ): Promise<Response> {
   if (!path.startsWith('/') || path.startsWith('//') || path.includes('\\')) {
     throw new Error('白板服务请求必须使用同源路径。');
@@ -207,6 +223,7 @@ async function postBinary(
     credentials: 'same-origin',
     redirect: 'error',
     signal,
+    keepalive,
   });
 }
 
@@ -237,12 +254,14 @@ export async function postProtobuf(
   path: string,
   body: Uint8Array,
   signal?: AbortSignal,
+  keepalive?: boolean,
 ): Promise<Uint8Array> {
   const response = await postBinary(
     path,
     new Uint8Array(body),
     { 'content-type': protobufContentType },
     signal,
+    keepalive,
   );
 
   return readProtobufResponse(response);
@@ -252,8 +271,15 @@ export async function postGuestProtobuf(
   path: string,
   body: Uint8Array,
   signal?: AbortSignal,
+  keepalive?: boolean,
 ): Promise<Uint8Array> {
-  const response = await postBinary(path, new Uint8Array(body), guestRequestHeaders, signal);
+  const response = await postBinary(
+    path,
+    new Uint8Array(body),
+    guestRequestHeaders,
+    signal,
+    keepalive,
+  );
 
   return readProtobufResponse(response);
 }

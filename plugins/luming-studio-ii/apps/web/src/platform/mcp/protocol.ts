@@ -110,6 +110,11 @@ export function readRoute(path: string) {
 }
 
 export function encodeChunk(bytes: Uint8Array) {
+  const native = bytes as Uint8Array & { toBase64?: () => string };
+  if (native.toBase64) {
+    return native.toBase64();
+  }
+
   const step = 8 * 1024;
   let binary = '';
   for (let offset = 0; offset < bytes.length; offset += step) {

@@ -1,4 +1,4 @@
-import { User } from 'lucide-react';
+import { Bot, User } from 'lucide-react';
 import { createContext, useContext } from 'react';
 import type { FeedbackMessage } from '../../data/feedback/index.js';
 
@@ -11,8 +11,14 @@ export const FeedbackAuthorColor = createContext<AuthorColor | undefined>(undefi
 const contrastPivot = 0.179;
 const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 
+function isAgentAuthor({ authorId }: FeedbackAuthor) {
+  return authorId.startsWith('agent-');
+}
+
 export function feedbackAuthorName(author: FeedbackAuthor) {
-  return author.authoredByViewer ? '我' : author.authorName?.trim() || '协作者';
+  return author.authoredByViewer
+    ? '我'
+    : author.authorName?.trim() || (isAgentAuthor(author) ? 'Agent' : '协作者');
 }
 
 function colorChannel(hex: string) {
@@ -32,6 +38,9 @@ export function feedbackAuthorColors(colorFor: AuthorColor | undefined, actorId?
 }
 
 export function FeedbackAuthorGlyph({ author }: { readonly author?: FeedbackAuthor }) {
+  if (author && isAgentAuthor(author)) {
+    return <Bot size={15} aria-hidden="true" />;
+  }
   if (!author || author.authoredByViewer) {
     return <span aria-hidden="true">我</span>;
   }
@@ -59,6 +68,7 @@ export function FeedbackAvatar({ author }: { readonly author: FeedbackAuthor }) 
   return (
     <span
       className="whiteboard-feedback__avatar"
+      data-agent={isAgentAuthor(author) || undefined}
       style={feedbackAuthorColors(colorFor, author.authorId)}
       aria-hidden="true"
     >

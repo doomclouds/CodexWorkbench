@@ -22,7 +22,12 @@ function invalidFilename(filename: string) {
 }
 
 export function createMcpDownload(app: App, lifetime: AbortSignal) {
-  return async ({ filename, mimeType, content }: DownloadRequest, requestSignal?: AbortSignal) => {
+  const confirmation = app.getHostCapabilities()?.downloadFile ? ('host' as const) : undefined;
+
+  async function request(
+    { filename, mimeType, content }: DownloadRequest,
+    requestSignal?: AbortSignal,
+  ) {
     const signal = requestSignal ? AbortSignal.any([lifetime, requestSignal]) : lifetime;
     signal.throwIfAborted();
     if (!app.getHostCapabilities()?.downloadFile) {
@@ -33,6 +38,9 @@ export function createMcpDownload(app: App, lifetime: AbortSignal) {
     }
     if (content.byteLength > maximumBytes) {
       throw new Error('文件超过宿主下载大小上限。请缩小导出范围。');
+    }
+    if (content.byteLength === 0) {
+      throw new Error('导出文件为空。请重新导出。');
     }
     if (invalidFilename(filename)) {
       throw new Error('导出文件名无效。');
@@ -62,5 +70,7 @@ export function createMcpDownload(app: App, lifetime: AbortSignal) {
       kind: 'requested' as const,
       message: `宿主已接受下载「${filename}」。请留意宿主的下载提示。`,
     };
-  };
+  }
+
+  return Object.assign(request, { confirmation });
 }

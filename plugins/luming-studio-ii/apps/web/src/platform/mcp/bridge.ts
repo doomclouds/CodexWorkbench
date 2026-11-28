@@ -1,29 +1,27 @@
-import {
-  App,
-  applyDocumentTheme,
-  applyHostStyleVariables,
-  PostMessageTransport,
-} from '@modelcontextprotocol/ext-apps';
+import { App, PostMessageTransport } from '@modelcontextprotocol/ext-apps';
 import { OpenAIExtensions } from '@openai/mcp-extensions/app';
 import { createMcpAssets } from './assets.js';
 import { createViewPublisher, readMcpBoardView, type McpViewContext } from './context.js';
 import { reportMcpWarning } from './diagnostics.js';
 import { createMcpDownload } from './download.js';
 import { createMcpNavigation } from './navigation.js';
+import { createMcpPreferences } from './preferences.js';
 import { decodeSession, isIdentifier, record, StudioMcpRequestError } from './protocol.js';
 import type { HostExchange } from './protocol.js';
 import { createMcpSessions } from './session.js';
 import { createMcpTransport } from './transport.js';
-
-type StudioTheme = 'light' | 'dark';
-type StudioLayout = 'grid' | 'list';
-type HostContext = ReturnType<App['getHostContext']>;
 
 interface ReviewSourceReference {
   readonly boardId: string;
   readonly feedbackThreadId: string;
   readonly comment: string;
   readonly excerpt?: string;
+  readonly targetLabel?: string;
+  readonly selectedTargets?: readonly {
+    readonly objectId: string;
+    readonly kind: string;
+    readonly label: string;
+  }[];
   readonly sourceId: string;
   readonly capturedBoardRevision: bigint;
   readonly targetsBoardRevision: bigint;
@@ -44,60 +42,45 @@ export function createMcpCommandId() {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-function createMcpPreferences() {
-  let layout: StudioLayout = 'grid';
-  let resolvedTheme: StudioTheme = 'light';
-  const listeners = new Set<(theme: StudioTheme) => void>();
-
-  function rememberTheme(theme: StudioTheme) {
-    resolvedTheme = theme;
-    applyDocumentTheme(theme);
-    document.documentElement.dataset.theme = theme;
-  }
-
-  return {
-    read() {
-      return { layout, resolvedTheme };
-    },
-    rememberTheme,
-    rememberLayout(next: StudioLayout) {
-      layout = next;
-    },
-    subscribeTheme(listener: (theme: StudioTheme) => void) {
-      listeners.add(listener);
-
-      return () => listeners.delete(listener);
-    },
-    receive(context: HostContext) {
-      if (context?.styles?.variables) {
-        applyHostStyleVariables(context.styles.variables);
-      }
-      if (context?.theme) {
-        rememberTheme(context.theme);
-        for (const listener of listeners) {
-          listener(context.theme);
-        }
-      }
-    },
-  };
-}
-
-function createContext(app: App, viewId: string) {
+function createContext(
+  app: App,
+  viewId: string,
+  transport: ReturnType<typeof createMcpTransport>,
+  navigation: ReturnType<typeof createMcpNavigation>,
+) {
   const formats = app.getHostCapabilities()?.updateModelContext;
-  if (formats?.structuredContent) {
-    return createViewPublisher(viewId, (structuredContent) =>
-      app.updateModelContext({ structuredContent }),
-    );
-  }
-  if (formats?.text) {
-    return createViewPublisher(viewId, (summary) =>
-      app.updateModelContext({
+  let sequence = 0;
+  let previous: unknown;
+
+  return createViewPublisher(viewId, async (summary) => {
+    const { boardId, viewport, selectedIds, selectedCount, focusedObjectId, returnViewport } =
+      summary;
+    const current = navigation.read();
+    if (boardId && (current.kind !== 'whiteboard' || current.boardId !== boardId)) {
+      return;
+    }
+
+    const state =
+      boardId && viewport
+        ? { boardId, viewport, selectedIds, selectedCount, focusedObjectId, returnViewport }
+        : undefined;
+    await transport.syncView({ viewId, sequence: ++sequence, state });
+    if (summary === previous) {
+      return;
+    }
+
+    if (formats?.structuredContent) {
+      await app.updateModelContext({ structuredContent: summary });
+    } else if (formats?.text) {
+      await app.updateModelContext({
         content: [
           { type: 'text', text: JSON.stringify(summary), annotations: { audience: ['assistant'] } },
         ],
-      }),
-    );
-  }
+      });
+    }
+
+    previous = summary;
+  });
 }
 
 function openingBoard(args: unknown) {
@@ -140,7 +123,8 @@ function createReviewAttachment(
   return async (reference: ReviewSourceReference, attachSignal?: AbortSignal) => {
     const signal = attachSignal ? AbortSignal.any([lifetime, attachSignal]) : lifetime;
     signal.throwIfAborted();
-    const { boardId, feedbackThreadId, sourceId, comment, excerpt } = reference;
+    const { boardId, feedbackThreadId, sourceId, comment, excerpt, targetLabel, selectedTargets } =
+      reference;
     const location = navigation.read();
     const sameBoard = location.kind === 'whiteboard' && location.boardId === boardId;
     const validReference = [boardId, feedbackThreadId, sourceId].every(isIdentifier);
@@ -154,8 +138,12 @@ function createReviewAttachment(
         boardId,
         feedbackThreadId,
         sourceId,
-        comment,
+        sourceRef: { kind: 'feedback', boardId, feedbackThreadId },
+        read: { boardId, mode: 'context', feedbackId: feedbackThreadId },
+        comment: comment.length > 3000 ? comment.slice(0, 2999) + '…' : comment,
         excerpt,
+        targetLabel,
+        selectedTargets: selectedTargets?.slice(0, 30),
         capturedBoardRevision: reference.capturedBoardRevision.toString(),
         targetsBoardRevision: reference.targetsBoardRevision.toString(),
         targets: reference.targets.map(({ objectId, kind, geometryVersion, payloadVersion }) => ({
@@ -170,7 +158,15 @@ function createReviewAttachment(
     const response = await message.send(
       {
         role: 'user',
-        content: [{ type: 'text', text, _meta: { 'openai/title': '白板备注' } }],
+        content: [
+          {
+            type: 'text',
+            text,
+            _meta: {
+              'openai/title': targetLabel ? '白板备注 · ' + targetLabel.slice(0, 48) : '白板备注',
+            },
+          },
+        ],
         _meta: { 'openai/message': { target: 'active', send: false } },
       },
       { signal },
@@ -183,18 +179,36 @@ function createReviewAttachment(
   };
 }
 
+function readAppIcon() {
+  const src = document.querySelector('link[rel="icon"]')?.getAttribute('href');
+
+  return src?.startsWith('data:image/png;base64,')
+    ? { src, mimeType: 'image/png', sizes: ['64x64'] }
+    : undefined;
+}
+
 export async function connectMcpApp(onClosed: () => void) {
   if (window.parent === window) {
     throw new Error('请从 Codex 对话面板打开鹿鸣。');
   }
 
-  const app = new App({ name: 'Luming Studio II', version: '1.0.0' }, {}, { autoResize: false });
+  const icon = readAppIcon();
+  const app = new App(
+    {
+      name: 'Luming Studio II',
+      title: '鹿鸣 · Luming Studio II',
+      version: '1.0.0',
+      icons: icon ? [icon] : undefined,
+    },
+    {},
+    { autoResize: false },
+  );
   const extensions = new OpenAIExtensions(app);
   const controller = new AbortController();
   const { signal } = controller;
   const readOpeningId = () => app.getHostContext()?.toolInfo?.id;
   const navigation = createMcpNavigation(readOpeningId);
-  const preferences = createMcpPreferences();
+  const preferences = createMcpPreferences(signal);
   const call: HostExchange = (arguments_, signal) =>
     app.callServerTool({ name: appToolName, arguments: { ...arguments_ } }, { signal });
   const sessions = createMcpSessions({
@@ -212,11 +226,12 @@ export async function connectMcpApp(onClosed: () => void) {
     lifetime: signal,
   });
   const assets = createMcpAssets(transport.getAsset, signal);
-  let publish: ReturnType<typeof createContext> = undefined;
+  let publish: ReturnType<typeof createContext> | undefined = undefined;
   let closing: Promise<void> | undefined;
   let ready = false;
 
   async function release() {
+    await preferences.flush();
     controller.abort(new Error('白板面板已关闭。'));
     publish?.close();
     assets.close();
@@ -237,7 +252,11 @@ export async function connectMcpApp(onClosed: () => void) {
     await app.close();
   }
 
-  function handlePageHide() {
+  function handlePageHide(event: PageTransitionEvent) {
+    if (event.persisted) {
+      return;
+    }
+
     close().catch((error: unknown) => {
       reportMcpWarning('鹿鸣面板释放失败。', error);
     });
@@ -273,7 +292,7 @@ export async function connectMcpApp(onClosed: () => void) {
 
     return {};
   };
-  window.addEventListener('pagehide', handlePageHide, { once: true });
+  window.addEventListener('pagehide', handlePageHide);
   try {
     await app.connect(new PostMessageTransport(window.parent, window.parent), {
       timeout: handshakeTimeout,
@@ -290,7 +309,7 @@ export async function connectMcpApp(onClosed: () => void) {
   preferences.receive(app.getHostContext());
   preferFullscreen(app);
   const restoredView = readMcpBoardView(extensions.modelContext?.getCurrent());
-  publish = createContext(app, restoredView?.viewId ?? createMcpCommandId());
+  publish = createContext(app, createMcpCommandId(), transport, navigation);
   if (restoredView) {
     navigation.restore(restoredView);
   } else {

@@ -15,6 +15,7 @@ interface BoardEditRequest {
   readonly kind: BoardVersionKind;
   readonly savedAtMillis: number;
   readonly sourceRevision?: bigint;
+  readonly ownerActorId?: string;
 }
 
 type PlanBoardEdit = (writer: BoardEditWriter, board: BoardHeader) => BoardEditDecision;
@@ -43,8 +44,10 @@ export function runBoardEditInTransaction(
   plan: PlanBoardEdit,
 ): BoardEditReceipt {
   const { boardId, commandId } = identity;
-  const access = writer.getAccess(boardId, actor.id);
-  const board = access?.canEdit ? writer.getBoard(boardId) : undefined;
+  const { ownerActorId } = request;
+  const access = writer.getAccess(boardId, ownerActorId ?? actor.id);
+  const canEdit = access?.canEdit && (ownerActorId === undefined || access.isOwner);
+  const board = canEdit ? writer.getBoard(boardId) : undefined;
   if (!board) {
     return rejected(identity, 'forbidden');
   }
@@ -64,8 +67,14 @@ export function runBoardEditInTransaction(
     return rejected(identity, 'invalidEdit');
   }
 
-  const { signature, ...details } = request;
-  const applied = writer.applyBoardChanges(board, decision, { ...details, actorId: actor.id });
+  const { signature, kind, savedAtMillis, sourceRevision } = request;
+  const applied = writer.applyBoardChanges(board, decision, {
+    kind,
+    savedAtMillis,
+    sourceRevision,
+    actorId: actor.id,
+    actorKind: ownerActorId === undefined ? undefined : 'agent',
+  });
   const advancedRevision = applied.boardRevision > board.revision;
   const outcome = advancedRevision ? applied : { ...applied, order: undefined };
   const receipt = { ...identity, outcome };
@@ -93,11 +102,13 @@ export function checkBoardEditBeforePreparation(
   actor: Actor,
   identity: BoardEditIdentity,
   signature: string,
+  ownerActorId?: string,
 ): BoardEditReceipt | undefined {
   const { boardId, commandId } = identity;
 
   return repository.read((reader) => {
-    if (!reader.getAccess(boardId, actor.id)?.canEdit) {
+    const access = reader.getAccess(boardId, ownerActorId ?? actor.id);
+    if (!access?.canEdit || (ownerActorId !== undefined && !access.isOwner)) {
       return rejected(identity, 'forbidden');
     }
 

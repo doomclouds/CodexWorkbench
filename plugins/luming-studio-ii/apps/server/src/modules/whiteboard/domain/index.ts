@@ -48,7 +48,7 @@ export {
   maxBoardBackupBytes,
   maxExportFileBytes,
 } from './export-types.js';
-export { selectExportObjects } from './export-scope.js';
+export { selectExportObjects, selectExportRectangle } from './export-scope.js';
 export { exportFilename, renderExportFile } from './export-file.js';
 export { backupElement, BackupElementError } from './backup-elements.js';
 export { legacyBackupFeedback } from './backup-feedback.js';
@@ -119,7 +119,7 @@ export {
   readSafeSvgImage,
   type SafeSvgImage,
 } from './svg-image.js';
-export { planVideoChanges, type VideoOperation } from './video-edits.js';
+export { inspectVideo, planVideoChanges, type VideoOperation } from './video-edits.js';
 export type {
   AcceptBoardSuggestion,
   BoardReviewActor,

@@ -68,6 +68,27 @@ function scheduleRoomClock() {
   return { clock, advance };
 }
 
+function createVisibility(initiallyVisible: boolean) {
+  const listeners = new Set<(visible: boolean) => void>();
+  let visible = initiallyVisible;
+  return {
+    observe: (listener: (visible: boolean) => void) => {
+      listeners.add(listener);
+      listener(visible);
+
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    show(next: boolean) {
+      visible = next;
+      for (const listener of listeners) {
+        listener(visible);
+      }
+    },
+  };
+}
+
 interface StreamProbe extends BoardRoomStreamObserver {
   readonly signal: AbortSignal;
 }
@@ -77,7 +98,11 @@ interface PresenceUpdate {
   readonly presence: BoardRoomPresence;
 }
 
-function createRoomRig(overrides: Partial<BoardRoomService> = {}, observation?: 'snapshot') {
+function createRoomRig(
+  overrides: Partial<BoardRoomService> = {},
+  observation?: 'snapshot',
+  visibility?: ReturnType<typeof createVisibility>['observe'],
+) {
   const streams: StreamProbe[] = [];
   const updates: PresenceUpdate[] = [];
   const leaving: bigint[] = [];
@@ -108,7 +133,14 @@ function createRoomRig(overrides: Partial<BoardRoomService> = {}, observation?: 
     },
     ...overrides,
   };
-  const session = createBoardRoomSession({ boardId, viewId, clock, service, observation });
+  const session = createBoardRoomSession({
+    boardId,
+    viewId,
+    clock,
+    service,
+    observation,
+    visibility,
+  });
   const close = session.open({
     onContentChanged(change) {
       contents.push(change);
@@ -380,6 +412,45 @@ test('a host snapshot and a restarted room cannot apply out-of-date timer result
   expect(room.session.getSnapshot().timer).toEqual(initialTimer);
   room.close();
 });
+
+test.each(['stream', 'snapshot'] as const)(
+  'leaves on hide and restores room presence with a new %s observer',
+  async (mode) => {
+    const visibility = createVisibility(false);
+    const room = createRoomRig({}, mode === 'snapshot' ? mode : undefined, visibility.observe);
+    expect(room.streams).toHaveLength(0);
+
+    visibility.show(true);
+    room.stream().onEvent(snapshot(5n, 1n));
+    await room.advance(0);
+    expect(room.updates.map(({ sequence }) => sequence)).toEqual([1n]);
+
+    visibility.show(false);
+    visibility.show(false);
+    expect(room.stream().signal.aborted).toBe(true);
+    expect(room.leaving).toEqual([2n]);
+    await room.advance(6000);
+    expect(room.updates).toHaveLength(1);
+    room.stream().onEvent(snapshot(9n, 6n));
+    expect(room.session.getSnapshot()).toMatchObject({
+      status: 'reconnecting',
+      boardRevision: 5n,
+    });
+
+    visibility.show(true);
+    room.stream(1).onEvent(snapshot(5n, 7n));
+    await room.advance(0);
+    expect(room.session.getSnapshot().status).toBe('online');
+    expect(room.updates.map(({ sequence }) => sequence)).toEqual([1n, 3n]);
+    expect(room.contents.map(({ revision }) => revision)).toEqual([5n]);
+
+    visibility.show(false);
+    room.close();
+    visibility.show(true);
+    expect(room.leaving).toEqual([2n, 4n]);
+    expect(room.streams).toHaveLength(2);
+  },
+);
 
 test('retries a throttled presence after its response without reconnecting the event stream', async () => {
   const sent: PresenceUpdate[] = [];

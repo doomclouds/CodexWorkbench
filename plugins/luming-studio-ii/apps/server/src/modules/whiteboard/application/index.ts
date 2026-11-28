@@ -21,7 +21,13 @@ import { renderExportPng, type SvgPngRenderer } from './export-png.js';
 import { executeMove } from './move-objects.js';
 
 export { createBoardBackup } from './export-backup.js';
-export { readArchivedSvgImage } from './prepare-board-image.js';
+export { prepareBoardAsset, readArchivedSvgImage } from './prepare-board-image.js';
+export { agentWriteBounds } from './agent-board-write-scope.js';
+export {
+  createBoardAgentWriteApplication,
+  maximumAgentBoardWriteOperations,
+  type BoardAgentWriteApplication,
+} from './agent-board-write.js';
 
 export { BoardSuggestionError, createBoardSuggestionApplication } from './board-suggestions.js';
 export type { BoardSuggestionApplication } from './board-suggestions.js';
@@ -32,6 +38,7 @@ export type {
   BoardSuggestion,
   BoardSuggestionEdit,
   BoardSuggestionOptionDraft,
+  BoardSuggestionOperation,
   BoardSuggestionPreview,
 } from '../domain/index.js';
 export type { BoardCreationAttachment } from '../domain/index.js';

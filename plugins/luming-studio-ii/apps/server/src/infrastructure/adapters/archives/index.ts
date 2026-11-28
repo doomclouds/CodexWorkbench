@@ -12,6 +12,12 @@ import {
 } from '../../platform/archives/index.js';
 import type { SqliteConnection, SqliteDatabase } from '../../platform/index.js';
 import {
+  deleteBoardAsset,
+  importBoardAsset,
+  isActiveBoardOwner,
+  listBoardAssets,
+} from './board-assets.js';
+import {
   preparePublication,
   readPublishedAsset,
   writePublication,
@@ -201,5 +207,15 @@ export function createArchiveImportRepository(
       database.read((connection) =>
         readPublishedAsset(connection, actorId, boardId, assetId, allowTrashedOwner),
       ),
+    isActiveBoardOwner: (actorId, boardId) =>
+      database.read((connection) => isActiveBoardOwner(connection, actorId, boardId)),
+    listBoardAssets: (actorId, boardId, cursor, limit) =>
+      database.read((connection) => listBoardAssets(connection, actorId, boardId, cursor, limit)),
+    importBoardAsset: (actorId, boardId, assetId, signature, asset) =>
+      database.write((connection) =>
+        importBoardAsset(connection, actorId, boardId, assetId, signature, asset),
+      ),
+    deleteBoardAsset: (actorId, boardId, assetId) =>
+      database.write((connection) => deleteBoardAsset(connection, actorId, boardId, assetId)),
   };
 }

@@ -25,9 +25,11 @@ function getObject(
   objectId: string,
 ): FeedbackAnchorObject | undefined {
   const statement = connection.prepare(`
-    SELECT kind, label, x, y, width, height, rotation, geometry_version
-    FROM board_objects
-    WHERE board_id = ? AND object_id = ?
+    SELECT o.kind, o.label, o.x, o.y, o.width, o.height, o.rotation, o.geometry_version,
+           p.payload_version
+    FROM board_objects AS o
+    LEFT JOIN object_payloads AS p ON p.board_id = o.board_id AND p.object_id = o.object_id
+    WHERE o.board_id = ? AND o.object_id = ?
   `);
   statement.setReadBigInts(true);
   const row = statement.get(boardId, objectId);
@@ -45,6 +47,10 @@ function getObject(
     height: readFinite(row.height, 'height'),
     rotation: readFinite(row.rotation, 'rotation'),
     geometryVersion: readUnsigned(row.geometry_version, 'geometry_version'),
+    payloadVersion:
+      row.payload_version === null
+        ? undefined
+        : readUnsigned(row.payload_version, 'payload_version'),
   };
 }
 
@@ -74,6 +80,18 @@ function createReader(connection: SqliteConnection): FeedbackReader {
 export function createFeedbackRepository(database: SqliteDatabase): FeedbackRepository {
   database.write((connection) => {
     connection.exec(feedbackSchema);
+    const threadColumns = connection.prepare('PRAGMA table_info(feedback_threads)').all();
+    for (const column of ['selection_json', 'attachment_json']) {
+      if (!threadColumns.some(({ name }) => name === column)) {
+        connection.exec(
+          'ALTER TABLE feedback_threads ADD COLUMN ' +
+            column +
+            ' TEXT CHECK (json_valid(' +
+            column +
+            '))',
+        );
+      }
+    }
     const columns = connection.prepare('PRAGMA table_info(feedback_messages)').all();
     if (!columns.some(({ name }) => name === 'author_name')) {
       connection.exec('ALTER TABLE feedback_messages ADD COLUMN author_name TEXT');

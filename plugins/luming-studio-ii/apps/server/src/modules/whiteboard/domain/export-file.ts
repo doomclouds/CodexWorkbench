@@ -6,6 +6,7 @@ import {
   type BoardExportSnapshot,
   type ExportRenderCommand,
   type ExportBoardResult,
+  type PngExportOptions,
 } from './export-types.js';
 import type { BoardObject, ConnectorEndpoint } from './model.js';
 
@@ -103,19 +104,25 @@ function encodeFile(
   };
 }
 
-function renderVectorFile(snapshot: BoardExportSnapshot, format: 'svg' | 'png'): ExportBoardResult {
-  const scene = renderExportSvg(snapshot);
+function renderVectorFile(
+  snapshot: BoardExportSnapshot,
+  format: 'svg' | 'png',
+  options?: PngExportOptions,
+): ExportBoardResult {
+  const scene = renderExportSvg(snapshot, options);
   if (scene.kind === 'rejected') {
     return scene;
   }
 
-  if (scene.regions.length) {
-    const { width, height } = scene.viewport;
+  const { width, height } = scene.viewport;
+  if (format === 'png' || scene.regions.length) {
     const dimensions = width <= 16384 && height <= 16384;
     if (!dimensions || Math.ceil(width) * Math.ceil(height) > 32_000_000) {
       return { kind: 'rejected', reason: 'tooLarge' };
     }
+  }
 
+  if (scene.regions.length) {
     return {
       kind: 'browserPng',
       filename: exportFilename(snapshot.board.title, format),
@@ -132,12 +139,14 @@ function renderVectorFile(snapshot: BoardExportSnapshot, format: 'svg' | 'png'):
 
 export function renderExportFile(
   snapshot: BoardExportSnapshot,
-  { format }: Pick<ExportRenderCommand, 'format' | 'scope'>,
+  command: Pick<ExportRenderCommand, 'format' | 'scope' | 'rectangle' | 'scale'>,
 ): ExportBoardResult {
+  const { format } = command;
   switch (format) {
     case 'svg':
-    case 'png':
       return renderVectorFile(snapshot, format);
+    case 'png':
+      return renderVectorFile(snapshot, format, command);
     case 'html':
       return encodeFile(snapshot, renderExportHtml(snapshot), 'html', 'text/html');
     case 'html-source':

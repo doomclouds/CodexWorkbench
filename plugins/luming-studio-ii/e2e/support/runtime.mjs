@@ -7,11 +7,9 @@ import { basename, dirname, extname, join } from "node:path";
 import { Readable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import { initialServerEntry } from "./initial-baseline.mjs";
 
 const loopback = "127.0.0.1";
-const initialEntry = fileURLToPath(
-  new URL("../../../luming-studio/runtime/server.mjs", import.meta.url),
-);
 const iiEntry = fileURLToPath(new URL("../../runtime/backend.mjs", import.meta.url));
 const iiWeb = fileURLToPath(new URL("../../runtime/web/", import.meta.url));
 const directoryPrefix = "luming-studio-e2e-";
@@ -113,7 +111,7 @@ async function stopChild(service) {
 
 async function startChild(edition, directory, agentSuggestions) {
   const legacy = edition === "initial";
-  const entry = legacy ? initialEntry : iiEntry;
+  const entry = legacy ? initialServerEntry() : iiEntry;
   await access(entry);
   const recordPath = join(directory, "service.json");
   const token = randomBytes(32).toString("base64url");

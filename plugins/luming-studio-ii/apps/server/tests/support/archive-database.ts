@@ -42,6 +42,36 @@ export function rejectArchiveReceiptInserts(path: string): void {
   }
 }
 
+export function rejectArchiveAssetDeletion(path: string): void {
+  const database = openSqliteDatabase(path);
+  try {
+    database.write((connection) => {
+      connection.exec(`
+        CREATE TRIGGER reject_archive_asset_deletion BEFORE DELETE ON board_archive_assets
+        BEGIN
+          SELECT RAISE(ABORT, 'Injected archive asset deletion failure');
+        END
+      `);
+    });
+  } finally {
+    database.close();
+  }
+}
+
+export function removedArchiveAsset(path: string, boardId: string, assetId: string): boolean {
+  const database = openSqliteDatabase(path);
+  try {
+    return database.read(
+      (connection) =>
+        connection
+          .prepare('SELECT 1 FROM board_removed_assets WHERE board_id = ? AND asset_id = ?')
+          .get(boardId, assetId) !== undefined,
+    );
+  } finally {
+    database.close();
+  }
+}
+
 export function archiveRowCounts(path: string) {
   const database = openSqliteDatabase(path);
   try {

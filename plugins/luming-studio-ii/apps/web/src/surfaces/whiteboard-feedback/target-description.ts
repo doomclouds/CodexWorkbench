@@ -50,6 +50,9 @@ export function describeFeedbackTarget(
   if (target.kind === 'board') {
     return '画板位置';
   }
+  if (target.kind === 'selection') {
+    return (target.bounds ? '画板范围' : '选区') + ' · ' + target.objects.length + ' 个对象';
+  }
 
   const objectKind = object?.kind && Object.hasOwn(objectLabels, object.kind) ? object.kind : '';
   const kind =

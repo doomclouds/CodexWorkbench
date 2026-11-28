@@ -57,6 +57,28 @@ async function readCurrentSharing(runtime, boardId) {
   };
 }
 
+async function readGuestViews(runtime, boardId, name) {
+  const { create, fromBinary, toBinary } = requireServer("@bufbuild/protobuf");
+  const { BoardRoomService } = requireServer(
+    "@codexworkbench/luming-studio-ii-contracts/rooms/service",
+  );
+  const method = BoardRoomService.method.getBoardRoom;
+  const response = await runtime.request("/" + method.parent.typeName + "/" + method.name, {
+    method: "POST",
+    headers: { "content-type": "application/protobuf" },
+    body: toBinary(method.input, create(method.input, { boardId })),
+  });
+  assert.equal(response.status, 200, "Read Studio II room participants");
+  const { event } = fromBinary(method.output, new Uint8Array(await response.arrayBuffer()));
+  assert.equal(event?.payload.case, "snapshot", "The room must return a presence snapshot");
+  const participants = event.payload.value.participants.filter((peer) => peer.displayName === name);
+
+  return {
+    actors: new Set(participants.flatMap(({ key }) => (key ? [key.actorId] : []))).size,
+    views: participants.length,
+  };
+}
+
 function verifiedGuestLink(copied, state, boardId, edition, role) {
   assert.ok(invitationRoles.has(role), "Expected a supported invitation role");
   assert.ok(
@@ -135,6 +157,28 @@ export async function workbenchLinkProbe({ page, browser, studio }) {
         });
 
       return guest;
+    },
+    async openGuestTab(board, guest) {
+      const context = guest.context();
+      assert.ok(contexts.has(context), "Only an isolated guest context can open another tab");
+      const url = new URL(guest.url());
+      assert.equal(studio.edition, "ii", "Guest tabs use the Studio II room fixture");
+      assert.equal(
+        url.origin,
+        new URL(copies.at(-1)).origin,
+        "Guest tab stays at its invitation origin",
+      );
+      assert.equal(url.searchParams.get("board"), board.id, "Guest tab opens the same board");
+      assert.ok(!url.username && !url.password && !url.searchParams.has("token"));
+      const duplicate = await context.newPage();
+      await duplicate.goto(url.href);
+
+      return duplicate;
+    },
+    guestViews(board, name) {
+      assert.equal(studio.edition, "ii", "Room snapshots use the Studio II service");
+
+      return readGuestViews(runtime, board.id, name);
     },
     async close() {
       copies.length = 0;

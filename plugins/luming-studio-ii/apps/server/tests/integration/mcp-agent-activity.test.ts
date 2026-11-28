@@ -72,6 +72,9 @@ function agentPort(requests: ChangeAgentActivityRequest[]): Dispatch {
   return (body) => {
     const request = fromBinary(activity.input, body);
     requests.push(request);
+    if (request.action.case === 'disconnect') {
+      return Promise.resolve(encodeReply({ case: 'disconnected', value: {} }));
+    }
     if (request.action.case === 'end') {
       return Promise.resolve(
         encodeReply({
@@ -161,7 +164,11 @@ test('publishes the action schema and forwards only a transport-minted Agent ide
     await fixture.close();
   }
 
-  expect(requests).toHaveLength(4);
+  expect(requests[4]).toMatchObject({
+    agentId: requests[0]?.agentId,
+    action: { case: 'disconnect' },
+  });
+  expect(requests).toHaveLength(5);
 });
 
 test('rejects spoofed identity, release, mixed scopes, and missing or unrelated fields', async () => {
@@ -187,7 +194,7 @@ test('rejects spoofed identity, release, mixed scopes, and missing or unrelated 
   }
 });
 
-test('ends a confirmed area lease by its exact generation on graceful MCP close', async () => {
+test('disconnects the whole Agent session on graceful MCP close', async () => {
   const requests: ChangeAgentActivityRequest[] = [];
   const fixture = await mcpFixture(agentPort(requests));
   const bounds = { x: 22, y: 35, width: 120, height: 2040 };
@@ -202,9 +209,8 @@ test('ends a confirmed area lease by its exact generation on graceful MCP close'
   }
 
   expect(requests[1]).toMatchObject({
-    ...task,
     agentId: requests[0]?.agentId,
-    action: { case: 'end', value: { generation } },
+    action: { case: 'disconnect' },
   });
   expect(requests).toHaveLength(2);
   expect(fixture.errors).toEqual([]);
@@ -222,6 +228,39 @@ test('bounds the byte stream before decoding a response from the activity endpoi
   } finally {
     await fixture.close();
   }
+});
+
+test('returns the MCP read result without waiting for its presence notification', async () => {
+  let resolvePresence: ((response: Response) => void) | undefined;
+  const pending = new Promise<Response>((resolve) => {
+    resolvePresence = resolve;
+  });
+  const requests: ChangeAgentActivityRequest[] = [];
+  const fixture = await mcpFixture((bytes) => {
+    const request = fromBinary(activity.input, bytes);
+    requests.push(request);
+
+    return request.action.case === 'readPresence'
+      ? pending
+      : Promise.resolve(encodeReply({ case: 'disconnected', value: {} }));
+  });
+
+  try {
+    const result = await fixture.client.callTool({
+      name: 'artifact_read',
+      arguments: { boardId, mode: 'summary' },
+    });
+    expect(result.structuredContent).toMatchObject({
+      ok: false,
+      error: { code: 'FORBIDDEN' },
+    });
+    expect(requests.map(({ action }) => action.case)).toEqual(['readPresence']);
+  } finally {
+    resolvePresence?.(new Response(null, { status: 403 }));
+    await fixture.close();
+  }
+
+  expect(requests.map(({ action }) => action.case)).toEqual(['readPresence', 'disconnect']);
 });
 
 test('allows the owner App to route release for its session board only', async () => {

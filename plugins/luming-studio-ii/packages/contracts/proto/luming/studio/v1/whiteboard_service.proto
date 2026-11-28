@@ -21,12 +21,23 @@ message ExportBoardRequest {
     ExportBoardSelection selection = 4;
   }
   BoardExportFormat format = 5;
+  // PNG crop in board coordinates when scope is whole.
+  ExportBoardRectangle rectangle = 6;
+  // PNG pixel scale. Defaults to 1.
+  optional double scale = 7;
 }
 
 message ExportWholeBoard {}
 
 message ExportBoardSelection {
   repeated string object_ids = 1;
+}
+
+message ExportBoardRectangle {
+  double x = 1;
+  double y = 2;
+  double width = 3;
+  double height = 4;
 }
 
 enum BoardExportFormat {

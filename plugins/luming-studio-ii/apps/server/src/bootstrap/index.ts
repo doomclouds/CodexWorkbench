@@ -42,11 +42,13 @@ import {
   type SharingScope,
 } from '../modules/sharing/application/index.js';
 import {
+  createBoardAgentWriteApplication,
   createBoardBackup,
   createBoardEditorApplication,
   createBoardHistoryApplication,
   createBoardSuggestionApplication,
   createWhiteboardApplication,
+  prepareBoardAsset,
 } from '../modules/whiteboard/application/index.js';
 import { createRoomWorkspaceScope } from './room-workspace-scope.js';
 
@@ -157,6 +159,9 @@ export function createWhiteboardServer(options: WhiteboardServerOptions): Whiteb
     const archiveApplication = createArchiveImportApplication(archives, {
       newBoardId: randomUUID,
       now: Date.now,
+      digest,
+      prepareAsset: (boardId, assetId, content) =>
+        prepareBoardAsset(boardId, assetId, content, validateSvgUpload),
     });
     const feedbackRepository = createFeedbackRepository(database);
     const feedback = createFeedbackApplication(feedbackRepository, {
@@ -172,16 +177,23 @@ export function createWhiteboardServer(options: WhiteboardServerOptions): Whiteb
         newId: randomUUID,
         digest,
         onChanged: (boardId) => rooms.publishDiscussionChange(boardId, 'suggestionsChanged'),
+        resolveAgentWorkspaces: (boardId, ownerId) => rooms.agentWriteWorkspaces(boardId, ownerId),
         readFeedbackSource(actor, boardId, feedbackThreadId) {
           try {
             const { thread } = feedback.getThread(actor, boardId, feedbackThreadId, {
               pageSize: 1,
             });
-            const anchor = thread.anchor;
+            const { sourceBoardRevision, target } = thread.anchor;
+            const objectIds =
+              target.kind === 'selection' ? target.objects.map(({ objectId }) => objectId) : [];
+
+            if (target.kind === 'object' || target.kind === 'content') {
+              objectIds.push(target.objectId);
+            }
 
             return {
-              capturedBoardRevision: anchor.sourceBoardRevision,
-              objectId: anchor.target.kind === 'board' ? undefined : anchor.target.objectId,
+              capturedBoardRevision: sourceBoardRevision,
+              objectIds,
             };
           } catch (error) {
             if (error instanceof FeedbackThreadNotFoundError) {
@@ -221,6 +233,10 @@ export function createWhiteboardServer(options: WhiteboardServerOptions): Whiteb
         history: createBoardHistoryApplication(repository, Date.now, renderSvgPng),
         feedback,
         rooms,
+        agentBoardWrite: createBoardAgentWriteApplication(repository, {
+          now: Date.now,
+          resolveWorkspaces: (boardId, ownerId) => rooms.agentWriteWorkspaces(boardId, ownerId),
+        }),
         suggestions,
         digest,
       },

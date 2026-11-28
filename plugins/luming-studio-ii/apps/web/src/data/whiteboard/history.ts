@@ -1,6 +1,7 @@
 import { BoardEditService } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/edits';
 import {
   BoardHistoryService as wireService,
+  BoardVersionActorKind,
   BoardVersionKind,
   type BoardVersionSummary as WireBoardVersionSummary,
   type ExportBoardVersionResponse,
@@ -40,6 +41,8 @@ export interface BoardHistoryVersion {
   readonly title: string;
   readonly savedAtMillis?: number;
   readonly actorId?: string;
+  readonly actorKind?: 'agent';
+  readonly actorName?: string;
   readonly kind: HistoryVersionKind;
   readonly changedObjectCount: number;
   readonly sourceRevision?: bigint;
@@ -127,6 +130,8 @@ function readVersion({
   title,
   savedAtMillis,
   actorId,
+  actorKind,
+  actorName,
   kind,
   changedObjectCount,
   sourceRevision,
@@ -136,6 +141,8 @@ function readVersion({
     title,
     savedAtMillis: readSavedAt(savedAtMillis),
     actorId: actorId || undefined,
+    actorKind: actorKind === BoardVersionActorKind.AGENT ? 'agent' : undefined,
+    actorName: actorName.trim() || undefined,
     kind: requireField(versionKinds.get(kind), 'history version kind'),
     changedObjectCount,
     sourceRevision,

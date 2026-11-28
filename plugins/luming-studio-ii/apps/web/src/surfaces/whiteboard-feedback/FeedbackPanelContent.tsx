@@ -50,9 +50,9 @@ export function FeedbackDetails({
   const { detail, refresh } = queries;
   const anchor = detail.page?.thread.anchor;
   const target = anchor?.target;
-  const object = target && target.kind !== 'board' ? objects.get(target.objectId) : undefined;
+  const object = target && 'objectId' in target ? objects.get(target.objectId) : undefined;
   const missing =
-    target && target.kind !== 'board' ? anchor?.targetMissing === true || !object : false;
+    target && 'objectId' in target ? anchor?.targetMissing === true || !object : false;
 
   return (
     <FeedbackThreadView

@@ -55,7 +55,9 @@ interface StudioNavigation {
 interface StudioPreferences {
   readonly layout: StudioLayout;
   readonly resolvedTheme: StudioTheme;
+  readonly pinnedOnly?: boolean;
   readonly rememberLayout: (layout: StudioLayout) => void;
+  readonly rememberPinnedOnly?: (pinnedOnly: boolean) => void;
   readonly rememberTheme: (theme: StudioTheme) => void;
   readonly subscribeTheme?: (listener: (theme: StudioTheme) => void) => () => void;
 }
@@ -158,7 +160,11 @@ export function StudioApp({
   const [resolvedTheme, setTheme] = useState(preferences.resolvedTheme);
   const [searchExpanded, setSearchExpanded] = useState(false);
   const subscribeTheme = preferences.subscribeTheme;
-  const directory = useMemo(() => createCatalogDirectory(catalog), [catalog]);
+  const initialPinnedOnly = preferences.pinnedOnly;
+  const directory = useMemo(
+    () => createCatalogDirectory(catalog, initialPinnedOnly),
+    [catalog, initialPinnedOnly],
+  );
   const routeGeneration = useRef(0);
   const shareEntry = useRef<string>(undefined);
   const renameBoard = useMemo(
@@ -348,7 +354,7 @@ export function StudioApp({
         creation={creation}
         onOpenTrash={catalogManagement ? openRecycleBin : undefined}
         archiveImport={importFlow.workbench}
-        preferences={pagePreferences}
+        preferences={{ ...pagePreferences, onPinnedOnlyChange: preferences.rememberPinnedOnly }}
         searchExpansion={searchExpansion}
       />
     );

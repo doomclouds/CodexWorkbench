@@ -25,7 +25,7 @@ function layerPoint(point: FeedbackPoint | undefined, viewport: FeedbackViewport
 
 function useFeedbackSuggestions(
   { panelOpen, viewing, renderSuggestions }: WhiteboardFeedbackSurfaceProps,
-  { mine, authorId }: ReturnType<typeof useFeedbackSurface>['queries'],
+  { scope, authorId }: ReturnType<typeof useFeedbackSurface>['queries'],
 ) {
   const [outlet, setOutlet] = useState<HTMLElement | null>(null);
   const [hasCards, setHasCards] = useState(false);
@@ -36,7 +36,7 @@ function useFeedbackSuggestions(
     hasVisibleSuggestions: Boolean(render) && hasCards,
     contents: render?.({
       outlet: panelOpen ? outlet : null,
-      showCards: !mine && !authorId,
+      showCards: scope === 'all' && !authorId,
       onCardsVisibleChange: setHasCards,
     }),
   };
@@ -86,6 +86,7 @@ export function WhiteboardFeedbackSurface(props: WhiteboardFeedbackSurfaceProps)
     <FeedbackAuthorColor value={colorForAuthor}>
       <div className="whiteboard-feedback" ref={stage} tabIndex={-1}>
         <FeedbackPins
+          canvas={stage}
           threads={queries.pinnedThreads}
           selectedThreadId={activeThreadId}
           draftPoint={
@@ -122,10 +123,10 @@ export function WhiteboardFeedbackSurface(props: WhiteboardFeedbackSurfaceProps)
               threads={queries.list.items}
               authorId={queries.authorId}
               authors={queries.authors}
-              mine={queries.mine}
+              scope={queries.scope}
               showResolved={queries.showResolved}
               onAuthorChange={queries.setAuthorId}
-              onMineChange={queries.setMine}
+              onScopeChange={queries.setScope}
               onShowResolvedChange={queries.setShowResolved}
               expandedId={surface.expandedId}
               expanded={details}
@@ -212,16 +213,12 @@ export function WhiteboardFeedbackSurface(props: WhiteboardFeedbackSurfaceProps)
                   createDraft.attach,
                 )
               }
-              attachment={
-                attachment.available
-                  ? {
-                      checked: createDraft.attach === true,
-                      label: '附加到 Codex 对话',
-                      disabled: Boolean(attachment.pending),
-                      onChange: (attach) => surface.setCreateDraft({ ...createDraft, attach }),
-                    }
-                  : undefined
-              }
+              attachment={{
+                checked: createDraft.attach === true,
+                label: attachment.actionLabel,
+                disabled: Boolean(attachment.pending),
+                onChange: (attach) => surface.setCreateDraft({ ...createDraft, attach }),
+              }}
               onCancel={surface.handleCancelDraft}
               disabled={surface.blocked || !surface.canWrite}
               focusOnMount

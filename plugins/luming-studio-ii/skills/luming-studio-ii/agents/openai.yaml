@@ -1,0 +1,6 @@
+interface:
+  display_name: "鹿鸣 · Luming Studio II"
+  short_description: "在 Codex 对话旁编辑白板、查看版本、根据具体备注协作并审阅修改建议"
+  icon_small: "./assets/icon64.png"
+  icon_large: "./assets/icon.png"
+  default_prompt: "使用 $luming-studio-ii，根据当前白板中已附加的备注核对内容并整理修改建议。"

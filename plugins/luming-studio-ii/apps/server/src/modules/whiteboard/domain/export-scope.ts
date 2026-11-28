@@ -1,4 +1,9 @@
-import type { BoardExportRejection, BoardExportScope } from './export-types.js';
+import { exportConnector, geometryCorners } from './export-geometry.js';
+import type {
+  BoardExportRectangle,
+  BoardExportRejection,
+  BoardExportScope,
+} from './export-types.js';
 import type { BoardObject } from './model.js';
 import { sectionContains } from './section.js';
 
@@ -97,4 +102,25 @@ export function selectExportObjects(
   }
 
   return objects.filter(({ objectId }) => ids.has(objectId));
+}
+
+export function selectExportRectangle(
+  objects: readonly BoardObject[],
+  byId: ReadonlyMap<string, BoardObject>,
+  { x, y, width, height }: BoardExportRectangle,
+): readonly BoardObject[] | BoardExportRejection {
+  const right = x + width;
+  const bottom = y + height;
+  const selected = objects.filter((object) => {
+    const route = object.detail?.kind === 'connector' && exportConnector(object.detail, byId);
+    const points = route ? [...route.points, route.label] : geometryCorners(object.geometry);
+    const overlapsWidth =
+      points.some((point) => point.x < right) && points.some((point) => point.x > x);
+    const overlapsHeight =
+      points.some((point) => point.y < bottom) && points.some((point) => point.y > y);
+
+    return overlapsWidth && overlapsHeight;
+  });
+
+  return selected.length ? selected : { kind: 'rejected', reason: 'invalidSelection' };
 }

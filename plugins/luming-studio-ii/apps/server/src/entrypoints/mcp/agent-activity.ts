@@ -12,7 +12,6 @@ import { BridgeError, invalidArgument, tooLarge } from './errors.js';
 
 const rpc = BoardRoomService.method.changeAgentActivity;
 const maximumBytes = 32 * 1024;
-const maximumTrackedTasks = 256;
 const cleanupMillis = 2_000;
 const coordinateLimit = 10_000_000;
 const boardId = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/u);
@@ -58,19 +57,14 @@ type DispatchAgentActivity = (body: Uint8Array, signal: AbortSignal) => Promise<
 
 interface ActivityOptions {
   readonly allocateId: () => string;
+  readonly agentId?: string;
   readonly dispatch: DispatchAgentActivity;
-  readonly now: () => number;
   readonly reportError: (error: unknown) => void;
 }
 
 interface ActivityIdentity {
   readonly boardId: string;
   readonly taskId: string;
-}
-
-interface TrackedActivity extends ActivityIdentity {
-  readonly generation: string;
-  readonly expiresAtUnixMs: number;
 }
 
 const wirePhases = {
@@ -180,36 +174,11 @@ async function readActivityReply(response: Response): Promise<ActivityResult> {
   return fromBinary(rpc.output, bytes.subarray(0, size), { readUnknownFields: false }).result;
 }
 
-function activityKey({
-  boardId: board,
-  taskId,
-  generation,
-}: Pick<TrackedActivity, 'boardId' | 'taskId' | 'generation'>) {
-  return JSON.stringify([board, taskId, generation]);
-}
-
 export function registerAgentActivity(server: McpServer, options: ActivityOptions) {
-  const { allocateId, dispatch, now, reportError } = options;
-  const agentId = 'agent-' + allocateId();
+  const { allocateId, dispatch, reportError } = options;
+  const agentId = options.agentId ?? 'agent-' + allocateId();
   const lifetime = new AbortController();
-  const activities = new Map<string, TrackedActivity>();
-
-  function record(activity: TrackedActivity) {
-    const time = now();
-    for (const [key, item] of activities) {
-      if (item.expiresAtUnixMs <= time) {
-        activities.delete(key);
-      }
-    }
-
-    activities.set(activityKey(activity), activity);
-    if (activities.size > maximumTrackedTasks) {
-      const earliest = activities.keys().next().value;
-      if (earliest !== undefined) {
-        activities.delete(earliest);
-      }
-    }
-  }
+  let joined = false;
 
   function activeResult(
     identity: ActivityIdentity,
@@ -226,8 +195,6 @@ export function registerAgentActivity(server: McpServer, options: ActivityOption
     }
 
     const activity = { ...identity, generation: value.generation, expiresAtUnixMs };
-    record(activity);
-
     return activitySuccess({ ...activity, status: 'active', phase: currentPhase });
   }
 
@@ -240,8 +207,6 @@ export function registerAgentActivity(server: McpServer, options: ActivityOption
       const { generation } = result.value;
       const reason = endedReasons.get(result.value.reason);
       if (reason && identifier.safeParse(generation).success) {
-        activities.delete(activityKey({ ...identity, generation }));
-
         return activitySuccess({ ...identity, generation, status: 'ended', reason });
       }
     }
@@ -258,15 +223,12 @@ export function registerAgentActivity(server: McpServer, options: ActivityOption
   }
 
   async function send(
-    { boardId: board, taskId }: ActivityIdentity,
+    identity: { readonly boardId: string; readonly taskId?: string } | undefined,
     action: WireAction,
     signal: AbortSignal,
   ) {
     signal.throwIfAborted();
-    const bytes = toBinary(
-      rpc.input,
-      create(rpc.input, { boardId: board, taskId, agentId, action }),
-    );
+    const bytes = toBinary(rpc.input, create(rpc.input, { ...identity, agentId, action }));
 
     if (bytes.byteLength > maximumBytes) {
       throw tooLarge('工作区请求超过体积限制。');
@@ -277,6 +239,9 @@ export function registerAgentActivity(server: McpServer, options: ActivityOption
 
   async function perform(operation: ActivityOperation, signal: AbortSignal) {
     const identity = { boardId: operation.boardId, taskId: operation.taskId };
+    if (operation.action === 'begin') {
+      joined = true;
+    }
     const response = await send(identity, toWireAction(operation), signal);
     if (!response.ok) {
       await response.body?.cancel();
@@ -320,34 +285,67 @@ export function registerAgentActivity(server: McpServer, options: ActivityOption
     },
   );
 
-  async function finish(activity: TrackedActivity, signal: AbortSignal) {
-    const response = await send(
-      activity,
-      { case: 'end', value: { generation: activity.generation } },
-      signal,
-    );
-    await response.body?.cancel();
-    if (!response.ok) {
-      throw new Error('Agent 工作区结束请求失败。');
-    }
-  }
-
-  return async function close() {
+  async function close() {
     lifetime.abort();
-    const pending = [...activities.values()].filter((activity) => activity.expiresAtUnixMs > now());
-    activities.clear();
-    if (!pending.length) {
+    if (!joined) {
       return;
     }
 
-    const signal = AbortSignal.timeout(cleanupMillis);
-    const completed = await Promise.allSettled(pending.map((activity) => finish(activity, signal)));
-    const failures = completed.flatMap((result) =>
-      result.status === 'rejected' ? [result.reason] : [],
-    );
-
-    if (failures.length) {
-      reportError(new AggregateError(failures, '未能立即结束部分 Agent 工作区。'));
+    joined = false;
+    try {
+      const response = await send(
+        undefined,
+        { case: 'disconnect', value: {} },
+        AbortSignal.timeout(cleanupMillis),
+      );
+      await response.body?.cancel();
+      if (!response.ok) {
+        throw new Error('未能立即断开 Agent 房间会话。');
+      }
+    } catch (error) {
+      reportError(error);
     }
-  };
+  }
+
+  async function publishRead(boardId: string, activityId: string, reading: boolean) {
+    try {
+      const signal = AbortSignal.any([lifetime.signal, AbortSignal.timeout(cleanupMillis)]);
+      const response = await send(
+        { boardId },
+        { case: 'readPresence', value: { activityId, reading } },
+        signal,
+      );
+      await response.body?.cancel();
+
+      return response.ok;
+    } catch (error) {
+      if (!lifetime.signal.aborted) {
+        reportError(error);
+      }
+
+      return false;
+    }
+  }
+
+  function startRead(boardId: string) {
+    if (lifetime.signal.aborted) {
+      return;
+    }
+
+    joined = true;
+    const id = allocateId();
+    const started = publishRead(boardId, id, true);
+
+    return () => {
+      started
+        .then(async (accepted) => {
+          if (accepted) {
+            await publishRead(boardId, id, false);
+          }
+        })
+        .catch(reportError);
+    };
+  }
+
+  return { close, startRead };
 }

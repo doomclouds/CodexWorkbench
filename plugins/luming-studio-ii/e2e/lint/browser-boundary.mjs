@@ -89,7 +89,10 @@ const scopedFixtureImports = new Map(
       "whiteboard-topbar/export",
       ["downloadBoardExport", "readBoardDownload", "failNextBoardExport"],
     ],
-    ["whiteboard-topbar/sharing-feedback", ["workbenchLinkProbe"]],
+    [
+      "whiteboard-topbar/sharing-feedback",
+      ["workbenchLinkProbe", "mediaDisplaySize", "mediaPlaying"],
+    ],
     ["whiteboard-topbar/overlays", ["seedTopbarSuggestion", "seedTopbarAgentWorkspace"]],
     ["whiteboard-topbar/export-fidelity", ["downloadBoardExport", "inspectBoardExport"]],
     ["whiteboard-topbar/scripted-export", ["downloadBoardExport", "inspectBoardExport"]],

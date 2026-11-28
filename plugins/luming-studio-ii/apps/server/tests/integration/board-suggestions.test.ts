@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { Buffer } from 'node:buffer';
 import type { MessageInitShape } from '@bufbuild/protobuf';
 import { BoardCatalogService } from '@codexworkbench/luming-studio-ii-contracts/catalog/service';
 import { BoardRoomService } from '@codexworkbench/luming-studio-ii-contracts/rooms/service';
@@ -9,10 +10,17 @@ import {
   BoardTransformKind,
 } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/edits';
 import { BoardSuggestionService } from '@codexworkbench/luming-studio-ii-contracts/suggestions/service';
+import {
+  BoardHistoryService,
+  BoardVersionActorKind,
+} from '@codexworkbench/luming-studio-ii-contracts/whiteboard/history';
 import { WhiteboardService } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/service';
 import { ConnectorPort } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/scene';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { afterEach, beforeEach, test } from 'vitest';
 import { createWhiteboardServer } from '../../src/bootstrap/index.js';
+import { createStudioMcpServer } from '../../src/entrypoints/mcp/index.js';
 import { interruptSuggestionAcceptance } from '../support/board-suggestion-database.js';
 import {
   actorHeader,
@@ -35,8 +43,11 @@ const {
   listBoardSuggestions,
   previewBoardSuggestion,
   acceptBoardSuggestion,
+  chooseAgentBoardSuggestion,
   rejectBoardSuggestion,
 } = BoardSuggestionService.method;
+const { changeAgentActivity } = BoardRoomService.method;
+const suggestionAgentId = 'agent-suggestion-review';
 const geometry = { x: 12, y: 32, width: 100, height: 80, rotation: 0 };
 
 function setupSuggestionServer() {
@@ -94,6 +105,22 @@ function setupSuggestionServer() {
 }
 
 const server = setupSuggestionServer();
+
+async function beginSuggestionWorkspace(boardId: string, objectIds: string[]) {
+  const taskId = 'suggestion-review-workspace';
+  const { result } = await callWhiteboard(server.address, agentCredential, changeAgentActivity, {
+    boardId,
+    agentId: suggestionAgentId,
+    taskId,
+    action: {
+      case: 'begin',
+      value: { scope: { target: { case: 'objects', value: { objectIds } } } },
+    },
+  });
+  assert.equal(result.case, 'workspace');
+
+  return { agentId: suggestionAgentId, taskId, generation: result.value.generation };
+}
 
 async function boardWithText(commandId = 'create-proposal-board') {
   const { receipt } = await callWhiteboard(server.address, owner, createBoard, {
@@ -617,6 +644,283 @@ test('replaces an overlapping active option and safely withdraws it with monoton
   assert.equal((await currentBoard(boardId)).objects[0]?.geometry?.width, 210);
   const listed = await callWhiteboard(server.address, owner, listBoardSuggestions, { boardId });
   assert.deepEqual(listed.proposals[0]?.activeOptionIds, ['wide']);
+});
+
+test('requires a live Agent suggestion workspace, checks competing versions, and replays only the original command after release', async () => {
+  const boardId = await boardWithText();
+  const proposal = await privateProposal(boardId, resizeAlternatives());
+  const binding = await beginSuggestionWorkspace(boardId, [objectId]);
+  const choice = { ...chooseWidth(boardId, proposal.proposalId), ...binding };
+  const unauthorized = await sendWhiteboardRequest(
+    server.address,
+    owner,
+    chooseAgentBoardSuggestion,
+    choice,
+  );
+  assert.equal(unauthorized.status, 403);
+  const unbound = await sendWhiteboardRequest(
+    server.address,
+    agentCredential,
+    chooseAgentBoardSuggestion,
+    { ...choice, generation: '' },
+  );
+  assert.equal(unbound.status, 400);
+  const wrongAgent = await callWhiteboard(
+    server.address,
+    agentCredential,
+    chooseAgentBoardSuggestion,
+    { ...choice, agentId: 'agent-unbound' },
+  );
+  assert.equal(wrongAgent.receipt?.outcome.case, 'rejected');
+  assert.equal((await currentBoard(boardId)).boardRevision, 1n);
+
+  const accepted = await callWhiteboard(
+    server.address,
+    agentCredential,
+    chooseAgentBoardSuggestion,
+    choice,
+  );
+  assert.equal(accepted.receipt?.outcome.case, 'applied');
+  const altered = await callWhiteboard(
+    server.address,
+    agentCredential,
+    chooseAgentBoardSuggestion,
+    { ...choice, optionId: 'larger' },
+  );
+  assert.equal(altered.receipt?.outcome.case, 'rejected');
+  assert.equal(altered.receipt.outcome.value.reason, BoardEditRejectionReason.COMMAND_ID_REUSE);
+  const stale = await callWhiteboard(server.address, agentCredential, chooseAgentBoardSuggestion, {
+    ...choice,
+    commandId: 'stale-agent-review',
+  });
+  assert.equal(stale.receipt?.outcome.case, 'conflict');
+
+  const replacement = {
+    ...choice,
+    commandId: 'replace-in-agent-scope',
+    optionId: 'larger',
+    expectedProposalVersion: 1n,
+  };
+  const switched = await callWhiteboard(
+    server.address,
+    agentCredential,
+    chooseAgentBoardSuggestion,
+    replacement,
+  );
+  assert.equal(switched.receipt?.outcome.case, 'applied');
+  const withdrawal = {
+    ...replacement,
+    commandId: 'withdraw-in-agent-scope',
+    expectedProposalVersion: 2n,
+  };
+  const withdrawn = await callWhiteboard(
+    server.address,
+    agentCredential,
+    chooseAgentBoardSuggestion,
+    withdrawal,
+  );
+  assert.equal(withdrawn.receipt?.outcome.case, 'applied');
+  assert.equal((await currentBoard(boardId)).objects[0]?.geometry?.width, geometry.width);
+
+  const released = await callWhiteboard(server.address, owner, changeAgentActivity, {
+    boardId,
+    agentId: binding.agentId,
+    taskId: binding.taskId,
+    action: { case: 'release', value: { generation: binding.generation } },
+  });
+  assert.equal(released.result.case, 'ended');
+  const replay = await callWhiteboard(
+    server.address,
+    agentCredential,
+    chooseAgentBoardSuggestion,
+    withdrawal,
+  );
+  assert.deepEqual(replay, withdrawn);
+  const denied = await callWhiteboard(server.address, agentCredential, chooseAgentBoardSuggestion, {
+    ...choice,
+    commandId: 'agent-choose-after-release',
+    expectedProposalVersion: 3n,
+  });
+  assert.equal(denied.receipt?.outcome.case, 'rejected');
+
+  const human = await callWhiteboard(server.address, owner, acceptBoardSuggestion, {
+    ...chooseWidth(boardId, proposal.proposalId),
+    commandId: 'human-can-still-accept',
+    expectedProposalVersion: 3n,
+  });
+  assert.equal(human.receipt?.outcome.case, 'applied');
+
+  const { versions } = await callWhiteboard(
+    server.address,
+    owner,
+    BoardHistoryService.method.listBoardVersions,
+    { boardId },
+  );
+  assert.equal(versions[0]?.actorId, owner);
+  assert.equal(versions[0]?.actorKind, BoardVersionActorKind.UNSPECIFIED);
+  assert.equal(versions[1]?.actorId, binding.agentId);
+  assert.equal(versions[1]?.actorKind, BoardVersionActorKind.AGENT);
+  assert.equal(versions[1]?.actorName, 'Agent · ' + binding.agentId.slice(-8));
+});
+
+test('rejects switching or withdrawing an option whose inverse would change an unclaimed object', async () => {
+  const boardId = await boardWithText();
+  const alternateId = 'outside-agent-workspace';
+  const alternate = await callWhiteboard(server.address, owner, editBoardGeometry, {
+    boardId,
+    commandId: 'create-outside-agent-workspace',
+    operation: {
+      case: 'create',
+      value: {
+        object: {
+          objectId: alternateId,
+          kind: 'text',
+          label: 'outside',
+          geometry: { ...geometry, x: 550 },
+        },
+      },
+    },
+  });
+  assert.equal(alternate.receipt?.outcome.case, 'applied');
+  const source = await captureSource(boardId, [objectId, alternateId], 2n);
+  const { suggestion } = await callWhiteboard(
+    server.address,
+    agentCredential,
+    submitBoardSuggestion,
+    {
+      ...submitRequest(boardId, source.sourceId),
+      options: [
+        {
+          optionId: 'wide',
+          label: '调整两个对象',
+          operations: [
+            { edit: { case: 'geometry', value: { operation: widthChange(210) } } },
+            {
+              edit: {
+                case: 'content',
+                value: {
+                  objectId: alternateId,
+                  expectedPayloadVersion: 0n,
+                  edit: { case: 'text', value: { text: '原先应用的范围外正文' } },
+                },
+              },
+            },
+          ],
+        },
+        {
+          optionId: 'larger',
+          label: '仅调整第一个对象',
+          edit: { case: 'geometry', value: { operation: widthChange(330) } },
+        },
+      ],
+    },
+  );
+  assert.ok(suggestion);
+  const choice = chooseWidth(boardId, suggestion.proposalId);
+  const applied = await callWhiteboard(server.address, owner, acceptBoardSuggestion, choice);
+  assert.equal(applied.receipt?.outcome.case, 'applied');
+  const binding = await beginSuggestionWorkspace(boardId, [objectId]);
+  const before = await currentBoard(boardId);
+
+  for (const optionId of ['larger', 'wide']) {
+    const response = await callWhiteboard(
+      server.address,
+      agentCredential,
+      chooseAgentBoardSuggestion,
+      {
+        ...choice,
+        ...binding,
+        optionId,
+        expectedProposalVersion: 1n,
+        commandId: 'agent-outside-' + optionId,
+      },
+    );
+    assert.equal(response.receipt?.outcome.case, 'rejected');
+    assert.equal(response.receipt.outcome.value.reason, BoardEditRejectionReason.FORBIDDEN);
+  }
+  assert.deepEqual(await currentBoard(boardId), before);
+  const proposals = await callWhiteboard(server.address, owner, listBoardSuggestions, { boardId });
+  assert.deepEqual(proposals.proposals[0]?.activeOptionIds, ['wide']);
+  assert.equal(proposals.proposals[0]?.proposalVersion, 1n);
+});
+
+test('routes model choice through the protected workspace endpoint using the same session Agent identity', async () => {
+  const boardId = await boardWithText();
+  const proposal = await privateProposal(boardId, resizeAlternatives());
+  const agentCalls: string[] = [];
+  const activityPath = '/' + changeAgentActivity.parent.typeName + '/' + changeAgentActivity.name;
+  const choicePath =
+    '/' + chooseAgentBoardSuggestion.parent.typeName + '/' + chooseAgentBoardSuggestion.name;
+
+  function postAgent(route: string, body: Uint8Array, signal: AbortSignal) {
+    agentCalls.push(route);
+    return fetch(new URL(route, server.address), {
+      method: 'POST',
+      headers: { 'content-type': 'application/protobuf', [actorHeader]: agentCredential },
+      body: Buffer.from(body),
+      signal,
+    });
+  }
+
+  const mcp = createStudioMcpServer({
+    html: '<html></html>',
+    pluginVersion: '1.0.0',
+    now: Date.now,
+    allocateId: () => 'scoped-choose-integration',
+    createFile: () => Promise.reject(new Error('Unexpected temporary file.')),
+    dispatch: () => Promise.reject(new Error('Model choice used the owner transport.')),
+    dispatchAgentActivity: (body, signal) => postAgent(activityPath, body, signal),
+    dispatchAgentChoice: (body, signal) => postAgent(choicePath, body, signal),
+    onError: (error) => {
+      throw error;
+    },
+  });
+  const sdk = new Client({ name: 'scoped-choice-check', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await mcp.connect(serverTransport);
+  await sdk.connect(clientTransport);
+
+  try {
+    const taskId = 'verify-model-choice';
+    const choice = {
+      ...chooseWidth(boardId, proposal.proposalId),
+      action: 'choose',
+      taskId,
+      expectedProposalVersion: '0',
+    };
+    const unbound = await sdk.callTool({ name: 'artifact_feedback', arguments: choice });
+    assert.equal(unbound.isError, true);
+    assert.deepEqual(agentCalls, []);
+
+    const started = await sdk.callTool({
+      name: 'artifact_activity',
+      arguments: {
+        boardId,
+        taskId,
+        action: 'begin',
+        scope: { objectIds: [objectId] },
+      },
+    });
+    const announcement = started.structuredContent as
+      | { data?: { generation?: string } }
+      | undefined;
+    const data = announcement?.data;
+    assert.ok(data?.generation);
+    const decided = await sdk.callTool({
+      name: 'artifact_feedback',
+      arguments: {
+        ...choice,
+        generation: data.generation,
+      },
+    });
+    const result = decided.structuredContent as { ok?: boolean } | undefined;
+    assert.equal(result?.ok, true);
+    assert.deepEqual(agentCalls, [activityPath, choicePath]);
+    assert.equal((await currentBoard(boardId)).objects[0]?.geometry?.width, 210);
+  } finally {
+    await sdk.close();
+    await mcp.close();
+  }
 });
 
 test('keeps a later object change intact when someone clicks the older active option', async () => {

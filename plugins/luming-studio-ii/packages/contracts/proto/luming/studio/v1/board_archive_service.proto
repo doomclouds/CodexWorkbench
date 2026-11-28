@@ -4,6 +4,61 @@ package luming.studio.v1;
 
 service BoardArchiveService {
   rpc GetArchiveImportReceipt(GetArchiveImportReceiptRequest) returns (GetArchiveImportReceiptResponse);
+  rpc ListBoardAssets(ListBoardAssetsRequest) returns (ListBoardAssetsResponse);
+  rpc ImportBoardAsset(ImportBoardAssetRequest) returns (ImportBoardAssetResponse);
+  rpc DeleteBoardAsset(DeleteBoardAssetRequest) returns (DeleteBoardAssetResponse);
+}
+
+message BoardAssetReference {
+  string asset_id = 1;
+  string src = 2;
+  string media_type = 3;
+  uint32 byte_length = 4;
+}
+
+message ListBoardAssetsRequest {
+  string board_id = 1;
+  optional string cursor = 2;
+  optional uint32 limit = 3;
+}
+
+message ListBoardAssetsResponse {
+  repeated BoardAssetReference assets = 1;
+  optional string next_cursor = 2;
+}
+
+enum BoardAssetRejection {
+  BOARD_ASSET_REJECTION_UNSPECIFIED = 0;
+  BOARD_ASSET_REJECTION_INVALID_MEDIA = 1;
+  BOARD_ASSET_REJECTION_TOO_LARGE = 2;
+  BOARD_ASSET_REJECTION_COMMAND_ID_REUSE = 3;
+  BOARD_ASSET_REJECTION_NOT_FOUND = 4;
+  BOARD_ASSET_REJECTION_REFERENCE_IN_USE = 5;
+}
+
+message ImportBoardAssetRequest {
+  string board_id = 1;
+  string command_id = 2;
+  bytes content = 3;
+}
+
+message ImportBoardAssetResponse {
+  oneof result {
+    BoardAssetReference asset = 1;
+    BoardAssetRejection rejected = 2;
+  }
+}
+
+message DeleteBoardAssetRequest {
+  string board_id = 1;
+  string asset_id = 2;
+}
+
+message DeleteBoardAssetResponse {
+  oneof result {
+    string removed = 1;
+    BoardAssetRejection rejected = 2;
+  }
 }
 
 message ImportBoardArchiveResponse {

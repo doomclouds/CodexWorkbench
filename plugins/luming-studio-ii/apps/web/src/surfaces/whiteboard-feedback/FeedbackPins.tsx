@@ -1,7 +1,8 @@
 import { Check } from 'lucide-react';
-import { useContext } from 'react';
-import type { MouseEvent } from 'react';
+import { Fragment, useContext, useState } from 'react';
+import type { MouseEvent, RefObject } from 'react';
 import type { FeedbackPoint, FeedbackThread } from '../../data/feedback/index.js';
+import { FeedbackPinCluster } from './FeedbackPinCluster.js';
 import type {
   FeedbackCanvasObject,
   FeedbackViewport,
@@ -14,9 +15,11 @@ import {
   feedbackAuthorName,
 } from './feedback-author.js';
 import { commentPinSize } from './feedback-layer-position.js';
+import { groupFeedbackPins, type PositionedFeedbackPin } from './feedback-pin-groups.js';
 import { locateAnchor, screenPoint, worldPoint } from './geometry.js';
 
 interface FeedbackPinsProps {
+  readonly canvas: RefObject<HTMLDivElement | null>;
   readonly threads: readonly FeedbackThread[];
   readonly selectedThreadId?: string;
   readonly draftPoint?: FeedbackPoint;
@@ -55,6 +58,7 @@ function pinIntersects(
 }
 
 export function FeedbackPins({
+  canvas,
   threads,
   selectedThreadId,
   draftPoint,
@@ -71,12 +75,13 @@ export function FeedbackPins({
   onPick,
   onCancelPicking,
 }: FeedbackPinsProps) {
+  const [openCluster, setOpenCluster] = useState<string>();
   const colorFor = useContext(FeedbackAuthorColor);
   const visibleThreads = threads.flatMap((thread) => {
     const { id, anchor } = thread;
     const { target, targetMissing } = anchor;
     const inView =
-      !focusedObjectId || (target.kind !== 'board' && target.objectId === focusedObjectId);
+      !focusedObjectId || ('objectId' in target && target.objectId === focusedObjectId);
     const clipped =
       target.kind === 'content' &&
       !targetMissing &&
@@ -95,6 +100,15 @@ export function FeedbackPins({
     return pinIntersects(position, viewportSize) ? [{ thread, position }] : [];
   });
   const draftPosition = draftPoint && screenPoint(draftPoint, viewport);
+  const groups = Array.from(groupFeedbackPins(visibleThreads), (pins) => ({
+    pins,
+    id: pins.length > 1 ? JSON.stringify(pins.map(({ thread }) => thread.id).sort()) : undefined,
+    selected: pins.find(({ thread }) => thread.id === selectedThreadId),
+  }));
+
+  if (openCluster && !groups.some(({ id, selected }) => id === openCluster && !selected)) {
+    setOpenCluster(undefined);
+  }
 
   function handlePickPoint(event: MouseEvent<HTMLButtonElement>) {
     if (event.detail === 0) {
@@ -105,32 +119,57 @@ export function FeedbackPins({
     onPick(worldPoint({ x: event.clientX - bounds.left, y: event.clientY - bounds.top }, viewport));
   }
 
+  function renderPin({ thread, position }: PositionedFeedbackPin) {
+    return (
+      <button
+        type="button"
+        className="whiteboard-feedback__pin"
+        data-resolved={thread.status === 'resolved' || undefined}
+        data-selected={thread.id === selectedThreadId || undefined}
+        data-feedback-pin={thread.id}
+        data-comment-author={feedbackAuthorName(thread.first)}
+        key={thread.id}
+        aria-label={'备注 ' + pinLabel(thread)}
+        title={pinLabel(thread)}
+        style={{ ...position, ...feedbackAuthorColors(colorFor, thread.first.authorId) }}
+        onPointerDown={(event) => event.stopPropagation()}
+        onDoubleClick={(event) => event.stopPropagation()}
+        onClick={(event) => onThread(thread, event.currentTarget)}
+      >
+        <FeedbackAuthorGlyph author={thread.first} />
+        {thread.status === 'resolved' && (
+          <span className="whiteboard-feedback__pin-check" aria-hidden="true">
+            <Check size={9} strokeWidth={3} />
+          </span>
+        )}
+      </button>
+    );
+  }
+
   return (
     <div className="whiteboard-feedback__pin-layer">
-      {visibleThreads.map(({ thread, position }) => (
-        <button
-          type="button"
-          className="whiteboard-feedback__pin"
-          data-resolved={thread.status === 'resolved' || undefined}
-          data-selected={thread.id === selectedThreadId || undefined}
-          data-feedback-pin={thread.id}
-          data-comment-author={feedbackAuthorName(thread.first)}
-          key={thread.id}
-          aria-label={'备注 ' + pinLabel(thread)}
-          title={pinLabel(thread)}
-          style={{ ...position, ...feedbackAuthorColors(colorFor, thread.first.authorId) }}
-          onPointerDown={(event) => event.stopPropagation()}
-          onDoubleClick={(event) => event.stopPropagation()}
-          onClick={(event) => onThread(thread, event.currentTarget)}
-        >
-          <FeedbackAuthorGlyph author={thread.first} />
-          {thread.status === 'resolved' && (
-            <span className="whiteboard-feedback__pin-check" aria-hidden="true">
-              <Check size={9} strokeWidth={3} />
-            </span>
-          )}
-        </button>
-      ))}
+      {groups.map(({ id, pins, selected }) => {
+        const first = pins[0];
+        if (!id) {
+          return renderPin(first);
+        }
+
+        return (
+          <Fragment key={id}>
+            <FeedbackPinCluster
+              pins={pins}
+              position={first.position}
+              canvas={canvas}
+              hidden={Boolean(selected)}
+              open={openCluster === id}
+              onToggle={() => setOpenCluster((current) => (current === id ? undefined : id))}
+              onClose={() => setOpenCluster((current) => (current === id ? undefined : current))}
+              onThread={onThread}
+            />
+            {selected && renderPin(selected)}
+          </Fragment>
+        );
+      })}
       {draftPosition && pinIntersects(draftPosition, viewportSize) && (
         <span
           className="whiteboard-feedback__pin whiteboard-feedback__draft-pin"

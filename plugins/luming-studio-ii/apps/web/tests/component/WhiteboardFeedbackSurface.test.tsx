@@ -283,12 +283,28 @@ test('anchors a selected large object inside its visible corner and keeps the sa
   expect(fixture.host.querySelector('.whiteboard-feedback__draft-pin')).toBeNull();
 });
 
-test('saves before attaching, then retries the original attachment without saving again', async () => {
-  const service = testService();
+test('saves before attaching and retries a lost confirmation without reinserting the draft', async () => {
+  const thread = {
+    ...sample,
+    version: 2n,
+    attachment: { requestId: 'queued-request', state: 'pending', threadVersion: 2n },
+  } as const;
+  const service = testService(thread);
   service.apply.mockRejectedValueOnce(new Error('保存请求尚未确认'));
   const onAttachThread = vi.fn<NonNullable<WhiteboardFeedbackSurfaceProps['onAttachThread']>>();
-  onAttachThread.mockRejectedValueOnce(new Error('宿主没有确认附加'));
-  const createCommandId = vi.fn(() => 'attachment-command').mockReturnValueOnce('save-command');
+  let confirmLost = false;
+  service.apply.mockImplementation(async ({ operation }) => {
+    if (operation.kind === 'confirmAttachment' && !confirmLost) {
+      confirmLost = true;
+      throw new Error('附加状态的回执丢失');
+    }
+
+    return { kind: 'applied', threadId: sample.id, threadVersion: 2n, deleted: false };
+  });
+  let nextId = 0;
+  const createCommandId = vi
+    .fn(() => 'attachment-command-' + ++nextId)
+    .mockReturnValueOnce('save-command');
 
   await render(service, {
     annotationRequest: { objectId: card.id, sequence: 1 },
@@ -302,22 +318,23 @@ test('saves before attaching, then retries the original attachment without savin
   expect(onAttachThread).not.toHaveBeenCalled();
 
   await click('重试本次保存');
-  expect(service.apply.mock.calls.map(([command]) => command.commandId)).toEqual([
+  expect(service.apply.mock.calls.slice(0, 2).map(([command]) => command.commandId)).toEqual([
     'save-command',
     'save-command',
   ]);
   expect(fixture.host.textContent).toContain('备注已保存，附加失败后可直接重试。');
   await click('重试附加');
 
-  const attached = { boardId, threadId: sample.id, commandId: 'attachment-command' };
-  expect(onAttachThread.mock.calls).toEqual([
-    [{ ...attached, signal: expect.any(AbortSignal) }],
-    [{ ...attached, signal: expect.any(AbortSignal) }],
-  ]);
-  expect(service.apply).toHaveBeenCalledTimes(2);
+  const attached = { boardId, threadId: sample.id, threadVersion: 2n, commandId: 'queued-request' };
+  expect(onAttachThread.mock.calls).toEqual([[{ ...attached, signal: expect.any(AbortSignal) }]]);
+  const confirms = service.apply.mock.calls
+    .map(([command]) => command)
+    .filter(({ operation }) => operation.kind === 'confirmAttachment');
+  expect(confirms).toHaveLength(2);
+  expect(confirms[0]).toEqual(confirms[1]);
 });
 
-test('keeps the discussion actions available without an unsupported Codex attachment', async () => {
+test('offers a durable request for the owner when no Codex draft capability is present', async () => {
   const service = testService();
   await render(service, { annotationRequest: { objectId: card.id, sequence: 1 } });
   expect(fixture.host.textContent).not.toContain('附加到 Codex 对话');
@@ -328,6 +345,13 @@ test('keeps the discussion actions available without an unsupported Codex attach
   expect(fixture.host.textContent).toContain('定位备注');
   expect(fixture.host.textContent).not.toContain('附加到 Codex 对话');
   expect(fixture.host.textContent).not.toContain('使用此批注作为建议来源');
+  await click('请求房主附加到 Codex');
+  expect(service.apply.mock.lastCall?.[0].operation).toEqual({
+    kind: 'requestAttachment',
+    threadId: sample.id,
+    expectedVersion: sample.version,
+  });
+  expect(fixture.host.textContent).toContain('已请求房主在 Codex 中附加。');
 });
 
 test('keeps the notes pager in place while appending the next page', async () => {
@@ -403,6 +427,10 @@ test('keeps author colors consistent across pins, the list, threads and viewers'
     const threads = owners.map(({ id, text }) => ({
       ...sample,
       id,
+      anchor:
+        id === owner.id
+          ? sample.anchor
+          : { ...sample.anchor, target: { kind: 'board' as const, point: { x: 190, y: 95 } } },
       first: { ...sample.first, text, authorId: id, authoredByViewer: id === viewerActorId },
     }));
     service.listThreads.mockResolvedValue({ items: threads, canWrite: true });
@@ -966,6 +994,7 @@ test('reopens the draft for the selected discussion when changing between two pi
   const other: FeedbackThread = {
     ...sample,
     id: 'another-thread',
+    anchor: { ...sample.anchor, target: { kind: 'board', point: { x: 190, y: 95 } } },
     first: { ...sample.first, id: 'other-message', text: '另一块卡片' },
   };
   service.listThreads.mockResolvedValue({ items: [sample, other], canWrite: true });
@@ -986,6 +1015,106 @@ test('reopens the draft for the selected discussion when changing between two pi
   expect(element<HTMLTextAreaElement>('textarea').value).toBe('第一条讨论的回复');
   await clickPin(other.id);
   expect(element<HTMLTextAreaElement>('textarea').value).toBe('第二条讨论的回复');
+});
+
+test('groups overlapping notes transitively, opens the requested discussion and separates at higher zoom', async () => {
+  const otherCard = {
+    id: 'close-card',
+    label: '邻近卡片',
+    geometryVersion: 3n,
+    geometry: { x: 167, y: 88, width: 20, height: 14, rotation: 0 },
+  };
+  const sameShape: FeedbackThread = {
+    ...sample,
+    id: 'agent-note',
+    anchor: {
+      ...sample.anchor,
+      target: { kind: 'object', objectId: card.id, u: 0.75, v: 0.05, geometryVersion: 7n },
+    },
+    first: {
+      ...sample.first,
+      id: 'agent-message',
+      text: 'Agent 在同一对象的备注',
+      authorId: 'agent-one',
+      authorName: 'Review Agent',
+      authoredByViewer: false,
+    },
+  };
+  const nearby: FeedbackThread = {
+    ...sample,
+    id: 'nearby-note',
+    anchor: {
+      ...sample.anchor,
+      target: { kind: 'object', objectId: otherCard.id, u: 0.5, v: 0.5, geometryVersion: 3n },
+    },
+    first: {
+      ...sample.first,
+      id: 'nearby-message',
+      text: '来宾在邻近对象的备注',
+      authorId: 'guest-one',
+      authorName: '外部审阅',
+      authoredByViewer: false,
+    },
+  };
+  const threads = [sample, sameShape, nearby];
+  const service = testService();
+  service.listThreads.mockResolvedValue({ items: threads, canWrite: true });
+  service.getThread.mockImplementation(async ({ threadId }) => {
+    const thread = threads.find(({ id }) => id === threadId);
+    if (!thread) {
+      throw new Error('Could not find the fixture discussion');
+    }
+
+    return { thread, canWrite: true, items: [] };
+  });
+  service.apply.mockResolvedValue({
+    kind: 'applied',
+    threadId: sameShape.id,
+    threadVersion: 2n,
+    deleted: false,
+  });
+  const objects = [card, otherCard];
+  const pin = '[data-feedback-pin]';
+  const group = '3 条备注';
+  const chooser = '.whiteboard-feedback__popup--cluster';
+  await render(service, { objects });
+
+  expect(fixture.host.querySelectorAll(pin)).toHaveLength(0);
+  expect(button(group).querySelectorAll('.whiteboard-feedback__avatar')).toHaveLength(2);
+  expect(element('.whiteboard-feedback__cluster-authors [data-agent] svg')).toBeTruthy();
+  await click(group);
+  const rows = element(chooser).querySelectorAll('.whiteboard-feedback__cluster-summary');
+  expect(Array.from(rows, (row) => row.textContent)).toEqual([
+    '我' + sample.first.text,
+    'Review Agent' + sameShape.first.text,
+    '外部审阅' + nearby.first.text,
+  ]);
+
+  await act(async () => {
+    element<HTMLButtonElement>(chooser + ' li:nth-child(2) button').click();
+  });
+  expect(service.getThread.mock.calls.at(-1)?.[0].threadId).toBe(sameShape.id);
+  expect(button(group).hidden).toBe(true);
+  expect(element(pin).getAttribute('data-feedback-pin')).toBe(sameShape.id);
+  expect(element('[data-feedback-pin="agent-note"] svg')).toBeTruthy();
+  expect(element('.whiteboard-feedback__thread [data-agent] svg')).toBeTruthy();
+  await typeMessage('这条回复只归 Agent 的讨论');
+  await click('发送回复');
+  expect(service.apply.mock.calls.at(-1)?.[0].operation).toEqual({
+    kind: 'reply',
+    threadId: sameShape.id,
+    text: '这条回复只归 Agent 的讨论',
+  });
+  await click('关闭备注');
+  expect(button(group).hidden).toBe(false);
+  expect(document.activeElement).toBe(button(group));
+
+  await click(group);
+  await render(service, { objects, viewport: { ...viewport, zoom: 4 } });
+  expect(fixture.host.querySelector(chooser)).toBeNull();
+  expect(fixture.host.querySelectorAll(pin)).toHaveLength(3);
+  await render(service, { objects });
+  expect(button(group).getAttribute('aria-expanded')).toBe('false');
 });
 
 test('the numeric-tools setting guards 9 and Escape leaves annotation mode without opening the list', async () => {

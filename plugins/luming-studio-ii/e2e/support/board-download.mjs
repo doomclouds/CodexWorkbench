@@ -1,10 +1,6 @@
 import assert from "node:assert/strict";
-import { createRequire } from "node:module";
+import { unzipSync } from "fflate";
 
-const requireInitial = createRequire(
-  new URL("../../../luming-studio/package.json", import.meta.url),
-);
-const { unzipSync } = requireInitial("fflate");
 const maximumBytes = 8 * 1024 * 1024;
 const extensions = new Map([
   ["json", ".json"],

@@ -22,8 +22,11 @@
       "interface": {
         "displayName": "鹿鸣 · Luming Studio II",
         "shortDescription": "共享白板、图解与 Agent 协作",
+        "longDescription": "在 Codex 对话旁编辑共享白板，整理流程图、HTML 图解、文档和待办。通过具体备注附加上下文，审阅 Agent 建议，查看历史并导出作品。",
         "developerName": "doomclouds",
         "category": "Productivity",
+        "capabilities": ["Interactive"],
+        "defaultPrompt": "查看当前白板并整理修改建议。",
         "composerIcon": "./assets/icon.png",
         "logo": "./assets/icon.png"
       }

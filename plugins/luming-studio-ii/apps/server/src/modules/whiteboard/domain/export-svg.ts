@@ -18,6 +18,7 @@ import {
   type BoardExportPngRegion,
   type BoardExportRejection,
   type BoardExportSnapshot,
+  type PngExportOptions,
 } from './export-types.js';
 import type { BoardObject, ConnectorHead, PayloadRecord, Point } from './model.js';
 
@@ -197,15 +198,18 @@ export function exportViewport(frame: ExportFrame | undefined) {
 
 function svgDocument(
   snapshot: BoardExportSnapshot,
-  frame: ExportFrame | undefined,
+  viewBox: ReturnType<typeof exportViewport>,
+  viewport: Pick<ReturnType<typeof exportViewport>, 'width' | 'height'>,
   body: string,
+  exactCrop: boolean,
 ): string {
-  const { x, y, width, height } = exportViewport(frame);
+  const { x, y, width, height } = viewBox;
   const title = escapeXml(snapshot.board.title);
   const revision = snapshot.board.revision.toString();
   const description = `白板版本 ${revision}，包含 ${snapshot.objects.length} 个对象。`;
+  const aspectRatio = exactCrop ? ' preserveAspectRatio="none"' : '';
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="${x} ${y} ${width} ${height}" role="img" font-family="sans-serif"><title>${title}</title><desc>${description}</desc><rect x="${x}" y="${y}" width="${width}" height="${height}" fill="#f5f5f5"/>${body}</svg>\n`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${viewport.width}" height="${viewport.height}" viewBox="${x} ${y} ${width} ${height}"${aspectRatio} role="img" font-family="sans-serif"><title>${title}</title><desc>${description}</desc><rect x="${x}" y="${y}" width="${width}" height="${height}" fill="#f5f5f5"/>${body}</svg>\n`;
 }
 
 function richRegion(
@@ -266,7 +270,7 @@ function richMarkup({ index, width, height, scripted }: BoardExportPngRegion) {
   return `<foreignObject width="${width}" height="${height}"><div xmlns="http://www.w3.org/1999/xhtml" data-studio-png-region="${index}"></div></foreignObject>`;
 }
 
-export function renderExportSvg(snapshot: BoardExportSnapshot) {
+export function renderExportSvg(snapshot: BoardExportSnapshot, options?: PngExportOptions) {
   const payloads = new Map(snapshot.payloads.map((payload) => [payload.objectId, payload]));
   const layers: string[] = [];
   const regions: BoardExportPngRegion[] = [];
@@ -299,12 +303,25 @@ export function renderExportSvg(snapshot: BoardExportSnapshot) {
     }
 
     layers.push(markup.value);
-    frame = expandFrame(frame, markup.bounds);
+    if (!options?.rectangle) {
+      frame = expandFrame(frame, markup.bounds);
+    }
   }
 
+  const viewBox = options?.rectangle ?? exportViewport(frame);
+  const scale = options?.scale ?? 1;
+  const exactCrop = options?.rectangle !== undefined;
+  const viewport =
+    exactCrop || scale !== 1
+      ? {
+          width: Math.max(1, Math.floor(viewBox.width * scale)),
+          height: Math.max(1, Math.floor(viewBox.height * scale)),
+        }
+      : viewBox;
+
   return {
-    svg: svgDocument(snapshot, frame, layers.join('')),
+    svg: svgDocument(snapshot, viewBox, viewport, layers.join(''), exactCrop),
     regions,
-    viewport: exportViewport(frame),
+    viewport,
   };
 }

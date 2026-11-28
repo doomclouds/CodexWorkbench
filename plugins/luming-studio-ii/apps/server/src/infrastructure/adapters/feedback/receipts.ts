@@ -15,6 +15,7 @@ function readRejection(value: unknown): FeedbackRejectionReason {
     case 'forbidden':
     case 'versionChanged':
     case 'commandIdReuse':
+    case 'attachmentClaimed':
       return value;
     default:
       throw new Error('Invalid stored feedback rejection.');

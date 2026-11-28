@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict';
 import { Buffer } from 'node:buffer';
 import { create, toBinary } from '@bufbuild/protobuf';
 import { BoardCatalogService } from '@codexworkbench/luming-studio-ii-contracts/catalog/service';
@@ -186,6 +187,48 @@ test('uses the same event journal for Connect replay and the subsequent live str
   } finally {
     first.abort();
     resumed.abort();
+  }
+});
+
+test('publishes immediate view removal when a gRPC-Web response closes without a leave RPC', async () => {
+  const client = streamClient(server.owner, 'grpc-web');
+  const watching = abortScope();
+  const visiting = abortScope();
+  const observer = client
+    .streamBoardRoomEvents(scope, { headers: { [actorHeader]: editorId }, signal: watching.signal })
+    [Symbol.asyncIterator]();
+  const visitor = client
+    .streamBoardRoomEvents(peer, {
+      headers: { [actorHeader]: teammateId },
+      signal: visiting.signal,
+    })
+    [Symbol.asyncIterator]();
+
+  try {
+    const snapshot = await readEvent(observer);
+    assert.ok(snapshot.sequence !== undefined);
+    await readEvent(visitor);
+    const sample = { ...peer, sequence: 1n };
+    const view = { actorId: teammateId, viewId: peer.viewId };
+    await expect(
+      callWhiteboard(server.owner, teammateId, updateBoardPresence, sample),
+    ).resolves.toMatchObject({ accepted: true });
+    expect(await readEvent(observer)).toMatchObject({
+      sequence: snapshot.sequence + 1n,
+      payload: { case: 'participants', value: { upserts: [{ key: view }] } },
+    });
+    visiting.abort();
+    expect(await readEvent(observer)).toMatchObject({
+      sequence: snapshot.sequence + 2n,
+      payload: { case: 'participants', value: { upserts: [], removals: [view] } },
+    });
+    await expect(
+      callWhiteboard(server.owner, teammateId, updateBoardPresence, { ...sample, sequence: 2n }),
+    ).resolves.toMatchObject({ accepted: false });
+    expect(server.errors).toEqual([]);
+  } finally {
+    visiting.abort();
+    watching.abort();
   }
 });
 

@@ -150,7 +150,7 @@ export function locateDraft(
   target: FeedbackTarget,
   objects: ObjectIndex,
 ): FeedbackPoint | undefined {
-  if (target.kind === 'board') {
+  if (target.kind === 'board' || target.kind === 'selection') {
     return target.point;
   }
 

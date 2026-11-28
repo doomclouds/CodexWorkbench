@@ -19,6 +19,10 @@ export interface HistoryChange {
 
 const dateFormat = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'long' });
 
+export function historyAuthorName({ actorId, actorKind, actorName }: BoardHistoryVersion) {
+  return actorName || (actorKind === 'agent' ? 'Agent' : actorId);
+}
+
 function dayKey(date: Date): string {
   return [date.getFullYear(), date.getMonth(), date.getDate()].join('-');
 }

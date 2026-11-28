@@ -1,4 +1,8 @@
-import { freezeFeedbackAnchor, validFeedbackContentUnit } from '../domain/index.js';
+import {
+  freezeFeedbackAnchor,
+  freezeFeedbackSelection,
+  validFeedbackContentUnit,
+} from '../domain/index.js';
 import type {
   FeedbackActor,
   FeedbackAnchorTarget,
@@ -12,13 +16,17 @@ import type {
 } from '../domain/index.js';
 import type { FeedbackRepository, FeedbackWriter } from '../ports/index.js';
 import { canDeleteThread, requireWriteAccess } from './access.js';
+import { applyAttachment } from './attachments.js';
 
 const maximumTextLength = 16_000;
 
 type CreateOperation = Extract<FeedbackOperation, { readonly kind: 'create' }>;
 type ReplyOperation = Extract<FeedbackOperation, { readonly kind: 'reply' }>;
 type EditOperation = Extract<FeedbackOperation, { readonly kind: 'edit' }>;
-type ThreadOperation = Extract<FeedbackOperation, { readonly expectedThreadVersion: bigint }>;
+type ThreadOperation = Extract<
+  FeedbackOperation,
+  { readonly kind: 'resolve' | 'reopen' | 'delete' }
+>;
 
 export interface FeedbackServices {
   readonly now: () => number;
@@ -32,6 +40,7 @@ interface CommandContext {
   readonly actor: FeedbackActor;
   readonly access: FeedbackBoardAccess;
   readonly boardId: string;
+  readonly commandId: string;
   readonly now: () => number;
   readonly authorName?: string;
 }
@@ -63,6 +72,22 @@ function timestamp(now: () => number, previous = 0n): bigint {
 function anchorSignature(target: FeedbackAnchorTarget): readonly unknown[] {
   if (target.kind === 'board') {
     return [target.kind, String(target.point.x), String(target.point.y)];
+  }
+
+  if (target.kind === 'selection') {
+    const { point, bounds, objects, expectedBoardRevision } = target;
+
+    return [
+      target.kind,
+      point,
+      bounds,
+      expectedBoardRevision.toString(),
+      objects.map(({ objectId, geometryVersion, payloadVersion }) => [
+        objectId,
+        geometryVersion.toString(),
+        payloadVersion?.toString(),
+      ]),
+    ];
   }
 
   if (target.kind === 'content') {
@@ -111,10 +136,21 @@ function commandSignature(operation: FeedbackOperation): string {
     case 'resolve':
     case 'reopen':
     case 'delete':
+    case 'requestAttachment':
       return JSON.stringify([
         operation.kind,
         operation.threadId,
         operation.expectedThreadVersion.toString(),
+      ]);
+    case 'claimAttachment':
+    case 'resetAttachmentClaim':
+      return JSON.stringify([operation.kind, operation.threadId, operation.requestId]);
+    case 'confirmAttachment':
+      return JSON.stringify([
+        operation.kind,
+        operation.threadId,
+        operation.requestId,
+        operation.claimId,
       ]);
   }
 }
@@ -147,6 +183,27 @@ function applied(thread: FeedbackThread, message?: FeedbackMessage): FeedbackApp
   };
 }
 
+function freezeThreadAnchor({ writer, boardId }: CommandContext, target: FeedbackAnchorTarget) {
+  const revision = writer.getBoardRevision(boardId);
+  if (target.kind === 'selection') {
+    const objects =
+      target.objects.length <= 120
+        ? target.objects.map(({ objectId }) => writer.getObject(boardId, objectId))
+        : [];
+
+    return freezeFeedbackSelection(revision, target, objects);
+  }
+  if (target.kind === 'content' && !validFeedbackContentUnit(target.content)) {
+    return { kind: 'rejected', reason: 'invalidAnchor' } as const;
+  }
+
+  const object = target.kind === 'board' ? undefined : writer.getObject(boardId, target.objectId);
+  const content =
+    target.kind === 'content' && object ? writer.getContentSource(boardId, target) : undefined;
+
+  return freezeFeedbackAnchor(revision, target, object, content);
+}
+
 function createThread(context: CommandContext, operation: CreateOperation): FeedbackOutcome {
   const text = normalizedText(operation.text);
   if (!text) {
@@ -154,15 +211,7 @@ function createThread(context: CommandContext, operation: CreateOperation): Feed
   }
 
   const { writer, boardId, now } = context;
-  const target = operation.anchor;
-  if (target.kind === 'content' && !validFeedbackContentUnit(target.content)) {
-    return { kind: 'rejected', reason: 'invalidAnchor' };
-  }
-
-  const object = target.kind === 'board' ? undefined : writer.getObject(boardId, target.objectId);
-  const content =
-    target.kind === 'content' && object ? writer.getContentSource(boardId, target) : undefined;
-  const anchor = freezeFeedbackAnchor(writer.getBoardRevision(boardId), target, object, content);
+  const anchor = freezeThreadAnchor(context, operation.anchor);
   if ('kind' in anchor) {
     return anchor;
   }
@@ -299,6 +348,20 @@ function executeCommand(context: CommandContext, operation: FeedbackOperation): 
     case 'resolve':
     case 'reopen':
       return changeThread(context, thread, operation);
+    case 'requestAttachment':
+    case 'claimAttachment':
+    case 'confirmAttachment':
+    case 'resetAttachmentClaim':
+      return applyAttachment(
+        context.writer,
+        context.actor,
+        context.access.isOwner,
+        context.boardId,
+        thread,
+        operation,
+        context.commandId,
+        timestamp(context.now),
+      );
   }
 }
 
@@ -323,14 +386,17 @@ export function applyFeedback(
       return { boardId, commandId, outcome: { kind: 'rejected', reason: 'commandIdReuse' } };
     }
 
+    const principalName = access.isOwner ? services.ownerDisplayName : access.name;
+    const authorName = actor.kind === 'agent' ? 'Codex · ' + actor.id.slice(-8) : principalName;
     const outcome = executeCommand(
       {
         writer,
         actor,
         access,
         boardId,
+        commandId,
         now: services.now,
-        authorName: access.isOwner ? services.ownerDisplayName : access.name,
+        authorName,
       },
       operation,
     );

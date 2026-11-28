@@ -21,6 +21,21 @@ export const archiveSchema = `
     PRIMARY KEY (board_id, asset_id)
   ) STRICT;
 
+  CREATE TABLE IF NOT EXISTS board_removed_assets (
+    board_id TEXT NOT NULL REFERENCES boards (board_id) ON DELETE CASCADE,
+    asset_id TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    bytes BLOB NOT NULL,
+    PRIMARY KEY (board_id, asset_id)
+  ) STRICT;
+
+  CREATE TABLE IF NOT EXISTS board_asset_imports (
+    board_id TEXT NOT NULL REFERENCES boards (board_id) ON DELETE CASCADE,
+    asset_id TEXT NOT NULL,
+    signature TEXT NOT NULL,
+    PRIMARY KEY (board_id, asset_id)
+  ) STRICT;
+
   CREATE TABLE IF NOT EXISTS board_archive_source_chunks (
     board_id TEXT NOT NULL REFERENCES boards (board_id) ON DELETE CASCADE,
     chunk_index INTEGER NOT NULL CHECK (chunk_index >= 0),

@@ -30,6 +30,8 @@ function fixture() {
 
   const repository: CatalogRepository = {
     readThumbnail: () => ({ kind: 'unavailable' }),
+    readPreferences: () => ({}),
+    updatePreferences: vi.fn(),
     listBoards,
     listTrashedBoards,
     getReceipt,
@@ -151,7 +153,9 @@ describe('Catalog application', () => {
     const requests: CatalogListRequest[] = [
       { ...recentRequest, pageSize: 0 },
       { ...recentRequest, pageSize: 101 },
-      { ...recentRequest, query: 'q'.repeat(201) },
+      { ...recentRequest, query: 'q'.repeat(513) },
+      { ...recentRequest, offset: -1 },
+      { ...recentRequest, offset: 0, cursor: '{}' },
       { ...recentRequest, cursor: '{' },
     ];
 

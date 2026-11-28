@@ -1,6 +1,7 @@
 import {
   renderExportFile,
   selectExportObjects,
+  selectExportRectangle,
   type Actor,
   type BoardExportRejection,
   type BoardExportSnapshot,
@@ -64,7 +65,10 @@ function captureSnapshot(
   }
 
   const geometry = new Map(objects.map((object) => [object.objectId, object]));
-  const selected = selectExportObjects(objects, geometry, command.scope);
+  const selected = command.rectangle
+    ? selectExportRectangle(objects, geometry, command.rectangle)
+    : selectExportObjects(objects, geometry, command.scope);
+
   if ('kind' in selected) {
     return selected;
   }

@@ -6,8 +6,9 @@ import type {
   WhiteboardPayload,
 } from '../../data/whiteboard/index.js';
 import { StatusText } from '../../ui/base/index.js';
+import { HistoryAgentAvatar } from './HistoryAgentAvatar.js';
 import { diffHistoryText, historyTexts } from './history-difference.js';
-import { changeLabel, type HistoryChange } from './history-records.js';
+import { changeLabel, historyAuthorName, type HistoryChange } from './history-records.js';
 
 interface HistoryDifferencePageProps {
   readonly version: BoardHistoryVersion;
@@ -108,6 +109,21 @@ function useDifferenceBodies({
   return { bodies, loading: changed && !bodies };
 }
 
+function DifferenceAuthor({ version }: { readonly version: BoardHistoryVersion }) {
+  const { actorKind, actorId, savedAtMillis } = version;
+  const savedAt = savedAtMillis === undefined ? undefined : recordDateFormat.format(savedAtMillis);
+
+  return (
+    <p className="whiteboard-history__difference-meta">
+      {actorKind === 'agent' && <HistoryAgentAvatar actorId={actorId} compact />}
+      <span>
+        {historyAuthorName(version) || '协作者'}
+        {savedAt && ' · ' + savedAt}
+      </span>
+    </p>
+  );
+}
+
 export function HistoryDifferencePage(props: HistoryDifferencePageProps) {
   const { version, change, canRestore, busy, onBack, onClose, onRestore } = props;
   const backButton = useRef<HTMLButtonElement>(null);
@@ -119,10 +135,6 @@ export function HistoryDifferencePage(props: HistoryDifferencePageProps) {
   );
   const unchanged = diff.added === 0 && diff.removed === 0;
   const summary = diff.large ? '内容较大，无法在这里展开逐行差异。' : undefined;
-  const savedAt =
-    version.savedAtMillis === undefined
-      ? undefined
-      : recordDateFormat.format(version.savedAtMillis);
 
   return (
     <section className="whiteboard-history__difference">
@@ -152,10 +164,7 @@ export function HistoryDifferencePage(props: HistoryDifferencePageProps) {
           <X size={18} />
         </button>
       </header>
-      <p className="whiteboard-history__difference-meta">
-        {version.actorId || '协作者'}
-        {savedAt && ' · ' + savedAt}
-      </p>
+      <DifferenceAuthor version={version} />
       {canRestore && (
         <button
           type="button"

@@ -106,6 +106,7 @@ function authorizeBoardRead(actor: HttpActor, boardId: string) {
 
 interface StreamRequest {
   readonly authorize: () => HttpActor | undefined;
+  readonly disconnected: AbortSignal;
   readonly disconnectBlockedWriter: () => void;
 }
 
@@ -155,11 +156,17 @@ class RoomEventStream {
 
   private open(cursor: RoomEventCursor | undefined) {
     const { application, boardId, key } = this.options;
-    const subscription = application.subscribeAfter(boardId, key, cursor, {
-      deliver: (event) => this.run(() => this.enqueue(event)),
-      recheck: () => this.run(() => this.checkAccess()),
-      close: () => this.fail(new ConnectError('Room stream closed', Code.Unavailable)),
-    });
+    const subscription = application.subscribeAfter(
+      boardId,
+      key,
+      cursor,
+      {
+        deliver: (event) => this.run(() => this.enqueue(event)),
+        recheck: () => this.run(() => this.checkAccess()),
+        close: () => this.fail(new ConnectError('Room stream closed', Code.Unavailable)),
+      },
+      'stream',
+    );
     this.subscription = subscription;
     for (const event of subscription.events) {
       this.enqueue(event);
@@ -257,8 +264,9 @@ class RoomEventStream {
 
   private dispose() {
     clearInterval(this.interval);
-    this.subscription?.release();
+    const subscription = this.subscription;
     this.subscription = undefined;
+    subscription?.release();
     this.pending.length = 0;
     this.pendingBytes = 0;
   }
@@ -306,7 +314,7 @@ export function createRoomEventStreamRoute(
           key: { actorId: actor.id, viewId: input.viewId },
           reportError,
           ...request,
-        }).read(cursor, context.signal);
+        }).read(cursor, AbortSignal.any([context.signal, request.disconnected]));
       });
     },
   });
@@ -316,8 +324,14 @@ export function createRoomEventStreamRoute(
     response: ServerResponse,
     authorize: StreamRequest['authorize'],
   ) => {
+    const responseClosed = new AbortController();
+    response.once('close', () => responseClosed.abort());
+    if (response.destroyed) {
+      responseClosed.abort();
+    }
     requests.set(request, {
       authorize,
+      disconnected: responseClosed.signal,
       disconnectBlockedWriter() {
         if (response.writableNeedDrain) {
           response.destroy();

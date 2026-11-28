@@ -10,7 +10,7 @@ import {
 } from './feedback-layer-position.js';
 
 interface FeedbackPopupProps {
-  readonly kind: 'list' | 'pin' | 'draft';
+  readonly kind: 'list' | 'pin' | 'draft' | 'cluster';
   readonly label: string;
   readonly anchor?: HTMLElement | null;
   readonly canvas: RefObject<HTMLDivElement | null>;
@@ -73,17 +73,19 @@ function positionPopup(
   const viewport = { width: view.innerWidth, height: view.innerHeight };
   const bounds = canvas.getBoundingClientRect();
   const canvasViewport = visibleCanvas(bounds, viewport);
-  if (kind !== 'list') {
+  const anchored = kind === 'list' || kind === 'cluster';
+  if (!anchored) {
     layer.style.maxWidth = Math.max(0, canvasViewport.width - commentPopupGutter * 2) + 'px';
   }
   const frame = layer.getBoundingClientRect();
   const contentHeight = layer.firstElementChild?.scrollHeight || frame.height;
-  const kindWidth = kind === 'list' ? commentsPanelWidth : commentPopupWidth;
-  const availableWidth =
-    kind === 'list' ? viewport.width - 24 : canvasViewport.width - commentPopupGutter * 2;
+  const kindWidth = anchored ? commentsPanelWidth : commentPopupWidth;
+  const availableWidth = anchored
+    ? viewport.width - 24
+    : canvasViewport.width - commentPopupGutter * 2;
   const width = frame.width || Math.max(0, Math.min(kindWidth, availableWidth));
   const size = { width, height: contentHeight + 2 };
-  if (kind === 'list') {
+  if (anchored) {
     const position = placeCommentsList(listAnchor(anchor, bounds, viewport.width), size, viewport);
     addPixelPosition(layer, position);
     layer.dataset.above = String(position.above);
@@ -161,7 +163,7 @@ export function FeedbackPopup({
 
     function handleOutside(event: PointerEvent) {
       const target = event.target;
-      if (!(target instanceof Element) || layer?.contains(target)) {
+      if (!(target instanceof Element) || layer?.contains(target) || anchor?.contains(target)) {
         return;
       }
 

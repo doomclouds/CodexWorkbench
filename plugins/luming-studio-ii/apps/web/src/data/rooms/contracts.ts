@@ -97,6 +97,8 @@ type RoomEventPayload =
       readonly participants: readonly BoardRoomParticipant[];
       readonly timer: BoardRoomTimer;
       readonly agentWorkspaces?: readonly BoardRoomAgentWorkspace[];
+      readonly onlineAgentIds?: readonly string[];
+      readonly readingAgentIds?: readonly string[];
       readonly canReleaseAgentActivity?: boolean;
       readonly feedbackVersion?: bigint;
       readonly suggestionsVersion?: bigint;
@@ -109,7 +111,12 @@ type RoomEventPayload =
   | { readonly kind: 'timer'; readonly timer: BoardRoomTimer }
   | { readonly kind: 'contentChanged'; readonly change: BoardRoomContentChange }
   | { readonly kind: 'feedbackChanged' | 'suggestionsChanged'; readonly version: bigint }
-  | { readonly kind: 'agentWorkspaces'; readonly workspaces: readonly BoardRoomAgentWorkspace[] }
+  | {
+      readonly kind: 'agentWorkspaces';
+      readonly workspaces: readonly BoardRoomAgentWorkspace[];
+      readonly onlineAgentIds?: readonly string[];
+      readonly readingAgentIds?: readonly string[];
+    }
   | { readonly kind: 'accessLost' };
 
 export type BoardRoomEvent = RoomEventHeader & RoomEventPayload;
@@ -118,6 +125,7 @@ export type BoardRoomPost = (
   path: string,
   body: Uint8Array,
   signal?: AbortSignal,
+  keepalive?: boolean,
 ) => Promise<Uint8Array>;
 
 export type BoardRoomEventPort = (
@@ -181,6 +189,7 @@ export interface BoardRoomService {
 export interface BoardRoomClock {
   readonly now: () => number;
   readonly schedule: (delayMs: number, task: () => void) => () => void;
+  readonly scheduleFrame?: (task: (time: number) => void) => (() => void) | undefined;
 }
 
 export interface BoardRoomState {
@@ -193,6 +202,8 @@ export interface BoardRoomState {
   readonly timer?: BoardRoomTimer;
   readonly notice?: string;
   readonly agentWorkspaces?: readonly BoardRoomAgentWorkspace[];
+  readonly onlineAgentIds?: readonly string[];
+  readonly readingAgentIds?: readonly string[];
   readonly canReleaseAgentActivity?: boolean;
   readonly feedbackUpdateKey?: string;
   readonly suggestionsUpdateKey?: string;
@@ -216,6 +227,7 @@ export interface BoardRoomSession {
   now(): number;
   releaseAgentWorkspace?(target: BoardRoomAgentWorkspaceTarget): Promise<void>;
   schedule(delayMs: number, task: () => void): () => void;
+  readonly scheduleFrame?: BoardRoomClock['scheduleFrame'];
 }
 
 export interface BoardRoomSessionOptions {
@@ -224,6 +236,7 @@ export interface BoardRoomSessionOptions {
   readonly service: BoardRoomService;
   readonly clock: BoardRoomClock;
   readonly observation?: 'snapshot';
+  readonly visibility?: (listener: (visible: boolean) => void) => () => void;
 }
 
 import type { BoardRoomContentChange } from './room-message.js';

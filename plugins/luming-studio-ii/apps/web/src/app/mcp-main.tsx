@@ -3,6 +3,7 @@ import { createArchiveImportService } from '../data/archive-import/index.js';
 import {
   createBoardCatalogService,
   createCatalogManagementService,
+  createWorkbenchPreferencesService,
 } from '../data/catalog/index.js';
 import { createBoardFeedbackService } from '../data/feedback/index.js';
 import { createBoardRoomService, createBoardRoomSession } from '../data/rooms/index.js';
@@ -25,6 +26,7 @@ import {
   copyShareLink,
   createBoardDraftStorage,
   downloadBoardFile,
+  observeBoardRoomVisibility,
   prepareBoardImage,
   prepareBoardVideo,
   readCanvasClipboard,
@@ -280,8 +282,12 @@ function services(bridge: Bridge) {
   return { service, editService, historyService, suggestions };
 }
 
-function mount(bridge: Bridge) {
+async function mount(bridge: Bridge) {
   const { postProtobuf, navigation, preferences } = bridge;
+  if (!(await preferences.initialize(createWorkbenchPreferencesService(postProtobuf)))) {
+    return;
+  }
+
   const room = createBoardRoomService(postProtobuf, { waitForEvents: observeMcpRoomEvents });
 
   function createRoomSession(boardId: string) {
@@ -290,6 +296,7 @@ function mount(bridge: Bridge) {
       viewId: createMcpCommandId(),
       service: room,
       clock: boardRoomClock,
+      visibility: observeBoardRoomVisibility,
       observation: 'snapshot',
     });
   }

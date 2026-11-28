@@ -16,6 +16,7 @@ import { duplicateBoard } from './duplicate-board.js';
 import { getManagementReceipt, saveManagementReceipt } from './management-receipts.js';
 import { catalogSchema } from './schema.js';
 import { readCatalogThumbnail } from './thumbnail.js';
+import { readWorkbenchPreferences, updateWorkbenchPreferences } from './workbench-preferences.js';
 
 type OrderingValue = bigint | number | string | null;
 
@@ -67,6 +68,7 @@ const catalogTables = `
 const activeBoards = 'l.trashed_at_millis IS NULL';
 const activePinnedBoards = activeBoards + ' AND c.pinned = 1';
 const ownedTrash = 'l.owner_actor_id = m.actor_id AND l.trashed_at_millis IS NOT NULL';
+const ownedPinnedTrash = ownedTrash + ' AND c.pinned = 1';
 
 function readUnsigned(value: unknown, fieldName: string): bigint {
   if (typeof value !== 'bigint' || value < 0n) {
@@ -120,7 +122,7 @@ function listRows(
   condition: string,
   ordering: CatalogOrdering,
 ): SqliteRow[] {
-  const { actorId, query, limit, after } = lookup;
+  const { actorId, query, limit, after, offset = 0 } = lookup;
   const titleFilter = query ? 'AND instr(studio_unicode_lower(b.title), ?) > 0' : '';
   const search = query ? [query.toLocaleLowerCase()] : [];
   const boundary = after ? `WHERE (${ordering.columns}) > (${ordering.parameters})` : '';
@@ -136,11 +138,11 @@ function listRows(
     FROM visible
     ${boundary}
     ORDER BY ${ordering.columns}
-    LIMIT ?
+    LIMIT ? OFFSET ?
   `);
   statement.setReadBigInts(true);
 
-  return statement.all(actorId, ...search, ...values, limit);
+  return statement.all(actorId, ...search, ...values, limit, offset);
 }
 
 function listBoards(connection: SqliteConnection, lookup: CatalogLookup): CatalogBoardSummary[] {
@@ -155,7 +157,8 @@ function listTrashedBoards(
   connection: SqliteConnection,
   lookup: CatalogLookup,
 ): CatalogTrashedBoard[] {
-  return listRows(connection, lookup, ownedTrash, trashOrderings[lookup.order]).map((row) => ({
+  const condition = lookup.pinnedOnly ? ownedPinnedTrash : ownedTrash;
+  return listRows(connection, lookup, condition, trashOrderings[lookup.order]).map((row) => ({
     board: readListSummary(row),
     trashedAtMillis: readUnsigned(row.trashed_at_millis, 'trashed_at_millis'),
   }));
@@ -349,6 +352,10 @@ export function createCatalogRepository(
       database.read((connection) => readCatalogThumbnail(connection, lookup, cached)),
     getReceipt: (actorId, commandId) =>
       database.read((connection) => getReceipt(connection, actorId, commandId)?.receipt),
+    readPreferences: (actorId) =>
+      database.read((connection) => readWorkbenchPreferences(connection, actorId)),
+    updatePreferences: (actorId, changes) =>
+      database.write((connection) => updateWorkbenchPreferences(connection, actorId, changes)),
     write: (work) =>
       database.write((connection) =>
         work({

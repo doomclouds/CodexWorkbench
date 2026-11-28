@@ -37,6 +37,10 @@
       "types": "./dist/proto/luming/studio/v1/board_suggestion_service_pb.d.ts",
       "default": "./dist/proto/luming/studio/v1/board_suggestion_service_pb.js"
     },
+    "./agent-write/service": {
+      "types": "./dist/proto/luming/studio/v1/board_agent_write_service_pb.d.ts",
+      "default": "./dist/proto/luming/studio/v1/board_agent_write_service_pb.js"
+    },
     "./sharing/service": {
       "types": "./dist/proto/luming/studio/v1/board_sharing_service_pb.d.ts",
       "default": "./dist/proto/luming/studio/v1/board_sharing_service_pb.js"

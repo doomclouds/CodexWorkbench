@@ -258,8 +258,13 @@ test("[EDIT-EXTRA-05] 一次文字保存未送达后重载，从本机草稿恢�
   await editor.fill(draft);
   await button(page.getByRole("toolbar", { name: "白板工具" }), "选择").click();
   await failure.observed;
-  const retry = studio.edition === "initial" ? "核对上次保存" : "重试原保存";
-  await expect(button(page, retry).first()).toBeVisible();
+  if (studio.edition === "ii") {
+    const notices = page.getByRole("region", { name: "操作通知", exact: true });
+    await expect(notices.getByRole("alert")).toContainText("正文保存结果未知");
+    await expect(button(notices, "重试保存文字")).toBeVisible();
+  } else {
+    await expect(button(page, "核对上次保存").first()).toBeVisible();
+  }
   expect((await studio.readBoard(board)).objects.find((item) => item.id === textId)?.text).toBe(
     original,
   );

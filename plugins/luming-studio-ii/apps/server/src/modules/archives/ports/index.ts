@@ -1,9 +1,19 @@
-import type { ArchiveImportReceipt, ImportedArchiveAsset } from '../domain/index.js';
+import type {
+  ArchiveImportReceipt,
+  BoardAssetImport,
+  BoardAssetPage,
+  BoardAssetRemoval,
+  ImportedArchiveAsset,
+} from '../domain/index.js';
 
 export type {
   ArchiveImportOutcome,
   ArchiveImportReceipt,
   ArchiveImportRejectionReason,
+  BoardAssetImport,
+  BoardAssetPage,
+  BoardAssetReference,
+  BoardAssetRemoval,
   ImportedArchiveAsset,
 } from '../domain/index.js';
 
@@ -24,4 +34,23 @@ export interface ArchiveImportPort {
     assetId: string,
     allowTrashedOwner: boolean,
   ): ImportedArchiveAsset | undefined;
+  isActiveBoardOwner(actorId: string, boardId: string): boolean;
+  listBoardAssets(
+    actorId: string,
+    boardId: string,
+    cursor: string,
+    limit: number,
+  ): BoardAssetPage | undefined;
+  importBoardAsset(
+    actorId: string,
+    boardId: string,
+    assetId: string,
+    signature: string,
+    asset: ImportedArchiveAsset,
+  ): BoardAssetImport | undefined;
+  deleteBoardAsset(
+    actorId: string,
+    boardId: string,
+    assetId: string,
+  ): BoardAssetRemoval | undefined;
 }

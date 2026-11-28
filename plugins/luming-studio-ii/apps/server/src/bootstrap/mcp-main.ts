@@ -5,7 +5,12 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { createModelSuggestionSubmitter } from '../entrypoints/http/index.js';
 import { connectStudioMcpServer } from '../entrypoints/mcp/index.js';
-import { createMcpSpool, loadMcpRuntime } from '../infrastructure/platform/index.js';
+import {
+  createMcpFileAccess,
+  createMcpSpool,
+  loadMcpRuntime,
+} from '../infrastructure/platform/index.js';
+import { MAX_ARCHIVE_IMPORT_BYTES } from '../modules/archives/application/index.js';
 
 const dataRootVariable = 'LUMING_STUDIO_II_DATA_ROOT';
 const actorVariable = 'LUMING_STUDIO_II_ACTOR';
@@ -29,13 +34,15 @@ function reportFailure(error: unknown) {
   process.stderr.write('Studio MCP request failed (' + name + ').\n');
 }
 
+const root = dataRoot();
 const { dispatchAgentActivity, ...runtime } = await loadMcpRuntime({
   runtimeDirectory: fileURLToPath(new URL('.', import.meta.url)),
-  dataRoot: dataRoot(),
+  dataRoot: root,
   actorId: process.env[actorVariable] ?? 'local',
 });
 const server = await connectStudioMcpServer({
   ...runtime,
+  ...createMcpFileAccess(root, MAX_ARCHIVE_IMPORT_BYTES),
   dispatchAgentActivity,
   submitSuggestion: createModelSuggestionSubmitter(runtime.dispatchAgentSuggestion),
   now: Date.now,

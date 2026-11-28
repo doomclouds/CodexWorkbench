@@ -42,6 +42,7 @@ import {
 } from '../../ui/domain/objects/text/index.js';
 import { isTodoOverview } from '../../ui/domain/objects/todo/index.js';
 import { canvasOwnsClipboard } from './board-clipboard.js';
+import { isCanvasAnnotationTarget } from './canvas-annotation.js';
 import type { BoardTool } from './BoardChrome.js';
 import { BoardDraftRecovery } from './BoardDraftRecovery.js';
 import { BoardHtmlCreation, useBoardHtmlCreation } from './BoardHtmlCreation.js';
@@ -64,6 +65,7 @@ import { readBoardDraftCurrent } from './local-board-drafts.js';
 import { useMoveSession } from './move-session.js';
 import { describeSelectionLocks } from './organization-selection.js';
 import { renderSuggestionPreview } from './suggestion-preview.js';
+import { useAnnotationRange } from './use-annotation-range.js';
 import { useBoardPresentation } from './use-board-presentation.js';
 import { useBoardClipboard } from './use-board-clipboard.js';
 import { useBoardTitle, type RenameBoard } from './use-board-title.js';
@@ -956,9 +958,17 @@ function BoardWorkspace({
     changeAnnotation(!annotationActive);
   }
 
+  const annotationRange = useAnnotationRange({
+    enabled: canComment && annotationActive && !documentReading,
+    viewport: feedbackViewport,
+    objects: board.objects,
+    revision: board.revision,
+  });
+
   function handleCanvasAnnotation(event: MouseEvent<HTMLDivElement>) {
     const accepting = canComment && annotationActive && event.detail > 0;
-    if (!accepting || !canvasOwnsClipboard(event)) {
+    const hit = !event.defaultPrevented && isCanvasAnnotationTarget(event.target);
+    if (annotationRange.takeClickSuppression() || !accepting || !hit) {
       return;
     }
 
@@ -967,6 +977,7 @@ function BoardWorkspace({
       return;
     }
 
+    event.preventDefault();
     const x = (event.clientX - bounds.left - feedbackViewport.x) / feedbackViewport.zoom;
     const y =
       (event.clientY - bounds.top - feedbackViewport.y) /
@@ -978,6 +989,10 @@ function BoardWorkspace({
   }
 
   function handleAnnotateSelection() {
+    if (selection.length > 1) {
+      annotationRange.annotateSelected(selection);
+      return;
+    }
     const [objectId] = selection;
     if (objectId) {
       setAnnotationRequest((current) => ({ objectId, sequence: (current?.sequence ?? 0) + 1 }));
@@ -1352,6 +1367,11 @@ function BoardWorkspace({
             onDrop={handleDrop}
             onKeyDown={handleHistoryKey}
             onClick={handleCanvasAnnotation}
+            onPointerDownCapture={annotationRange.begin}
+            onPointerMoveCapture={annotationRange.move}
+            onPointerUpCapture={annotationRange.finish}
+            onPointerCancelCapture={annotationRange.cancel}
+            onPointerLeave={annotationRange.cancel}
           >
             <Viewing
               active={watching}
@@ -1367,6 +1387,18 @@ function BoardWorkspace({
                 {renderCanvas(room)}
               </TextSaveNoticePublisher.Provider>
             </Viewing>
+            {annotationRange.marquee && (
+              <div
+                aria-hidden="true"
+                className="whiteboard-editor__annotation-range"
+                style={{
+                  left: annotationRange.marquee.x,
+                  top: annotationRange.marquee.y,
+                  width: annotationRange.marquee.width,
+                  height: annotationRange.marquee.height,
+                }}
+              />
+            )}
             {room?.overlay}
             <div hidden={watching}>
               <BoardViewportTools
@@ -1437,6 +1469,7 @@ function BoardWorkspace({
               annotationRequest,
               contentAnnotationRequest,
               pointAnnotationRequest,
+              selectionAnnotationRequest: annotationRange.request,
               hostPicking: true,
               focusedObjectId: feedbackView.focusedObjectId,
               singleKeys,
@@ -1520,6 +1553,10 @@ function BoardWorkspace({
         paused: viewOnly,
         detachSequence,
         onViewportRequest: restoreViewport,
+        onCanvasFocus: () =>
+          canvasArea
+            ?.querySelector<HTMLElement>('[data-canvas-root]')
+            ?.focus({ preventScroll: true }),
         onContentChanged: session.acceptRoomContent,
         onAccessLost: handleRoomAccessLost,
         render: renderWorkspace,

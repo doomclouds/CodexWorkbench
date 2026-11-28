@@ -131,6 +131,7 @@ message BoardRoomSnapshot {
   bool can_release_agent_activity = 7;
   optional uint64 feedback_version = 8;
   optional uint64 suggestions_version = 9;
+  RoomOnlineAgents online_agents = 10;
 }
 
 message BoardRoomParticipants {
@@ -302,6 +303,13 @@ message AgentActivityRelease {
   string generation = 1;
 }
 
+message AgentActivityDisconnect {}
+
+message AgentReadPresence {
+  string activity_id = 1;
+  bool reading = 2;
+}
+
 message ChangeAgentActivityRequest {
   string board_id = 1;
   string agent_id = 2;
@@ -312,6 +320,8 @@ message ChangeAgentActivityRequest {
     AgentActivityEnd end = 6;
     AgentActivityStatus status = 7;
     AgentActivityRelease release = 8;
+    AgentActivityDisconnect disconnect = 9;
+    AgentReadPresence read_presence = 10;
   }
 }
 
@@ -330,10 +340,19 @@ message RoomAgentWorkspace {
   repeated RoomAgentWorkspaceArea areas = 6;
   optional uint64 expires_at_unix_ms = 7;
   AgentActivityScope scope = 8;
+  optional uint64 last_progress_at_unix_ms = 9;
+  optional uint64 ended_at_unix_ms = 10;
+  AgentActivityEndReason end_reason = 11;
 }
 
 message RoomAgentWorkspaceList {
   repeated RoomAgentWorkspace workspaces = 1;
+  RoomOnlineAgents online_agents = 2;
+}
+
+message RoomOnlineAgents {
+  repeated string agent_ids = 1;
+  repeated string reading_agent_ids = 2;
 }
 
 enum AgentActivityEndReason {
@@ -353,5 +372,50 @@ message ChangeAgentActivityResponse {
     RoomAgentWorkspace workspace = 1;
     AgentActivityEnded ended = 2;
     AgentActivityRejection rejected = 3;
+    AgentActivityDisconnect disconnected = 4;
+    AgentReadPresence read_presence = 5;
   }
+}
+
+service McpPanelViewService {
+  rpc UpdatePanelView(UpdatePanelViewRequest) returns (UpdatePanelViewResponse);
+  rpc ReadPanelView(ReadPanelViewRequest) returns (ReadPanelViewResponse);
+}
+
+message McpPanelCamera {
+  double x = 1;
+  double y = 2;
+  double zoom = 3;
+}
+
+message McpPanelView {
+  string board_id = 1;
+  repeated string selected_ids = 2;
+  uint32 selected_count = 3;
+  McpPanelCamera viewport = 4;
+  optional string focused_object_id = 5;
+  McpPanelCamera return_viewport = 6;
+}
+
+message UpdatePanelViewRequest {
+  string session_id = 1;
+  string view_id = 2;
+  uint64 sequence = 3;
+  uint64 session_expires_at_millis = 4;
+  oneof update {
+    McpPanelView state = 5;
+    bool clear = 6;
+  }
+}
+
+message UpdatePanelViewResponse {}
+
+message ReadPanelViewRequest {
+  string board_id = 1;
+  string view_id = 2;
+}
+
+message ReadPanelViewResponse {
+  McpPanelView state = 1;
+  optional uint64 updated_at_millis = 2;
 }

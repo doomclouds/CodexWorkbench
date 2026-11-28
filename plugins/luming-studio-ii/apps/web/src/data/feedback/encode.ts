@@ -34,6 +34,17 @@ function encodeTarget(target: FeedbackTarget): MessageInitShape<typeof FeedbackA
     return { target: { case: 'boardPoint', value: target.point } };
   }
 
+  if (target.kind === 'selection') {
+    const { point, bounds, objects, expectedBoardRevision } = target;
+
+    return {
+      target: {
+        case: 'selection',
+        value: { point, bounds, objects: [...objects], expectedBoardRevision },
+      },
+    };
+  }
+
   const { objectId, u, v, geometryVersion } = target;
   if (target.kind === 'content') {
     return {
@@ -73,9 +84,25 @@ function encodeOperation(operation: FeedbackOperation): SentOperation {
     case 'resolve':
     case 'reopen':
     case 'delete':
+    case 'requestAttachment':
       return {
         case: operation.kind,
         value: { threadId: operation.threadId, expectedThreadVersion: operation.expectedVersion },
+      };
+    case 'claimAttachment':
+    case 'resetAttachmentClaim':
+      return {
+        case: operation.kind,
+        value: { threadId: operation.threadId, requestId: operation.requestId },
+      };
+    case 'confirmAttachment':
+      return {
+        case: operation.kind,
+        value: {
+          threadId: operation.threadId,
+          requestId: operation.requestId,
+          claimId: operation.claimId,
+        },
       };
   }
 }

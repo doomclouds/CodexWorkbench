@@ -1,16 +1,19 @@
-export { freezeFeedbackAnchor } from './anchor.js';
+export { freezeFeedbackAnchor, freezeFeedbackSelection } from './anchor.js';
 export { hasFeedbackContent, validFeedbackContentUnit } from './content.js';
 export type {
   FeedbackActor,
   FeedbackAnchor,
   FeedbackAnchorObject,
   FeedbackAnchorTarget,
+  FeedbackAttachment,
+  FeedbackAttachmentOperation,
   FeedbackApplied,
   FeedbackBoardAccess,
   FeedbackContentSource,
   FeedbackContentTarget,
   FeedbackContentUnit,
   FeedbackFrozenObject,
+  FeedbackFrozenTarget,
   FeedbackMessage,
   FeedbackMessageView,
   FeedbackOperation,
@@ -18,6 +21,7 @@ export type {
   FeedbackPoint,
   FeedbackReceipt,
   FeedbackRejected,
+  FeedbackSelectionTarget,
   FeedbackRejectionReason,
   FeedbackStoredReceipt,
   FeedbackThread,

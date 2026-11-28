@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
+import { strToU8, zipSync } from "fflate";
 import { materializeBoardAssets } from "./board-fixture-assets.mjs";
 import {
   createIiContentReader,
@@ -10,11 +11,7 @@ import {
 import { mixedBoard } from "./board-fixture-presets.mjs";
 import { createIiFixtureProtocol, initialPost } from "./boards.mjs";
 
-const requireInitial = createRequire(
-  new URL("../../../luming-studio/package.json", import.meta.url),
-);
 const requireServer = createRequire(new URL("../../apps/server/package.json", import.meta.url));
-const { zipSync, strToU8 } = requireInitial("fflate");
 const zipType = "application/zip";
 const ports = [undefined, "top", "bottom", "left", "right"];
 const connectorHeads = [undefined, "none", "arrow", "circle"];

@@ -18,7 +18,8 @@ export function requireAccess(
   actor: FeedbackActor,
   boardId: string,
 ): FeedbackBoardAccess {
-  const access = reader.getAccess(boardId, actor.id);
+  const principalId = actor.kind === 'agent' ? (actor.principalId ?? actor.id) : actor.id;
+  const access = reader.getAccess(boardId, principalId);
   if (!access) {
     throw new FeedbackAccessError();
   }
@@ -69,8 +70,14 @@ export function viewThread(
   thread: FeedbackThread,
   legacyNames?: (authorId: string) => string | undefined,
 ): FeedbackThreadView {
+  const { attachment } = thread;
   return {
     ...thread,
+    attachment: attachment && {
+      requestId: attachment.requestId,
+      state: attachment.state,
+      threadVersion: attachment.threadVersion,
+    },
     first: viewMessage(actor, access, thread.first, legacyNames),
     canResolve: permitsFeedback(access),
     canDelete: canDeleteThread(actor, access, thread),

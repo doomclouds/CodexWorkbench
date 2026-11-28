@@ -14,7 +14,10 @@ import {
   type BoardRoomPost,
   type BoardRoomStreamObserver,
 } from '../../src/data/rooms/index.js';
-import { createRoomStreamTransport } from '../../src/platform/browser/index.js';
+import {
+  createRoomStreamTransport,
+  observeBoardRoomVisibility,
+} from '../../src/platform/browser/index.js';
 
 const boardId = 'room-board';
 const viewId = 'view-one';
@@ -440,8 +443,9 @@ test('decodes changed metadata through the shared object codec without carrying 
 });
 
 test('publishes ordered temporary presence and leaves using its next sequence', async () => {
-  const post: BoardRoomPost = async (path, body) => {
+  const post: BoardRoomPost = async (path, body, _signal, keepalive) => {
     if (path === pathFor(updateBoardPresence.name)) {
+      expect(keepalive).toBeUndefined();
       expect(fromBinary(updateBoardPresence.input, body)).toMatchObject({
         boardId,
         viewId,
@@ -459,6 +463,7 @@ test('publishes ordered temporary presence and leaves using its next sequence', 
     }
 
     expect(path).toBe(pathFor(leaveBoardPresence.name));
+    expect(keepalive).toBe(true);
     expect(fromBinary(leaveBoardPresence.input, body)).toMatchObject({
       boardId,
       viewId,
@@ -480,6 +485,23 @@ test('publishes ordered temporary presence and leaves using its next sequence', 
     }),
   ).resolves.toBe(true);
   await expect(service.leavePresence(boardId, viewId, 2n)).resolves.toBe(true);
+});
+
+test('translates page-cache transitions without treating an ordinary blur as a leave', () => {
+  const observed: boolean[] = [];
+  const stop = observeBoardRoomVisibility((visible) => observed.push(visible));
+  try {
+    window.dispatchEvent(new Event('blur'));
+    expect(observed).toEqual([true]);
+
+    window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
+    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+    expect(observed).toEqual([true, false, true]);
+  } finally {
+    stop();
+  }
+  document.dispatchEvent(new Event('visibilitychange'));
+  expect(observed).toHaveLength(3);
 });
 
 test('decodes a peer gesture lease and an explicit zero geometry version', () => {

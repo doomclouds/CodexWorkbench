@@ -174,16 +174,12 @@ function ThreadComposer({
       disabled={!canWrite}
       cancelDisabled={blocked}
       focusOnMount={editing}
-      attachment={
-        attachment.available
-          ? {
-              checked: draft?.attach === true,
-              label: '附加到 Codex 对话',
-              disabled: Boolean(attachment.pending),
-              onChange: toggleAttachment,
-            }
-          : undefined
-      }
+      attachment={{
+        checked: draft?.attach === true,
+        label: attachment.actionLabel,
+        disabled: Boolean(attachment.pending),
+        onChange: toggleAttachment,
+      }}
     />
   );
 }
@@ -213,11 +209,27 @@ function threadMenu(
   }
 
   menu.push({ id: 'locate', label: '定位备注', run: onLocate });
-  if (attachment.available && canWrite) {
+  if (
+    canWrite &&
+    (thread.attachment?.state !== 'attached' || thread.attachment.threadVersion !== thread.version)
+  ) {
     menu.push({
       id: 'attach',
-      label: '附加到 Codex 对话',
+      label: attachment.actionLabel,
       run: () => attachment.request({ threadId: thread.id, threadVersion: thread.version }),
+    });
+  }
+  if (canWrite && attachment.canDeliver && thread.attachment?.state === 'claimed') {
+    const { requestId } = thread.attachment;
+    menu.push({
+      id: 'reset-attachment',
+      label: '核对草稿后重新附加',
+      run: () =>
+        attachment.request(
+          { threadId: thread.id, threadVersion: thread.version },
+          false,
+          requestId,
+        ),
     });
   }
   if (thread.canDelete && canEdit) {
@@ -227,12 +239,18 @@ function threadMenu(
   return menu;
 }
 
-function attachedStatus(thread: FeedbackThread, attachment: FeedbackAttachment) {
-  if (attachment.complete.get(thread.id) !== thread.version) {
+function attachedStatus(thread: FeedbackThread) {
+  if (thread.attachment?.threadVersion !== thread.version) {
     return null;
   }
 
-  return <StatusText message="已附加到 Codex 对话" announcement="polite" />;
+  const wording = {
+    pending: '等待房主在 Codex 中附加',
+    claimed: '房主正在处理附加',
+    attached: '已附加到 Codex 对话',
+  };
+
+  return <StatusText message={wording[thread.attachment.state]} announcement="polite" />;
 }
 
 function ThreadContents(props: ThreadContentsProps) {
@@ -357,7 +375,7 @@ function ThreadContents(props: ThreadContentsProps) {
         </span>
         {resolved && <span className="whiteboard-feedback__resolved">已解决</span>}
         {bodyOf(thread.first)}
-        {attachedStatus(thread, attachment)}
+        {attachedStatus(thread)}
       </div>
       {confirm && (
         <div

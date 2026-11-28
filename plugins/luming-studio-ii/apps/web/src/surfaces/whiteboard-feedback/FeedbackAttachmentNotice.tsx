@@ -6,12 +6,17 @@ export function FeedbackAttachmentNotice({
 }: {
   readonly attachment: FeedbackAttachment;
 }) {
-  const { busy, failure, pending, retry, cancel } = attachment;
+  const { busy, failure, pending, retry, cancel, notice } = attachment;
   if (busy) {
-    return <StatusText message="正在附加到 Codex 对话…" announcement="polite" />;
+    return (
+      <StatusText
+        message={attachment.canDeliver ? '正在附加到 Codex 对话…' : '正在提交待附加请求…'}
+        announcement="polite"
+      />
+    );
   }
   if (!failure) {
-    return null;
+    return notice ? <StatusText message={notice} announcement="polite" /> : null;
   }
 
   return (

@@ -26,6 +26,7 @@ import { unaryRoute } from './unary-route.js';
 const method = BoardRoomService.method.changeAgentActivity;
 export const agentActivityPath = '/' + BoardRoomService.typeName + '/' + method.name;
 export const agentActivityRequestLimit = 16 * 1024;
+const agentIdentifier = /^agent-[\w.:-]{1,122}$/u;
 
 const phases = {
   preparing: WirePhase.PREPARING,
@@ -57,7 +58,16 @@ const rejections = {
 export function agentWorkspaceWire(
   workspace: AgentWorkspace,
 ): MessageInitShape<typeof RoomAgentWorkspaceSchema> {
-  const { scope, phase, areas, expiresAtUnixMs, ...key } = workspace;
+  const {
+    scope,
+    phase,
+    areas,
+    expiresAtUnixMs,
+    lastProgressAtUnixMs,
+    endedAtUnixMs,
+    endReason,
+    ...key
+  } = workspace;
   const target =
     scope.kind === 'area'
       ? { case: 'area' as const, value: scope.bounds }
@@ -69,6 +79,10 @@ export function agentWorkspaceWire(
     phase: phases[phase],
     areas: [...areas],
     expiresAtUnixMs: BigInt(expiresAtUnixMs),
+    lastProgressAtUnixMs:
+      lastProgressAtUnixMs === undefined ? undefined : BigInt(lastProgressAtUnixMs),
+    endedAtUnixMs: endedAtUnixMs === undefined ? undefined : BigInt(endedAtUnixMs),
+    endReason: endReason === undefined ? undefined : endReasons[endReason],
   };
 }
 
@@ -136,6 +150,8 @@ function readOperation(action: WireAction, taskId: string): AgentActivityOperati
     case 'status':
       return { kind: 'status', taskId };
     case 'release':
+    case 'disconnect':
+    case 'readPresence':
     case undefined:
       throw new RoomInputError('An Agent workspace action is required.');
   }
@@ -144,13 +160,23 @@ function readOperation(action: WireAction, taskId: string): AgentActivityOperati
 export function agentActivityRoute(application: RoomsApplication) {
   return unaryRoute(method, (actor, request) => {
     const { action } = request;
-    const boardId = requireId(request.boardId);
     const { agentId, taskId } = request;
     const ownerId = actor.id;
-    if (!agentId.startsWith('agent-') || ownerId === agentId) {
+    if (!agentIdentifier.test(agentId) || ownerId === agentId) {
       throw new RoomInputError('An independent Agent work session is required.');
     }
 
+    if (action.case === 'disconnect') {
+      if (actor.kind !== 'agent' || actor.guestScope) {
+        throw new RoomAccessError('Closing an Agent session requires the Agent entrypoint.');
+      }
+
+      application.disconnectAgent(ownerId, agentId);
+
+      return { result: { case: 'disconnected' as const, value: {} } };
+    }
+
+    const boardId = requireId(request.boardId);
     if (action.case === 'release') {
       if (actor.kind === 'agent' || actor.guestScope) {
         throw new RoomAccessError('Only the board owner can release an Agent workspace.');
@@ -168,6 +194,13 @@ export function agentActivityRoute(application: RoomsApplication) {
     }
     if (actor.kind !== 'agent') {
       throw new RoomAccessError('Agent workspace changes require the Agent entrypoint.');
+    }
+
+    if (action.case === 'readPresence') {
+      const { activityId, reading } = action.value;
+      application.setAgentReadPresence({ boardId, ownerId, agentId }, activityId, reading);
+
+      return { result: { case: 'readPresence' as const, value: action.value } };
     }
 
     return resultWire(

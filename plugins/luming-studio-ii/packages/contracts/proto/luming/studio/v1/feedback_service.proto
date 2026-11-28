@@ -27,6 +27,25 @@ message FeedbackObjectPoint {
   optional uint64 geometry_version = 4;
 }
 
+message FeedbackSourceObject {
+  string object_id = 1;
+  optional uint64 geometry_version = 2;
+  optional uint64 payload_version = 3;
+}
+
+message FeedbackBounds {
+  double x = 1;
+  double y = 2;
+  double width = 3;
+  double height = 4;
+}
+
+message FeedbackSelectionPoint {
+  FeedbackPoint point = 1;
+  FeedbackBounds bounds = 2;
+  repeated FeedbackSourceObject objects = 3;
+  optional uint64 expected_board_revision = 4;
+}
 message FeedbackDocumentAnchor {
   repeated string block_ids = 1;
 }
@@ -54,6 +73,7 @@ message FeedbackAnchorTarget {
     FeedbackPoint board_point = 1;
     FeedbackObjectPoint object_point = 2;
     FeedbackContentPoint content_point = 3;
+    FeedbackSelectionPoint selection = 4;
   }
 }
 
@@ -67,6 +87,11 @@ message FeedbackFrozenObject {
   double rotation = 7;
 }
 
+message FeedbackFrozenTarget {
+  FeedbackSourceObject reference = 1;
+  FeedbackFrozenObject object = 2;
+}
+
 message FeedbackAnchor {
   FeedbackAnchorTarget target = 1;
   uint64 source_board_revision = 2;
@@ -74,6 +99,7 @@ message FeedbackAnchor {
   FeedbackFrozenObject frozen_object = 4;
   bool target_missing = 5;
   optional string frozen_excerpt = 6;
+  repeated FeedbackFrozenTarget frozen_targets = 7;
 }
 
 message FeedbackMessage {
@@ -98,6 +124,20 @@ message FeedbackThread {
   uint32 reply_count = 7;
   bool can_resolve = 8;
   bool can_delete = 9;
+  FeedbackAttachment attachment = 10;
+}
+
+enum FeedbackAttachmentState {
+  FEEDBACK_ATTACHMENT_STATE_UNSPECIFIED = 0;
+  FEEDBACK_ATTACHMENT_STATE_PENDING = 1;
+  FEEDBACK_ATTACHMENT_STATE_CLAIMED = 2;
+  FEEDBACK_ATTACHMENT_STATE_ATTACHED = 3;
+}
+
+message FeedbackAttachment {
+  string request_id = 1;
+  FeedbackAttachmentState state = 2;
+  uint64 thread_version = 3;
 }
 
 message ListThreadsRequest {
@@ -107,6 +147,7 @@ message ListThreadsRequest {
   FeedbackThreadStatus status = 4;
   optional string author_actor_id = 5;
   bool authored_by_viewer = 6;
+  bool pending_attachment = 7;
 }
 
 message ListThreadsResponse {
@@ -151,6 +192,22 @@ message FeedbackThreadChange {
   optional uint64 expected_thread_version = 2;
 }
 
+message FeedbackRequestAttachment {
+  string thread_id = 1;
+  optional uint64 expected_thread_version = 2;
+}
+
+message FeedbackAttachmentClaim {
+  string thread_id = 1;
+  string request_id = 2;
+}
+
+message FeedbackAttachmentConfirm {
+  string thread_id = 1;
+  string request_id = 2;
+  string claim_id = 3;
+}
+
 message ApplyFeedbackRequest {
   string board_id = 1;
   string command_id = 2;
@@ -161,6 +218,10 @@ message ApplyFeedbackRequest {
     FeedbackThreadChange resolve = 6;
     FeedbackThreadChange reopen = 7;
     FeedbackThreadChange delete = 8;
+    FeedbackRequestAttachment request_attachment = 9;
+    FeedbackAttachmentClaim claim_attachment = 10;
+    FeedbackAttachmentConfirm confirm_attachment = 11;
+    FeedbackAttachmentClaim reset_attachment_claim = 12;
   }
 }
 
@@ -185,6 +246,7 @@ enum FeedbackRejectionReason {
   FEEDBACK_REJECTION_REASON_FORBIDDEN = 5;
   FEEDBACK_REJECTION_REASON_VERSION_CHANGED = 6;
   FEEDBACK_REJECTION_REASON_COMMAND_ID_REUSE = 7;
+  FEEDBACK_REJECTION_REASON_ATTACHMENT_CLAIMED = 8;
 }
 
 message FeedbackRejected {

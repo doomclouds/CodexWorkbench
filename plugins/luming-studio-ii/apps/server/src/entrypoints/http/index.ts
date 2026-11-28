@@ -7,6 +7,8 @@ import {
 } from 'node:http';
 import {
   ArchiveRequestError,
+  BoardAssetAccessError,
+  MAX_BOARD_ASSET_IMPORT_BYTES,
   type ArchiveImportApplication,
 } from '../../modules/archives/application/index.js';
 import {
@@ -26,6 +28,7 @@ import {
   type RoomsApplication,
 } from '../../modules/rooms/application/index.js';
 import {
+  type BoardAgentWriteApplication,
   BoardSuggestionError,
   WhiteboardAccessError,
   type BoardEditorApplication,
@@ -34,7 +37,17 @@ import {
   type WhiteboardApplication,
 } from '../../modules/whiteboard/application/index.js';
 import { SharingAccessError } from '../../modules/sharing/application/index.js';
-import { archiveRoute, createArchiveReceiptRoute } from './archive-routes.js';
+import {
+  agentBoardReceiptPath,
+  agentBoardWritePath,
+  agentBoardWriteRequestLimit,
+  createAgentBoardWriteRoutes,
+} from './agent-board-write.js';
+import {
+  archiveRoute,
+  createArchiveReceiptRoute,
+  createBoardAssetRoutes,
+} from './archive-routes.js';
 import { createCatalogRoutes } from './catalog-routes.js';
 import { boardDocumentImageRoutePath, createDocumentImageRoute } from './document-image-route.js';
 import {
@@ -42,7 +55,7 @@ import {
   boardImageRoutePath,
   createBoardEditRoutes,
 } from './edit-routes.js';
-import { createFeedbackRoutes } from './feedback-routes.js';
+import { createFeedbackRoutes, isAgentFeedbackRequest } from './feedback-routes.js';
 import { createBoardHistoryRoutes } from './history-routes.js';
 import {
   allowsGuestOrigin,
@@ -52,6 +65,7 @@ import {
   resolveGuestActor,
   type GuestHttpOptions,
 } from './guest-sharing.js';
+import { createMcpPanelViewRoutes } from './mcp-panel-view.js';
 import { HttpRequestError, mediaType, readBody } from './request.js';
 import { protobufContentType, sendProtobuf, sendStatus } from './response.js';
 import { agentActivityPath, agentActivityRequestLimit } from './room-agent-activity.js';
@@ -61,7 +75,7 @@ import { roomEventWaitPath, serveRoomEventWait } from './room-event-wait.js';
 import { createRoomRoutes, roomEventPath, serveRoomEvents } from './room-routes.js';
 import { createWhiteboardRoutes } from './routes.js';
 import { createSharingRoutes, type SharingRoutesOptions } from './share-routes.js';
-import { createBoardSuggestionRoutes } from './suggestion-routes.js';
+import { agentSuggestionChoosePath, createBoardSuggestionRoutes } from './suggestion-routes.js';
 import type { HttpActor, ProtobufRoute } from './unary-route.js';
 import {
   boardVideoRequestLimit,
@@ -82,6 +96,7 @@ interface BoardHttpFeatures {
   readonly history: BoardHistoryApplication;
   readonly feedback: FeedbackApplication;
   readonly rooms?: RoomsApplication;
+  readonly agentBoardWrite?: BoardAgentWriteApplication;
   readonly suggestions?: BoardSuggestionApplication;
   readonly digest: (value: Uint8Array) => string;
 }
@@ -107,6 +122,9 @@ const requestLimits = new Map([
   [boardDocumentImageRoutePath, boardImageRequestLimit],
   [boardVideoRoutePath, boardVideoRequestLimit],
   [agentActivityPath, agentActivityRequestLimit],
+  [agentBoardWritePath, agentBoardWriteRequestLimit],
+  [agentBoardReceiptPath, agentBoardWriteRequestLimit + 16],
+  ['/luming.studio.v1.BoardArchiveService/ImportBoardAsset', MAX_BOARD_ASSET_IMPORT_BYTES + 1024],
 ]);
 
 function serveRoomConnection(
@@ -174,7 +192,17 @@ async function handleRequest(
     sendStatus(response, 401);
     return;
   }
-  if (actor.kind === 'agent' && path !== agentSuggestionPath && path !== agentActivityPath) {
+
+  const agentOperation = [
+    agentSuggestionPath,
+    agentActivityPath,
+    agentBoardWritePath,
+    agentBoardReceiptPath,
+    agentSuggestionChoosePath,
+  ].includes(path);
+
+  const agentFeedback = isAgentFeedbackRequest(path, actor);
+  if (actor.kind === 'agent' && !agentOperation && !agentFeedback) {
     sendStatus(response, 403);
     return;
   }
@@ -219,8 +247,15 @@ function handleError(
     return;
   }
 
-  const forbidden = error instanceof WhiteboardAccessError || error instanceof FeedbackAccessError;
-  if (forbidden || error instanceof SharingAccessError || error instanceof RoomAccessError) {
+  const forbidden = [
+    WhiteboardAccessError,
+    FeedbackAccessError,
+    BoardAssetAccessError,
+    SharingAccessError,
+    RoomAccessError,
+  ].some((AccessError) => error instanceof AccessError);
+
+  if (forbidden) {
     if (canRespond) {
       sendStatus(response, 403);
     }
@@ -301,6 +336,9 @@ export function createWhiteboardRequestHandler(
         createDocumentImageRoute(features.editor, features.digest),
         ...createBoardHistoryRoutes(features.history, features.digest, observe),
         ...createFeedbackRoutes(features.feedback),
+        ...(features.agentBoardWrite
+          ? createAgentBoardWriteRoutes(features.agentBoardWrite, features.digest, observe)
+          : []),
         ...(features.rooms ? createRoomRoutes(features.rooms) : []),
         ...(features.suggestions
           ? createBoardSuggestionRoutes(features.suggestions, features.digest, observe)
@@ -310,9 +348,11 @@ export function createWhiteboardRequestHandler(
   const routes: Routes = {
     unary: new Map([
       ...createWhiteboardRoutes(application, observe),
+      ...createMcpPanelViewRoutes(application, Date.now),
       ...studioRoutes,
       ...createCatalogRoutes(catalogApplication),
       createArchiveReceiptRoute(archiveApplication),
+      ...createBoardAssetRoutes(archiveApplication),
       ...(sharing ? createSharingRoutes(sharing) : []),
     ]),
     roomStream: features?.rooms && createRoomEventStreamRoute(features.rooms, onError),

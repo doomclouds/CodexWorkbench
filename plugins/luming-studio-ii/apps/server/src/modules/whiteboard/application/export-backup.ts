@@ -279,13 +279,18 @@ function capture(
   const elements = builder.elements(reader.listObjects(boardId, maxObjects + 1));
   const details = reader.getBackupDetails?.(boardId);
   const authors = new Map<string, BoardBackupActor>();
-  function author(id: string, role: BoardBackupActor['role'], name?: string) {
+  function author(
+    id: string,
+    role: BoardBackupActor['role'],
+    name?: string,
+    kind?: BoardBackupActor['kind'],
+  ) {
     const known = authors.get(id) ?? details?.actors.get(id);
     const ownerFallback = id === actor.id && (!known || known.name === id || known.name === '我');
     const profile = {
       id,
       name: name ?? (ownerFallback ? ownerName : undefined) ?? known?.name ?? id,
-      kind: known?.kind ?? 'human',
+      kind: known?.kind ?? kind ?? 'human',
       role: known?.role ?? role,
     };
     authors.set(id, profile);
@@ -313,6 +318,8 @@ function capture(
         author(
           version.actorId ?? actor.id,
           !version.actorId || version.actorId === actor.id ? 'owner' : 'editor',
+          version.actorName,
+          version.actorKind,
         ),
         metadata,
         formatTime,

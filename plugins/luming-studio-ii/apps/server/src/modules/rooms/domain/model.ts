@@ -130,6 +130,8 @@ export interface RoomSnapshot {
   readonly participants: readonly Participant[];
   readonly timer: RoomTimer;
   readonly agentWorkspaces: readonly AgentWorkspace[];
+  readonly onlineAgentIds?: readonly string[];
+  readonly readingAgentIds?: readonly string[];
   readonly canReleaseAgentActivity: boolean;
   readonly feedbackVersion?: bigint;
   readonly suggestionsVersion?: bigint;
@@ -150,7 +152,12 @@ export type RoomEventPayload =
   | { readonly kind: 'timer'; readonly timer: RoomTimer }
   | { readonly kind: 'contentChanged'; readonly change: RoomContentChange }
   | { readonly kind: 'feedbackChanged' | 'suggestionsChanged'; readonly version: bigint }
-  | { readonly kind: 'agentWorkspaces'; readonly workspaces: readonly AgentWorkspace[] }
+  | {
+      readonly kind: 'agentWorkspaces';
+      readonly workspaces: readonly AgentWorkspace[];
+      readonly onlineAgentIds?: readonly string[];
+      readonly readingAgentIds?: readonly string[];
+    }
   | { readonly kind: 'accessLost' };
 
 export interface RoomEvent {

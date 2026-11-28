@@ -5,6 +5,7 @@ import {
   ArchiveImportReceiptSchema,
   ArchiveImportRejectionReason as WireRejection,
   BoardArchiveService,
+  BoardAssetRejection as WireAssetRejection,
   ImportBoardArchiveResponseSchema,
 } from '@codexworkbench/luming-studio-ii-contracts/archives/service';
 import {
@@ -12,11 +13,18 @@ import {
   type ArchiveImportApplication,
   type ArchiveImportReceipt,
   type ArchiveImportRejectionReason,
+  type BoardAssetRejection,
 } from '../../modules/archives/application/index.js';
 import { readArchivedSvgImage } from '../../modules/whiteboard/application/index.js';
 import { HttpRequestError, mediaType } from './request.js';
 import { sendProtobuf, sendStatus } from './response.js';
-import { canReadTrashedBoard, unaryRoute, type HttpActor } from './unary-route.js';
+import {
+  asyncUnaryRoute,
+  canReadTrashedBoard,
+  unaryRoute,
+  type HttpActor,
+  type RouteEntry,
+} from './unary-route.js';
 
 const archiveImportPath = '/' + BoardArchiveService.typeName + '/ImportBoardArchive';
 const archiveAssetPrefix = '/studio-archive-assets/';
@@ -28,6 +36,13 @@ const rejectionCodes: Record<ArchiveImportRejectionReason, WireRejection> = {
   incompatibleContent: WireRejection.INCOMPATIBLE_CONTENT,
   commandIdReuse: WireRejection.COMMAND_ID_REUSE,
   tooLarge: WireRejection.INVALID_ARCHIVE,
+};
+const assetRejectionCodes: Record<BoardAssetRejection, WireAssetRejection> = {
+  invalidMedia: WireAssetRejection.INVALID_MEDIA,
+  tooLarge: WireAssetRejection.TOO_LARGE,
+  commandIdReuse: WireAssetRejection.COMMAND_ID_REUSE,
+  notFound: WireAssetRejection.NOT_FOUND,
+  referenceInUse: WireAssetRejection.REFERENCE_IN_USE,
 };
 
 function receiptMessage({
@@ -55,6 +70,36 @@ export function createArchiveReceiptRoute(application: ArchiveImportApplication)
         : { case: 'notRecorded' as const, value: { commandId } },
     };
   });
+}
+
+export function createBoardAssetRoutes(application: ArchiveImportApplication): RouteEntry[] {
+  const { listBoardAssets, importBoardAsset, deleteBoardAsset } = BoardArchiveService.method;
+
+  return [
+    unaryRoute(listBoardAssets, ({ id }, { boardId, cursor, limit }) => {
+      const { assets, nextCursor } = application.listBoardAssets(id, boardId, cursor, limit);
+
+      return { assets: [...assets], nextCursor };
+    }),
+    asyncUnaryRoute(importBoardAsset, async ({ id }, { boardId, commandId, content }) => {
+      const outcome = await application.importBoardAsset(id, boardId, commandId, content);
+      const result =
+        outcome.kind === 'asset'
+          ? { case: 'asset' as const, value: outcome.asset }
+          : { case: 'rejected' as const, value: assetRejectionCodes[outcome.reason] };
+
+      return { result };
+    }),
+    unaryRoute(deleteBoardAsset, ({ id }, { boardId, assetId }) => {
+      const outcome = application.deleteBoardAsset(id, boardId, assetId);
+      const result =
+        outcome.kind === 'removed'
+          ? { case: 'removed' as const, value: outcome.assetId }
+          : { case: 'rejected' as const, value: assetRejectionCodes[outcome.reason] };
+
+      return { result };
+    }),
+  ];
 }
 
 async function* archiveChunks(request: IncomingMessage): AsyncGenerator<Uint8Array> {

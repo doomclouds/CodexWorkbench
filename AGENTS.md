@@ -8,6 +8,8 @@
 
 ## 交付报告
 
+浏览器 E2E 报告默认使用 Playwright HTML，保留同次执行的真实截图、附件和测试结果。若本机存在 `.codex/skills/playwright-e2e-report/SKILL.md`，按该 Skill 生成报告。
+
 本项目的修复、改动及 PR 验收报告默认沿用用户认可的离线 HTML 格式：简短结论、逐项状态、真实前后截图、可折叠的必要验证与未验范围。若本机存在 `.codex/skills/delivery-report/SKILL.md`，生成报告前先读取并复用其模板和生成脚本；该目录按用户要求不纳入 Git。其他副本缺少此本地 Skill 时，仍遵循上述报告格式。
 
 ## 项目边界
