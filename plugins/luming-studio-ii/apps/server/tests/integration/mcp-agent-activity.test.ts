@@ -124,6 +124,10 @@ test('publishes the action schema and forwards only a transport-minted Agent ide
     expect(tool?.inputSchema.required).toEqual(['boardId', 'taskId', 'action']);
     expect(tool?.inputSchema.properties).toHaveProperty('scope');
     expect(tool?.inputSchema.properties).not.toHaveProperty('agentId');
+    expect(tool?.description).toContain('status 只传 action、boardId 和 taskId');
+    expect(tool?.inputSchema.properties?.generation).toMatchObject({
+      description: expect.stringContaining('仅 update 和 end 使用'),
+    });
     expect(tool?._meta).toEqual({ ui: { visibility: ['model'] } });
 
     const started = await fixture.call(begin);

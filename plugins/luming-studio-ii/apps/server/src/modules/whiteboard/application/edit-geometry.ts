@@ -6,6 +6,7 @@ import {
   connectorAttachmentIds,
   geometryInWorld,
   hasValidConnectorGeometry,
+  hasInlineEmbedResource,
   initialGeometryPayload,
   normalizeBoardCustomColor,
   supportsGeometryCreation,
@@ -257,6 +258,9 @@ function createObject(
   const body = initialGeometryPayload(object, payload);
   if (!body) {
     return reject('invalidEdit');
+  }
+  if (hasInlineEmbedResource(body)) {
+    return reject('inlineHtmlResource');
   }
   if (attachment) {
     return linkedCreation(scope, object, body, attachment);
@@ -635,7 +639,13 @@ function duplicateChanges(
 
   const payloads = duplicatePayloads(scope, sourcesWithPayload, duplicate.ids);
 
-  return payloads ? { kind: 'changes', objects, payloads } : reject('objectNotFound');
+  if (!payloads) {
+    return reject('objectNotFound');
+  }
+
+  return payloads.some(hasInlineEmbedResource)
+    ? reject('inlineHtmlResource')
+    : { kind: 'changes', objects, payloads };
 }
 
 function duplicateObjects(scope: GeometryScope, operation: Duplicate): BoardEditDecision {

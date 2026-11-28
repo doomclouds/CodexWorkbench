@@ -35,6 +35,10 @@ description: "在鹿鸣 · Luming Studio II 创建、查找、理解或编辑白
 
 需要绘制专门图解时，可在当前会话有 Diagram Design 的情况下读取与图种对应的参考，再使用白板工具交付到用户指定的区域。用户提供的现有 HTML 以保存源码和明确目标为修改依据。写入只涉及任务确定的对象以及确实需要联动的内容。
 
+新建或扩展成套图解时，按[章节、图组与组内顺序](references/whiteboard-craft.md#章节图组与组内顺序)先列章节、组和阅读顺序，写入后核对实际白板。
+
+新建、导入或编辑 HTML 区域时禁止引入任何 `data:` 资源，包括 Base64 和其他编码的字体、图片。用系统回退字体和已导入的白板素材。提交前检查 HTML、CSS 与 SVG 资源引用，细则见 [HTML 资源检查](references/html-feedback.md#html-资源检查)。
+
 ## 提交可审阅的建议
 
 1. 使用用户从具体白板备注附加的白板 ID 和用于编辑基线的 `sourceId`。只有板名或对象描述时，请用户在 Codex 中打开白板，从具体备注选择「附加到 Codex 对话」，然后发送任务。
@@ -46,7 +50,7 @@ description: "在鹿鸣 · Luming Studio II 创建、查找、理解或编辑白
 
 ## 工作区、保存与导出
 
-直接执行 `artifact_apply` 前，用 `artifact_activity` 登记实际任务范围。写入、更新进度和结束工作沿用同一 `taskId` 和返回的 `generation`。范围来自已确认的对象 ID 或画布矩形，参与者可以在白板里跟随。
+直接执行 `artifact_apply` 前，用 `artifact_activity` 登记实际任务范围。写入、更新进度和结束工作沿用同一 `taskId` 和返回的 `generation`。查询状态只向 `artifact_activity` 传 `action: "status"`、`boardId` 和 `taskId`。范围来自已确认的对象 ID 或画布矩形，参与者可以在白板里跟随。
 
 导出选用实际支持的范围、格式和版次，确认工具返回的文件或图像。历史预览保持当前白板内容，已授权的恢复会提交新版本。完成后说明实际改动、保存或导出的结果、以及仍有影响的验证缺口。
 

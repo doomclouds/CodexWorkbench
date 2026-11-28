@@ -221,12 +221,28 @@ export function publishBoardVersion(
   pruneBoardVersions(connection, boardId);
 }
 
-interface BoardLifecycleVersion {
+interface BoardCreationVersion {
   readonly boardId: string;
   readonly title: string;
   readonly actorId: string;
-  readonly action: 'trash' | 'restore';
   readonly savedAtMillis: number;
+}
+
+interface BoardLifecycleVersion extends BoardCreationVersion {
+  readonly action: 'trash' | 'restore';
+}
+
+export function recordAgentBoardCreationVersion(
+  connection: SqliteConnection,
+  { boardId, title, actorId, savedAtMillis }: BoardCreationVersion,
+): void {
+  retainBackupAgent(connection, boardId, actorId);
+  connection
+    .prepare(`
+      INSERT INTO board_versions (board_id, ${versionColumns})
+      VALUES (?, 0, ?, ?, 'baseline', ?, NULL, 0)
+    `)
+    .run(boardId, title, actorId, savedAtMillis);
 }
 
 export function recordBoardLifecycleVersion(
@@ -323,7 +339,11 @@ function readCreationVersion(
 
 function withCreationVersion(connection: SqliteConnection, boardId: string, row: SqliteRow) {
   const version = decodeVersion(row);
-  if (version.kind === 'baseline' && version.revision === 0n) {
+  if (
+    version.kind === 'baseline' &&
+    version.revision === 0n &&
+    version.savedAtMillis === undefined
+  ) {
     return readCreationVersion(connection, boardId) ?? version;
   }
 

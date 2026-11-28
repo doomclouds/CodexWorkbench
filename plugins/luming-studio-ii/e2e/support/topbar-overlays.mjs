@@ -75,11 +75,10 @@ export async function seedTopbarSuggestion(studio, board, objectId) {
   return { observation, alternatives };
 }
 
-export async function seedTopbarAgentWorkspace(studio, board, objectId) {
+export async function seedTopbarAgentWorkspace(studio, board, objectId, label = "检查发布区对象") {
   const runtime = runtimes.get(studio);
   assert.ok(runtime && studio.edition === "ii", "The isolated Agent workspace fixture is required");
   const { changeAgentActivity } = BoardRoomService.method;
-  const label = "检查发布区对象";
   const taskId = randomUUID();
   async function change(action) {
     const task = create(changeAgentActivity.input, {

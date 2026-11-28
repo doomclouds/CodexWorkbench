@@ -1,6 +1,6 @@
 # 鹿鸣 · Luming Studio II
 
-面向共享白板、架构图解和 Agent 协作的 CodexWorkbench 插件。插件 ID 为 `luming-studio-ii`，起始版本为 `1.0.0`。Web 与 Codex 对话面板共用工作台和白板，也支持分享、访客加入、视口跟随、共享计时和私人建议。
+面向共享白板、架构图解和 Agent 协作的 CodexWorkbench 插件。插件 ID 为 `luming-studio-ii`。Web 与 Codex 对话面板共用工作台和白板，也支持分享、访客加入、视口跟随、共享计时和私人建议。
 
 ## 项目结构
 
@@ -211,7 +211,7 @@ pnpm --filter @codexworkbench/luming-studio-ii test:e2e workbench --with-initial
 
 工作台按浏览与导航、展示与偏好、新建白板、作品管理、复制分享链接和文件导入六个业务区验收。各版本断言自己的工作台名称、操作和保存结果。导入回执丢失的用例验证各版本的恢复路径，并检查同一归档只导入一份。
 
-指定分组的截图、失败 trace 和 Playwright JSON 写入 `artifacts/luming-studio-ii/v1.0.0/e2e/<分组>/run/`。离线对照报告保存在对应分组的 `report.html`。
+指定分组的截图、失败 trace 和 Playwright JSON 写入 `artifacts/luming-studio-ii/v<版本>/e2e/<分组>/run/`。离线对照报告保存在对应分组的 `report.html`。
 
 ## 性能基准
 

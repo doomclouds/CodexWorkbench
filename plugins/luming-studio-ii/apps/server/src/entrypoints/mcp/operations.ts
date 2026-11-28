@@ -79,6 +79,7 @@ const libraryMethods = [
     'BoardCatalogService',
     [
       'ListBoards',
+      'WaitForBoardCatalogChange',
       'ListTrashedBoards',
       'GetBoardThumbnail',
       'CreateBoard',

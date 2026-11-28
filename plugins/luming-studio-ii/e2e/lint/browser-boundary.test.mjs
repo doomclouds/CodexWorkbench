@@ -93,6 +93,7 @@ const workbenchFixtures = [
   ["display", ["controlNextThumbnail", "readCardCover", "readControlPresentation"]],
   ["import", ["chooseArchive", "failNextArchiveImport", "holdNextArchiveImport", "imageLoaded"]],
   ["link", ["workbenchLinkProbe"]],
+  ["live", ["observeWorkbenchCatalog", "trackWorkbenchCard"]],
 ];
 
 function importFixture(names, source = "../support/studio.mjs") {
@@ -182,7 +183,9 @@ const whiteboardScopedFixtures = [
       "embedFrame",
       "chooseHtmlFile",
       "controlNextHtmlSave",
+      "countOverviewEmbeds",
       "inspectEmbedPaint",
+      "observeEmbedPayloadReads",
       "workbenchLinkProbe",
     ],
   ],
@@ -194,7 +197,18 @@ const whiteboardScopedFixtures = [
   ["whiteboard-editing/rich-gestures", ["embedFrame", "workbenchLinkProbe"]],
   ["whiteboard-editing/organization", ["enableCanvasClipboard"]],
   ["whiteboard-editing/inline-editing", ["holdNextInlineTextRefresh", "holdNextInlineTextWrite"]],
-  ["whiteboard-editing/reading-controls", ["readViewingInk", "workbenchLinkProbe"]],
+  [
+    "whiteboard-editing/reading-controls",
+    [
+      "countOverviewEmbeds",
+      "embedFrame",
+      "observeEmbedPayloadReads",
+      "observeViewingFrames",
+      "observeViewingLayers",
+      "readViewingInk",
+      "workbenchLinkProbe",
+    ],
+  ],
   ["whiteboard-editing/zoom-visibility", ["readZoomDetails", "holdNextCanvasMove"]],
   [
     "whiteboard-editing/canvas-extras",
@@ -205,7 +219,7 @@ const whiteboardScopedFixtures = [
   ["whiteboard-topbar/export", ["downloadBoardExport", "readBoardDownload", "failNextBoardExport"]],
   [
     "whiteboard-topbar/sharing-feedback",
-    ["workbenchLinkProbe", "mediaDisplaySize", "mediaPlaying"],
+    ["workbenchLinkProbe", "mediaDisplaySize", "mediaPlaying", "observeGuestAccessReads"],
   ],
   ["whiteboard-topbar/overlays", ["seedTopbarSuggestion", "seedTopbarAgentWorkspace"]],
   ["whiteboard-topbar/export-fidelity", ["downloadBoardExport", "inspectBoardExport"]],

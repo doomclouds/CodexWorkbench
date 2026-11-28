@@ -1,4 +1,4 @@
-import { Users, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import { useRef, useState } from 'react';
 import type { BoardRoomParticipant } from '../../data/rooms/index.js';
 import { AnchoredPopover } from '../../ui/base/index.js';
@@ -120,7 +120,7 @@ export function ParticipantControl({
     ...new Set(agents.workspaces.map(({ agentId }) => agentId)),
   ];
   const total = participants.length + agentIds.length;
-  if (total === 0 && !reconnecting) {
+  if (total === 0) {
     return null;
   }
 
@@ -172,7 +172,6 @@ export function ParticipantControl({
                 followed={participant.actorId === targetActor}
               />
             ))}
-          {total === 0 && <Users size={16} aria-hidden="true" />}
         </span>
         {total > visibleAvatars && (
           <span className="room-presence-more">+{total - visibleAvatars}</span>

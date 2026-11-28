@@ -404,6 +404,7 @@ export interface CanvasHandle {
 
 export interface CanvasPresentation {
   readonly objectIds: readonly string[];
+  readonly returnViewport?: CanvasViewport;
   readonly focusObjectId?: string;
   readonly expandedObjectId?: string;
 }

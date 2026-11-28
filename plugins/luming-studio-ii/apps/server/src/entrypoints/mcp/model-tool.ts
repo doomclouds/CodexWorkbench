@@ -14,6 +14,7 @@ import { protobufMediaType } from './operations.js';
 
 export interface ModelToolOptions {
   readonly dispatch: DispatchLocalRequest;
+  readonly dispatchCreateBoard?: DispatchLocalRequest;
   readonly allocateId: () => string;
   readonly onError: (error: unknown) => void;
   readonly observeRead?: (boardId: string) => (() => void) | undefined;

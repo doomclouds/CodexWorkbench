@@ -28,6 +28,10 @@ test('presents an existing selection without replacing Canvas or writing geometr
     const canvas = app.canvas();
     const world = canvas.querySelector<HTMLElement>('.studio-canvas__world');
     const originalTransform = world?.style.transform;
+    const selected = canvas.querySelector('[data-canvas-object="rectangle"]');
+    const background = canvas.querySelector('[data-canvas-object="caption"]');
+    expect(selected).not.toBeNull();
+    expect(background).not.toBeNull();
     const grab = { x: 70, y: 70 };
     await app.drag(grab, grab);
     expect(canvas.querySelectorAll('[data-canvas-static-corner]')).toHaveLength(4);
@@ -37,7 +41,9 @@ test('presents an existing selection without replacing Canvas or writing geometr
     await flushViewport();
     expect(app.canvas()).toBe(canvas);
     expect(canvas.hasAttribute('data-canvas-presentation')).toBe(true);
-    expect(canvas.querySelectorAll('[data-canvas-object]')).toHaveLength(1);
+    expect(canvas.querySelectorAll('[data-canvas-object]')).toHaveLength(2);
+    expect(canvas.querySelector('[data-canvas-object]:not([hidden])')).toBe(selected);
+    expect(canvas.querySelector('[data-canvas-object][hidden][inert]')).toBe(background);
     expect(canvas.querySelector('[data-canvas-static-corner]')).toBeNull();
 
     await app.drag(grab, { x: 100, y: 100 });
@@ -48,6 +54,9 @@ test('presents an existing selection without replacing Canvas or writing geometr
     expect(app.canvas()).toBe(canvas);
     expect(world?.style.transform).toBe(originalTransform);
     expect(canvas.hasAttribute('data-canvas-presentation')).toBe(false);
+    expect(canvas.querySelector('[data-canvas-object="rectangle"]')).toBe(selected);
+    expect(canvas.querySelector('[data-canvas-object="caption"]')).toBe(background);
+    expect(canvas.querySelector('[data-canvas-object][hidden]')).toBeNull();
     expect(canvas.querySelectorAll('[data-canvas-static-corner]')).toHaveLength(4);
     expect(origin.isConnected).toBe(false);
     expect(document.activeElement).toBe(action(canvas, '全屏观看选区'));

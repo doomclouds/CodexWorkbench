@@ -1,6 +1,6 @@
 {
   "name": "@codexworkbench/luming-studio-ii-server",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "Luming Studio II backend",
   "license": "MIT",
@@ -20,6 +20,7 @@
     "@codexworkbench/luming-studio-ii-whiteboard-shared": "workspace:*",
     "@connectrpc/connect": "2.3.0",
     "@connectrpc/connect-node": "2.3.0",
+    "@csstools/css-tokenizer": "4.0.2",
     "@modelcontextprotocol/sdk": "1.32.2",
     "@resvg/resvg-wasm": "2.6.2",
     "parse5": "8.1.1",

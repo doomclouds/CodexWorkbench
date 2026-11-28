@@ -20,7 +20,18 @@ export interface HistoryChange {
 const dateFormat = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'long' });
 
 export function historyAuthorName({ actorId, actorKind, actorName }: BoardHistoryVersion) {
-  return actorName || (actorKind === 'agent' ? 'Agent' : actorId);
+  if (actorName) {
+    return actorName;
+  }
+  if (actorKind === 'agent') {
+    return 'Agent';
+  }
+
+  return actorId === 'local' ? '本机' : actorId;
+}
+
+export function isBoardCreation({ kind, revision }: BoardHistoryVersion): boolean {
+  return kind === 'baseline' && revision === 0n;
 }
 
 function dayKey(date: Date): string {

@@ -30,7 +30,7 @@ export function beginObservation(page, options) {
 
     function trackSave(records) {
       const node = status();
-      const label = node?.textContent?.trim();
+      const label = node?.getAttribute("aria-label")?.trim() ?? node?.textContent?.trim();
       sawPending ||= Boolean(label?.startsWith("保存中"));
       sawPending ||= records.some(({ oldValue }) => /^保存中|^saving$/u.test(oldValue ?? ""));
       if (sawPending && label === "已保存") {
@@ -49,7 +49,7 @@ export function beginObservation(page, options) {
 
       statusObserver = new MutationObserver(trackSave);
       statusObserver.observe(region, {
-        attributeFilter: ["data-save-status"],
+        attributeFilter: ["aria-label", "data-save-status"],
         attributeOldValue: true,
         characterData: true,
         characterDataOldValue: true,

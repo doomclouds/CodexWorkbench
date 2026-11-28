@@ -36,6 +36,8 @@
 
 `artifact_apply.operations` 每批 1 至 60 项，按给定顺序原子处理。几何对象目标携实际 `expectedGeometryVersion`，内容携 `expectedPayloadVersion`。样式和层级等另有必要前置值时沿用实际字段。每个操作只使用它拥有的一种输入分支。具体形状和负载见[白板对象格式](whiteboard-format.md)。
 
+以 `receipt.applied.boardRevision` 确认已保存版次。收到 `detailsOmitted: true` 时，回执精简了对象或正文细节。按本次变更的目标 ID 回读该版次，核对整批结果。
+
 失联时先用 `artifact_read` 的 `operation-receipt` 模式查询，把原 `artifact_apply` 的 `boardId`、`taskId`、`generation`、`commandId` 和 `operations` 原样传入。查询只核对已提交的写入，同一连接结束工作区后也可以读回原回执。收到 `COMMIT_RESULT_UNKNOWN` 时核对实际对象状态和授权，再决定是否重送。冲突时保留意图，重读并比较当前值，重新声明需要修改的范围和版本。
 
 建议提交与直接写入有不同授权。收到备注附件的 `sourceRef` 用来读取证据，`sourceId` 用来提交建议。`artifact_suggest` 的 2 至 4 个选项可以用 `edit` 或有序 `operations` 描述。候选方案应根据冻结范围与当前对象版本构造。用户明确选择才把建议写入正文，已经应用的方案从备注列表的实际撤回动作处理。见[建议方案与预览](ideas.md)。
@@ -149,7 +151,7 @@ Agent 在当前白板活动时，顶部显示它的机器人头像和身份颜�
 }
 ```
 
-成功后读回目标并核实可见标题、正文、连线和周边留白。`end` 只需本次板、`taskId` 和真实 `generation`。工作区过期或被房主释放后先用 `status` 核对。自行结束或到期的任务如确需继续，经重新读取和范围核实后可带 `previousGeneration` 申请新一代。因房主释放而结束时停止旧任务，等待明确的新授权。MCP 正常关闭会尝试清理其工作区，异常断线依赖有限租约。视角跟随由用户主动开启，本地控制按实际页面退出跟随。
+成功后读回目标并核实可见标题、正文、连线和周边留白。`end` 携带本次板的 `boardId`、`taskId` 和真实 `generation`。查询工作区状态只传 `action: "status"`、`boardId` 和 `taskId`，从结果核对代次、状态和结束原因。工作区过期或被房主释放后先查询状态。自行结束或到期的任务如确需继续，经重新读取和范围核实后可带 `previousGeneration` 申请新一代。因房主释放而结束时停止旧任务，等待明确的新授权。MCP 正常关闭会尝试清理其工作区，异常断线依赖有限租约。视角跟随由用户主动开启，本地控制按实际页面退出跟随。
 
 ## 精确版本单元补读
 

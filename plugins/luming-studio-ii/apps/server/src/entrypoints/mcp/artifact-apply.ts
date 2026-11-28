@@ -104,7 +104,7 @@ export function registerArtifactApply(server: McpServer, options: ArtifactApplyO
     {
       title: '提交工作区内的白板修改',
       description:
-        '使用 artifact_activity 返回的 taskId 与 generation，原子执行实际工作范围内的有序修改。operations 每项是 II Protobuf JSON geometry 或 content 操作，内层省略白板及命令 ID。从有界回执确认已保存版次。失联时先用 artifact_read 的 operation-receipt 模式和原请求查询。',
+        '使用 artifact_activity 返回的 taskId 与 generation，原子执行实际工作范围内的有序修改。operations 每项是 II Protobuf JSON geometry 或 content 操作，内层省略白板及命令 ID。以 receipt.applied.boardRevision 确认已保存版次。detailsOmitted 表示回执精简了对象或正文细节，可在该版次回读核对。失联时先用 artifact_read 的 operation-receipt 模式和原请求查询。HTML 操作禁止新增 data: 资源。字体使用系统回退，图片复用 artifact_manage 导入返回的 asset.src。',
       inputSchema: artifactApplySchema,
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
     },

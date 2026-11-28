@@ -58,6 +58,10 @@ export function createMcpNavigation(readOpeningId: () => string | number | undef
       return () => listeners.delete(listener);
     },
     applyHostLocation(boardId: string | undefined, id: string | number | undefined) {
+      if (boardId === undefined) {
+        return false;
+      }
+
       const differentCall = id !== undefined && openingId !== undefined && id !== openingId;
       if (id !== undefined) {
         openingId = id;
@@ -66,12 +70,9 @@ export function createMcpNavigation(readOpeningId: () => string | number | undef
         return false;
       }
 
-      const next: StudioLocation = boardId
-        ? { kind: 'whiteboard', boardId }
-        : { kind: 'workbench' };
       writtenLocally = false;
       restoredView = undefined;
-      setLocation(next);
+      setLocation({ kind: 'whiteboard', boardId });
 
       return true;
     },

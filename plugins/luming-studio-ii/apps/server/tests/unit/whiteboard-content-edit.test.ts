@@ -1,11 +1,42 @@
 import { expect, test } from 'vitest';
 import {
   editDocumentContent,
+  editEmbedSource,
   editTextContent,
   editTodoContent,
   type JsonObject,
   type TodoContentEdit,
 } from '../../src/modules/whiteboard/domain/index.js';
+
+test('permits unrelated edits or removal of a legacy inline resource without adding copies', () => {
+  const image = '<img src="data:image/svg+xml,%3Csvg%2F%3E">';
+  const current = {
+    objectId: 'legacy-diagram',
+    payloadVersion: 2n,
+    bodyKind: 'embed',
+    data: { html: '<p>Old text</p>' + image, title: 'Legacy diagram', sourceRevision: '1' },
+  };
+  const edit = (html: string) =>
+    editEmbedSource(current, {
+      kind: 'embedSource',
+      objectId: current.objectId,
+      expectedPayloadVersion: 2n,
+      expectedSourceRevision: 1n,
+      title: 'Legacy diagram',
+      html,
+    });
+
+  expect(edit('<p>New text</p>' + image)).toMatchObject({
+    kind: 'updated',
+    data: { html: '<p>New text</p>' + image, sourceRevision: '2' },
+  });
+  expect(edit('<p>New text</p>')).toMatchObject({ kind: 'updated' });
+  expect(edit(image + image)).toEqual({ kind: 'rejected', reason: 'inlineHtmlResource' });
+  expect(edit(image.replace('%3Csvg%2F%3E', '%3Csvg%3E'))).toEqual({
+    kind: 'rejected',
+    reason: 'inlineHtmlResource',
+  });
+});
 
 const boardId = 'content-board';
 const assetId = 'asset-1';

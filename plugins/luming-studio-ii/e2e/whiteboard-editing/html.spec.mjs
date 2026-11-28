@@ -1,10 +1,12 @@
 import {
   chooseHtmlFile,
   controlNextHtmlSave,
+  countOverviewEmbeds,
   embedFrame,
   expect,
   inspectEmbedPaint,
   observe,
+  observeEmbedPayloadReads,
   readCanvas,
   screenshot,
   test,
@@ -777,4 +779,121 @@ test("[EDIT-HTML-10] 从整板概览返回后嵌入仍可点击和内部滚动�
     independentScroll: true,
     savedStateAfterReload: true,
   });
+});
+
+const diagramFixturePadding = "architecture-preview ".repeat(500);
+
+function architectureEmbed(index, x, y) {
+  const label = `架构图 ${index}`;
+  return {
+    id: `architecture-embed-${index}`,
+    kind: "html",
+    label,
+    x,
+    y,
+    width: 1440,
+    height: 1120,
+    html: `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>${label}</title>
+<style>:root { --paper: #f5f5f5; } body { background: var(--paper); }
+svg { display: block; width: 100%; }</style></head><body>
+<svg viewBox="0 0 1440 1100" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="${label}">
+<defs><marker id="arrow" refX="7" refY="3" markerWidth="8" markerHeight="6" orient="auto">
+<polygon points="0 0,8 3,0 6" fill="#2d3142" /></marker></defs>
+<rect x="80" y="260" width="490" height="450" rx="24" fill="#e51c84" />
+<rect x="870" y="260" width="490" height="450" rx="24" fill="#03abd0" />
+<path d="M580 480H835" fill="none" stroke="#2d3142" stroke-width="14" marker-end="url(#arrow)" />
+<text x="100" y="180" fill="#2d3142" font-size="84">${label}</text>
+</svg><!-- ${diagramFixturePadding} --></body></html>`,
+  };
+}
+
+test("[EDIT-HTML-11] 5% 概览读齐 98 份架构图并保留图解像素", async ({ page, studio }, testInfo) => {
+  const diagrams = Array.from({ length: 98 }, (_, index) =>
+    architectureEmbed(index, (index % 14) * 1850, Math.floor(index / 14) * 1200),
+  );
+  const offscreen = [architectureEmbed(98, -6800, 0), architectureEmbed(99, 30850, 0)];
+  const reads = observeEmbedPayloadReads(page, studio);
+  await openOriginal(page, studio, "架构大板静态预览", [...diagrams, ...offscreen]);
+  await openOverview(page, studio);
+  await expect.poll(async () => (await readCanvas(page, studio)).zoom).toBeCloseTo(0.05, 4);
+  await expect
+    .poll(() => countOverviewEmbeds(page, studio), { timeout: 20_000 })
+    .toBeGreaterThanOrEqual(diagrams.length);
+
+  for (const item of [diagrams[0], diagrams[49], diagrams[97]]) {
+    await expect
+      .poll(async () => {
+        const { counts } = await inspectEmbedPaint(page, studio, item.id, colors);
+        return counts.first > 200 && counts.second > 200;
+      })
+      .toBe(true);
+  }
+
+  if (studio.edition === "ii") {
+    const requested = new Set(reads().flat());
+    expect(reads().length).toBeGreaterThan(1);
+    expect(diagrams.every(({ id }) => requested.has(id))).toBe(true);
+    expect(offscreen.some(({ id }) => requested.has(id))).toBe(false);
+  }
+
+  await screenshot(page, testInfo, "architecture-html-overview");
+});
+
+test("[EDIT-HTML-12] 拦截新导入的内联资源并继续渲染已保存的旧图解", async ({
+  page,
+  studio,
+}, testInfo) => {
+  const asset = encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"><rect width="48" height="48" fill="#114488"/></svg>',
+  );
+  const legacySource = '<h1>旧图解</h1><img alt="旧图" src="data:image/svg+xml,' + asset + '">';
+  const board = await openOriginal(page, studio, "内联资源兼容", [
+    embeddedObject({ html: legacySource }),
+  ]);
+  const editing = await editSource(page, studio);
+  const revised = legacySource.replace("旧图解", "新文字");
+  await expect(nameField(editing)).toHaveValue(originalTitle);
+  await sourceField(editing).fill(revised);
+  await button(editing, "保存源码").click();
+  await expect(editing).toBeHidden();
+  await expect
+    .poll(() => savedEmbed(studio, board, { id: originalId }))
+    .toMatchObject({ html: revised });
+  await page.reload();
+  await expect(headingInFrame(page, originalTitle, "新文字")).toBeVisible();
+  await expect
+    .poll(async () => {
+      const { counts } = await inspectEmbedPaint(page, studio, originalId, {
+        legacyImage: [17, 68, 136],
+      });
+
+      return counts.legacyImage;
+    })
+    .toBeGreaterThan(100);
+  await screenshot(page, testInfo, "legacy-inline-resource-after-edit");
+
+  const opened = await openNewHtml(page);
+  const imported = await chooseHtmlFile(
+    page,
+    () => button(opened, "选择 HTML 文件").click(),
+    "inline-resource",
+  );
+  await expect(sourceField(opened)).toHaveValue(imported.html);
+  await button(opened, "添加到白板").click();
+  if (studio.edition === "ii") {
+    await expect(opened.getByText("HTML 含有新增的 data: 资源。", { exact: false })).toBeVisible();
+    await expect(sourceField(opened)).toHaveValue(imported.html);
+    expect((await studio.readBoard(board)).objects).toHaveLength(1);
+    await screenshot(page, testInfo, "inline-resource-import-rejected");
+    await button(opened, "取消").click();
+  } else {
+    await expect(opened).toBeHidden();
+    await expect
+      .poll(() => savedEmbed(studio, board, { label: imported.title }))
+      .toMatchObject({
+        html: imported.html,
+      });
+    await screenshot(page, testInfo, "inline-resource-import-accepted");
+  }
 });

@@ -21,6 +21,7 @@ import {
 } from './management.js';
 
 export { CatalogQueryError } from './cursor.js';
+export { createCatalogChangeEvents, type CatalogChangeEvents } from './change-events.js';
 export type { DuplicateBoardCommand } from './duplicate-board.js';
 export type {
   CatalogBoardSummary,
@@ -33,6 +34,7 @@ export type { WorkbenchPreferences } from '../ports/index.js';
 
 export interface CatalogActor {
   readonly id: string;
+  readonly creationAuthorId?: string;
 }
 
 export interface CatalogListRequest {
@@ -194,7 +196,7 @@ function createBoard(
     }
 
     const created = newBoard(services, commandId, title);
-    creation.saveBoard(actor.id, created);
+    creation.saveBoard(actor.id, created, actor.creationAuthorId);
 
     return created;
   });

@@ -372,6 +372,7 @@ test('refreshes through the already loaded history while preserving an expanded 
     .mockResolvedValueOnce({ currentRevision: 4n, versions: [version(0n)] });
   await act(async () => surface.render({ revision: 4n }));
   expect(button('展开版本 0')).toBeDefined();
+  expect(button('展开版本 3').textContent).not.toContain('当前版本');
   expect(document.activeElement).toBe(previewTrigger);
 
   await act(async () =>
@@ -384,7 +385,7 @@ test('refreshes through the already loaded history while preserving an expanded 
     4n,
     sourceRevision,
   ]);
-  expect(button('展开版本 4')).toBeDefined();
+  expect(button('展开版本 4').textContent).toContain('当前版本');
   expect(button('展开版本 0')).toBeDefined();
   expect(button('展开版本 1').getAttribute('aria-expanded')).toBe('true');
   expect(button('预览版本')).toBe(previewTrigger);
@@ -478,6 +479,7 @@ test('shows stored titles for current and initial revisions and preserves the re
       {
         ...version(0n),
         title: '初始白板标题',
+        actorId: 'local',
         kind: 'baseline',
         savedAtMillis: Date.parse(createdAt),
       },
@@ -486,9 +488,18 @@ test('shows stored titles for current and initial revisions and preserves the re
   await mount(service);
 
   expect(button('展开版本 3').textContent).toContain('当前白板标题');
-  expect(button('展开版本 0').textContent).toContain('初始白板标题');
-  expect(button('展开版本 0').querySelector('time')?.dateTime).toBe(createdAt);
+  const initial = button('展开版本 0');
+  expect(initial.textContent).toContain('初始白板标题');
+  expect(initial.textContent).toContain('创建作品');
+  expect(initial.querySelector('strong')?.textContent).toBe('本机');
+  expect(initial.querySelector('time')?.dateTime).toBe(createdAt);
   expect(button('展开版本 3').querySelector('time')).toBeNull();
+
+  await selectButton('展开版本 0');
+  expect(fixture.host.textContent).toContain('此时段没有保留的内容变化。');
+  expect(button('预览版本')).toBeDefined();
+  expect(button('恢复为新版本')).toBeDefined();
+  expect(service.getVersionScene).not.toHaveBeenCalled();
 });
 
 test('uses the saved Agent name and avatar in the version and its inspected change', async () => {

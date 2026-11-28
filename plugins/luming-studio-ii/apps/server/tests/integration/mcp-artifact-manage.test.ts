@@ -11,13 +11,21 @@ import { actorHeader, callWhiteboard } from '../support/whiteboard-client.js';
 import { mainBoardId, viewerId } from '../support/whiteboard-database.js';
 import { useWhiteboardTestServer } from './whiteboard-test-server.js';
 
-const http = useWhiteboardTestServer();
+const creationAuthorHeader = 'x-test-agent-creation-author';
+const http = useWhiteboardTestServer((request) => {
+  const id = request.headers[actorHeader];
+  const creationAuthorId = request.headers[creationAuthorHeader];
+  if (typeof id === 'string') {
+    return typeof creationAuthorId === 'string' ? { id, kind: 'agent', creationAuthorId } : { id };
+  }
+});
 const owner = 'catalog-model-owner';
 
 type Options = Parameters<typeof createStudioMcpServer>[0];
 
 interface FixtureOptions {
   readonly actor?: string;
+  readonly agentIdentity?: string;
   readonly loseCreateResponse?: boolean;
   readonly readArchiveFile?: Options['readArchiveFile'];
   readonly readAssetFile?: Options['readAssetFile'];
@@ -35,6 +43,7 @@ interface ModelAsset {
 
 async function fixture({
   actor = owner,
+  agentIdentity,
   loseCreateResponse,
   readArchiveFile,
   readAssetFile,
@@ -42,39 +51,47 @@ async function fixture({
   let counter = 0;
   let responseLost = false;
   const requests: LocalRequest[] = [];
+  async function dispatch(request: LocalRequest, signal: AbortSignal, authorId?: string) {
+    requests.push(request);
+    const headers = new Headers({ [actorHeader]: actor });
+    if (request.mediaType) {
+      headers.set('content-type', request.mediaType);
+    }
+    if (request.commandId) {
+      headers.set('x-studio-command-id', request.commandId);
+    }
+    if (authorId) {
+      headers.set(creationAuthorHeader, authorId);
+    }
+    const response = await fetch(new URL(request.route, http.address), {
+      method: request.method,
+      headers,
+      body: request.body instanceof Uint8Array ? Buffer.from(request.body) : request.body,
+      signal,
+    });
+
+    if (loseCreateResponse && !responseLost && request.route.endsWith('/CreateBoard')) {
+      responseLost = true;
+      await response.body?.cancel();
+
+      return new Response(null, { status: 503 });
+    }
+
+    return response;
+  }
+
   const server = createStudioMcpServer({
     html: '<html></html>',
     pluginVersion: '1.0.0',
     now: () => 0,
-    allocateId: () => 'manage-test-allocation-' + ++counter,
+    allocateId: () => (agentIdentity ?? 'manage-test-allocation-') + ++counter,
     createFile: () => Promise.reject(new Error('Unexpected file spool.')),
     readArchiveFile,
     readAssetFile,
-    async dispatch(request, signal) {
-      requests.push(request);
-      const headers = new Headers({ [actorHeader]: actor });
-      if (request.mediaType) {
-        headers.set('content-type', request.mediaType);
-      }
-      if (request.commandId) {
-        headers.set('x-studio-command-id', request.commandId);
-      }
-      const response = await fetch(new URL(request.route, http.address), {
-        method: request.method,
-        headers,
-        body: request.body instanceof Uint8Array ? Buffer.from(request.body) : request.body,
-        signal,
-      });
-
-      if (loseCreateResponse && !responseLost && request.route.endsWith('/CreateBoard')) {
-        responseLost = true;
-        await response.body?.cancel();
-
-        return new Response(null, { status: 503 });
-      }
-
-      return response;
-    },
+    dispatch,
+    dispatchAgentCreateBoard: agentIdentity
+      ? (agentId, request, signal) => dispatch(request, signal, agentId)
+      : undefined,
     onError() {},
   });
   const client = new Client({ name: 'manage-acceptance', version: '1.0.0' });
@@ -124,6 +141,51 @@ function replaceEntry(
     ...details,
   });
 }
+
+test('records MCP creation authors in revision zero without changing owner receipts', async () => {
+  const creator = await fixture({ agentIdentity: 'creation-test-agent-' });
+  const retryingAgent = await fixture({ agentIdentity: 'reconnected-agent-' });
+  const local = await fixture();
+  try {
+    const forged = await creator.call({
+      action: 'create',
+      commandId: 'forged-creator',
+      title: '伪造创建者',
+      agentId: 'agent-forged',
+    });
+    expect(forged.isError).toBe(true);
+    expect(creator.requests).toHaveLength(0);
+
+    const created = board(await create(creator, 'create-authored-board', 'Agent 架构设计'));
+    const receipt = await local.call({ action: 'receipt', commandId: 'create-authored-board' });
+    expect(board(receipt)).toEqual(created);
+    expect(board(await create(retryingAgent, 'create-authored-board', 'Agent 架构设计'))).toEqual(
+      created,
+    );
+
+    await http.restart();
+    const history = await local.client.callTool({
+      name: 'artifact_read',
+      arguments: { mode: 'history', boardId: created.id },
+    });
+    expect(history.structuredContent).toMatchObject({
+      ok: true,
+      data: {
+        history: [
+          {
+            revision: '0',
+            actorId: 'agent-creation-test-agent-1',
+            actorKind: 'agent',
+          },
+        ],
+      },
+    });
+  } finally {
+    await local.close();
+    await retryingAgent.close();
+    await creator.close();
+  }
+});
 
 test('exposes catalog lifecycle with stable receipts, optimistic versions, and batch purge results', async () => {
   const client = await fixture();

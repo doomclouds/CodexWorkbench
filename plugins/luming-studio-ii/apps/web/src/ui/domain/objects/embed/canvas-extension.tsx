@@ -154,7 +154,11 @@ function CanvasEmbedView(props: CanvasObjectViewProps) {
   );
 
   if (!current) {
-    return <StatusText message="暂未取得嵌入对象正文" announcement="polite" />;
+    return (
+      <div className="studio-ui-embed studio-ui-embed--placeholder">
+        <StatusText message="暂未取得嵌入对象正文" announcement="polite" />
+      </div>
+    );
   }
 
   const { value, version } = current;

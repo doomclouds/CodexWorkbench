@@ -254,6 +254,10 @@ const permitted = [
   ['src/infrastructure/adapters/feedback/content-source.ts', "import { parse } from 'parse5';"],
   [catalogAdapter + 'thumbnail-html.ts', "import { parse } from 'parse5';"],
   [
+    whiteboard + 'domain/embed-resource-validation.ts',
+    "import { parse } from 'parse5';\nimport { tokenize } from '@csstools/css-tokenizer';",
+  ],
+  [
     whiteboard + 'domain/export-html-content.ts',
     "import { parseRichText } from '@codexworkbench/luming-studio-ii-whiteboard-shared/rich-text';",
   ],
@@ -787,6 +791,11 @@ const rejected = [
     'the catalogue application cannot import the thumbnail HTML parser dependency',
     catalog + 'application/catalog-thumbnail.ts',
     "import { parse } from 'parse5';",
+  ],
+  [
+    'other whiteboard domain files cannot import the CSS resource tokenizer',
+    whiteboard + 'domain/object-content-edits-embed.ts',
+    "import { tokenize } from '@csstools/css-tokenizer';",
   ],
   [
     'the catalogue application cannot import sticker artwork',

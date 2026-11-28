@@ -11,6 +11,7 @@ import {
 } from '@codexworkbench/luming-studio-ii-contracts/catalog/service';
 import type {
   CatalogApplication,
+  CatalogChangeEvents,
   CatalogReceipt,
   CatalogRejectionReason as ApplicationRejection,
   ManageBoardCommand,
@@ -113,7 +114,13 @@ function toManageOperation(operation: ManageBoardRequest['operation']): ManageOp
   }
 }
 
-export function createCatalogRoutes(application: CatalogApplication): readonly RouteEntry[] {
+export const boardCreateRoutePath =
+  '/' + BoardCatalogService.typeName + '/' + BoardCatalogService.method.createBoard.name;
+
+export function createCatalogRoutes(
+  application: CatalogApplication,
+  changes?: CatalogChangeEvents,
+): readonly RouteEntry[] {
   const {
     listBoards,
     listTrashedBoards,
@@ -138,7 +145,11 @@ export function createCatalogRoutes(application: CatalogApplication): readonly R
         offset,
       });
 
-      return { boards: [...result.boards], nextCursor: result.nextCursor };
+      return {
+        boards: [...result.boards],
+        nextCursor: result.nextCursor,
+        catalogCursor: changes?.cursor,
+      };
     }),
     unaryRoute(listTrashedBoards, (actor, request) => {
       const { query, order, pageSize, cursor, pinnedOnly, offset } = request;
@@ -167,10 +178,20 @@ export function createCatalogRoutes(application: CatalogApplication): readonly R
       return { thumbnail: result.kind === 'thumbnail' ? result.thumbnail : undefined };
     }),
     unaryRoute(createBoard, (actor, request) => {
-      const receipt = application.createBoard(actor, {
-        commandId: requireId(request.commandId),
-        title: request.title,
-      });
+      if (actor.kind === 'agent' && !actor.creationAuthorId) {
+        throw new WhiteboardAccessError();
+      }
+
+      const receipt = application.createBoard(
+        {
+          id: actor.id,
+          creationAuthorId: actor.kind === 'agent' ? actor.creationAuthorId : undefined,
+        },
+        {
+          commandId: requireId(request.commandId),
+          title: request.title,
+        },
+      );
 
       return { receipt: toCatalogReceipt(receipt) };
     }),

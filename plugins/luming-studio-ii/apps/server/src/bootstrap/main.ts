@@ -58,6 +58,12 @@ function matchesToken(supplied: Uint8Array, expected: Uint8Array | undefined) {
   );
 }
 
+function agentAuthor(value: string | string[] | undefined): string | undefined {
+  return typeof value === 'string' && /^agent-[A-Za-z0-9_-]{1,128}$/u.test(value)
+    ? value
+    : undefined;
+}
+
 if (matchesToken(token, agentToken)) {
   throw new Error('Studio App and Agent credentials must be distinct.');
 }
@@ -100,15 +106,13 @@ const runtime: ReturnType<typeof createWhiteboardServer> = createWhiteboardServe
     if (matchesToken(supplied, token)) {
       return { id: actorId, kind: 'human' as const };
     }
-
     if (matchesToken(supplied, agentToken)) {
-      const author = request.headers['x-studio-feedback-agent-id'];
-      const feedbackAuthorId =
-        typeof author === 'string' && /^agent-[A-Za-z0-9_-]{1,128}$/u.test(author)
-          ? author
-          : undefined;
-
-      return { id: actorId, kind: 'agent' as const, feedbackAuthorId };
+      return {
+        id: actorId,
+        kind: 'agent' as const,
+        feedbackAuthorId: agentAuthor(request.headers['x-studio-feedback-agent-id']),
+        creationAuthorId: agentAuthor(request.headers['x-studio-agent-creator-id']),
+      };
     }
 
     return undefined;

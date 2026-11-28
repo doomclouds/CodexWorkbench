@@ -19,7 +19,16 @@ function boardName(page) {
 }
 
 function saved(page) {
-  return page.getByText("已保存", { exact: true }).first();
+  return page.getByRole("status", { name: "已保存", exact: true });
+}
+
+function statusLayout(page, title, status) {
+  const canvas = page.getByRole("region", { name: title, exact: true });
+  return Promise.all(
+    [boardName(page), status, button(page, "版本历史"), canvas].map((target) =>
+      target.boundingBox(),
+    ),
+  );
 }
 
 async function openWorkbench(page, studio) {
@@ -118,11 +127,16 @@ test("[TOPBAR-CHROME-02] 主题切换改变画布颜色并沿用工作台偏好"
   await observe(testInfo, "theme-shared-preference", { persisted: true, canvasTheme: "light" });
 });
 
-test("[TOPBAR-CHROME-03] 真实移动回执到达前后，顶栏显示对应保存状态", async ({
+test("[TOPBAR-CHROME-03] 真实移动回执到达前后，顶栏状态和画布布局稳定", async ({
   page,
   studio,
 }, testInfo) => {
-  const board = await studio.seedBasicBoard({ title: "顶栏保存状态验收", objects: [shape] });
+  const title = "顶栏保存状态验收";
+  const ii = studio.edition === "ii";
+  const board = await studio.seedBasicBoard({ title, objects: [shape] });
+  if (ii) {
+    await page.setViewportSize({ width: 360, height: 640 });
+  }
   await page.goto(board.url);
   await expect(saved(page)).toBeVisible();
   await page.getByText(shape.label, { exact: true }).click();
@@ -131,11 +145,16 @@ test("[TOPBAR-CHROME-03] 真实移动回执到达前后，顶栏显示对应保�
     action: "move",
     mode: "hold",
   });
+  const before = ii && (await statusLayout(page, title, saved(page)));
 
   try {
     await page.keyboard.press("ArrowRight");
     await hold.observed;
-    await expect(page.getByText(/^保存中…?$/u).first()).toBeVisible();
+    const saving = page.getByRole("status", { name: /^保存中…?$/u });
+    await expect(saving).toBeVisible();
+    if (ii) {
+      expect(await statusLayout(page, title, saving)).toEqual(before);
+    }
     await screenshot(page, testInfo, "chrome-saving");
   } finally {
     hold.release();
@@ -145,6 +164,11 @@ test("[TOPBAR-CHROME-03] 真实移动回执到达前后，顶栏显示对应保�
   await expect
     .poll(async () => (await studio.readBoard(board)).objects.find(({ id }) => id === shape.id)?.x)
     .toBe(shape.x + 1);
+
+  if (ii) {
+    expect(await statusLayout(page, title, saved(page))).toEqual(before);
+  }
+
   await screenshot(page, testInfo, "chrome-saved");
   await observe(testInfo, "save-status-after-receipt", { status: "已保存", x: shape.x + 1 });
 });

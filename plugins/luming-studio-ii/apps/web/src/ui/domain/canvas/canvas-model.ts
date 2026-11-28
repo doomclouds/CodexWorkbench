@@ -20,6 +20,7 @@ import {
 } from './scene/index.js';
 import type { ProjectedCanvasObject, SceneIndex } from './scene/index.js';
 import { projectMoveWithinWindow } from './scene/move-preview.js';
+import { expandSelectionIds } from './selection/index.js';
 import { getViewportBounds, rectContainsRect, rectsIntersect } from './viewport/index.js';
 import type { CanvasViewportSize } from './viewport/index.js';
 
@@ -214,8 +215,51 @@ function useStableWindow(candidate: readonly ProjectedCanvasObject[]) {
   return objects;
 }
 
+function presentedIds(
+  presentation: CanvasProps['presentation'],
+  index: SceneIndex,
+  pending: ReadonlyMap<string, CanvasObjectChange>,
+) {
+  if (presentation?.focusObjectId) {
+    return new Set([presentation.focusObjectId]);
+  }
+  if (presentation?.objectIds.length) {
+    return new Set(expandSelectionIds(index, presentation.objectIds, pending));
+  }
+}
+
+function inLayerOrder(index: SceneIndex, entries: ProjectedCanvasObject[]) {
+  const layerOf = ({ object }: ProjectedCanvasObject) => index.getEntry(object.id)?.layer ?? 0;
+
+  return entries.sort((first, second) => layerOf(first) - layerOf(second));
+}
+
+function mergeWindows(
+  index: SceneIndex,
+  background: readonly ProjectedCanvasObject[],
+  foreground: readonly ProjectedCanvasObject[] | undefined,
+) {
+  if (!foreground) {
+    return background;
+  }
+
+  const objects = new Map(background.map((entry) => [entry.object.id, entry]));
+  for (const entry of foreground) {
+    objects.set(entry.object.id, entry);
+  }
+  return inLayerOrder(index, [...objects.values()]);
+}
+
 export function useCanvasModel(
-  { scene, pendingEdits, selection, canEdit, payloadById, remoteGesturePreviews }: CanvasProps,
+  {
+    scene,
+    pendingEdits,
+    selection,
+    canEdit,
+    payloadById,
+    remoteGesturePreviews,
+    presentation,
+  }: CanvasProps,
   frame: CanvasFrame,
   size: CanvasViewportSize,
   retainedId: string | undefined,
@@ -233,7 +277,7 @@ export function useCanvasModel(
     [index, pending, preview],
   );
   const viewport = frame.viewport;
-  const bounds = useWindowBounds(viewport, size);
+  const bounds = useWindowBounds(presentation?.returnViewport ?? viewport, size);
   const visibleBounds = useMemo(() => getViewportBounds(viewport, size), [viewport, size]);
   const moveFrame = !preview || preview.kind === 'move';
   const pendingMovesOnly = !pendingEdits?.some(({ kind }) => kind !== 'move');
@@ -261,17 +305,36 @@ export function useCanvasModel(
     () => (displayChanges === windowChanges ? windowed : queryScene(index, bounds, displayChanges)),
     [index, bounds, windowChanges, displayChanges, windowed],
   );
-  const displayWindow = useStableWindow(displayCandidates);
+  const presentationIds = useMemo(
+    () => presentedIds(presentation, index, pending),
+    [presentation, index, pending],
+  );
+  const foreground = useMemo(() => {
+    if (!presentation) {
+      return undefined;
+    }
+
+    return queryScene(
+      index,
+      getViewportBounds(viewport, size, viewOverscan),
+      displayChanges,
+    ).filter(({ object }) => presentationIds?.has(object.id) !== false);
+  }, [presentation, presentationIds, index, viewport, size, displayChanges]);
+  const mounted = useMemo(
+    () => mergeWindows(index, displayCandidates, foreground),
+    [index, displayCandidates, foreground],
+  );
+  const displayWindow = useStableWindow(mounted);
   const visitedBodies = useVisitedBodies(windowed, index, registry, payloadById);
   const visibleIds = useMemo(() => {
-    if (windowChanges.size === 0 && index.fullyWithin(visibleBounds)) {
+    if (!foreground && windowChanges.size === 0 && index.fullyWithin(visibleBounds)) {
       return index.objectIds;
     }
 
-    return windowed
+    return (foreground ?? windowed)
       .filter((entry) => rectsIntersect(projectedObjectBounds(entry), visibleBounds))
       .map(({ object }) => object.id);
-  }, [index, visibleBounds, windowChanges, windowed]);
+  }, [index, visibleBounds, windowChanges, windowed, foreground]);
   const selected = useMemo(
     () =>
       selection.flatMap((id) => {
@@ -311,12 +374,8 @@ export function useCanvasModel(
       return displayWindow;
     }
 
-    const layerOf = ({ object }: ProjectedCanvasObject) => index.getEntry(object.id)?.layer ?? 0;
-
-    return [...displayWindow, ...additions].sort(
-      (first, second) => layerOf(first) - layerOf(second),
-    );
+    return inLayerOrder(index, [...displayWindow, ...additions]);
   }, [displayWindow, retainedId, retainedIds, visitedBodies, index, displayChanges]);
 
-  return { index, pending, selected, painted, visibleIds, projectedMove };
+  return { index, pending, selected, painted, visibleIds, projectedMove, presentationIds };
 }

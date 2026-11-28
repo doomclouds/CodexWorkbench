@@ -23,6 +23,7 @@ import {
   changeLabel,
   groupHistoryByDate,
   historyChanges,
+  isBoardCreation,
   type HistoryChange,
 } from './history-records.js';
 
@@ -51,6 +52,7 @@ interface RetainedChanges {
 }
 
 type ChangesState =
+  | { readonly kind: 'creation' }
   | { readonly kind: 'loading' }
   | { readonly kind: 'unavailable' }
   | { readonly kind: 'error'; readonly message: string }
@@ -192,6 +194,8 @@ function RecordChanges({
   readonly onInspect: (change: HistoryChange, previousRevision: bigint) => void;
 }) {
   switch (state?.kind) {
+    case 'creation':
+      return <p className="whiteboard-history__note">此时段没有保留的内容变化。</p>;
     case 'loading':
       return <StatusText message="正在加载改动…" announcement="polite" busy />;
     case 'error':
@@ -448,6 +452,10 @@ export function VersionHistoryPanel({
 
   function loadChanges(entry: BoardHistoryVersion) {
     pendingChanges.current?.abort();
+    if (isBoardCreation(entry)) {
+      setChanges({ kind: 'creation' });
+      return;
+    }
     if (!page) {
       return;
     }
@@ -571,7 +579,7 @@ export function VersionHistoryPanel({
     (canFocusButton ? trigger : anchor).focus({ preventScroll: true });
   }
 
-  const current = page?.currentRevision ?? revision;
+  const current = page && page.currentRevision > revision ? page.currentRevision : revision;
   const cursor = page?.nextBeforeRevision;
   const versions = page?.versions ?? noVersions;
 

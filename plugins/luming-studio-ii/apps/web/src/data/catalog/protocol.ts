@@ -17,7 +17,9 @@ import type {
   CatalogReceipt,
   CatalogRejectionReason as RejectionReason,
   CatalogSortOrder,
+  ObserveCatalogVisibility,
 } from './contracts.js';
+import { watchCatalogChanges } from './directory-watch.js';
 
 const orders: Readonly<Record<CatalogSortOrder, BoardSortOrder>> = {
   recent: BoardSortOrder.RECENT,
@@ -175,15 +177,51 @@ export function readReceiptLookup<Receipt>(
   }
 }
 
-export function createBoardCatalogService(post: CatalogPost) {
-  const { listBoards, createBoard, duplicateBoard, getCatalogCommandReceipt, getBoardThumbnail } =
-    wireService.method;
+export function createBoardCatalogService(
+  post: CatalogPost,
+  observeVisibility?: ObserveCatalogVisibility,
+) {
+  const {
+    listBoards,
+    waitForBoardCatalogChange,
+    createBoard,
+    duplicateBoard,
+    getCatalogCommandReceipt,
+    getBoardThumbnail,
+  } = wireService.method;
 
   return {
     async listBoards(input, signal?: AbortSignal) {
-      const { boards, nextCursor } = await request(post, listBoards, listInput(input), signal);
+      const { boards, nextCursor, catalogCursor } = await request(
+        post,
+        listBoards,
+        listInput(input),
+        signal,
+      );
 
-      return { boards: readBoards(boards), nextCursor };
+      return {
+        boards: readBoards(boards),
+        nextCursor,
+        ...(catalogCursor ? { catalogCursor } : {}),
+      };
+    },
+    watchChanges(cursor, onChange, signal) {
+      watchCatalogChanges(
+        async (afterCursor, scope) => {
+          const { catalogCursor } = await request(
+            post,
+            waitForBoardCatalogChange,
+            { afterCursor },
+            scope,
+          );
+
+          return catalogCursor;
+        },
+        cursor,
+        onChange,
+        signal,
+        observeVisibility,
+      );
     },
     async getBoardThumbnail(input, signal?: AbortSignal) {
       signal?.throwIfAborted();

@@ -516,6 +516,71 @@ test('applies room object metadata without rereading the scene and clears view c
   }
 });
 
+test('keeps the canvas and existing object mounted while recovering a missing room revision', async () => {
+  type Scene = Awaited<ReturnType<WhiteboardService['getScene']>>;
+  let resolveRecovery: ((scene: Scene) => void) | undefined;
+  const recovery = new Promise<Scene>((resolve) => {
+    resolveRecovery = resolve;
+  });
+  const baseline = { ...shape, geometryVersion: 2n };
+  const latest = { ...baseline, geometryVersion: 3n, label: '已从房间恢复' };
+  let sceneReads = 0;
+  const app = roomApp({
+    async getScene(boardId) {
+      sceneReads++;
+      if (sceneReads === 2) {
+        return recovery;
+      }
+
+      return { boardId, title: '共享白板', revision: 0n, objects: [shape], canEdit: true };
+    },
+  });
+  const canvasRoot = () => app.host.querySelector('[data-canvas-root]');
+  const card = () => app.host.querySelector('[data-canvas-object="card"]');
+  try {
+    await app.open();
+    const canvas = canvasRoot();
+    const originalCard = card();
+    expect(canvas).not.toBeNull();
+    expect(originalCard).not.toBeNull();
+
+    act(() => {
+      app.room.change({
+        revision: 2n,
+        changedObjectIds: [],
+        removedObjectIds: [],
+        refreshScene: true,
+      });
+      app.room.change({
+        revision: 3n,
+        changedObjectIds: [shape.id],
+        changedObjects: [latest],
+        removedObjectIds: [],
+        refreshScene: false,
+      });
+    });
+    expect(canvasRoot()).toBe(canvas);
+    expect(card()).toBe(originalCard);
+
+    await act(async () => {
+      resolveRecovery?.({
+        boardId: 'shared',
+        title: '共享白板',
+        revision: 2n,
+        objects: [baseline],
+        canEdit: true,
+      });
+    });
+    expect(app.host.textContent).toContain('已从房间恢复');
+    expect(canvasRoot()).toBe(canvas);
+    expect(card()).toBe(originalCard);
+    expect(sceneReads).toBe(2);
+    expect(app.board.payloadReads).toEqual([]);
+  } finally {
+    app.dispose();
+  }
+});
+
 test('shows an unsaved pointer drag in a second whiteboard view and clears it on cancel', async () => {
   const sender = roomApp();
   const recipient = roomApp();

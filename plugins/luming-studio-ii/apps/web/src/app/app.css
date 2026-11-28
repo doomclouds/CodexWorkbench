@@ -11,6 +11,68 @@ body,
   font-family: Inter, 'Segoe UI', system-ui, sans-serif;
 }
 
+.studio-mcp-startup {
+  display: grid;
+  box-sizing: border-box;
+  place-items: center;
+  inline-size: 100%;
+  block-size: 100%;
+  padding: 16px;
+  color: CanvasText;
+  background: Canvas;
+}
+
+.studio-mcp-startup__spinner {
+  box-sizing: border-box;
+  inline-size: 20px;
+  block-size: 20px;
+  border: 2px solid currentColor;
+  border-inline-end-color: transparent;
+  border-radius: 50%;
+  color: color-mix(in srgb, CanvasText 62%, Canvas);
+  animation:
+    studio-mcp-startup-reveal 0s 160ms both,
+    studio-mcp-startup-spin 0.8s 160ms linear infinite;
+}
+
+.studio-mcp-startup__label {
+  position: absolute;
+  overflow: hidden;
+  inline-size: 1px;
+  block-size: 1px;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.studio-mcp-startup__error {
+  max-inline-size: 34rem;
+  margin: 0;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+@keyframes studio-mcp-startup-reveal {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes studio-mcp-startup-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .studio-mcp-startup__spinner {
+    animation-name: studio-mcp-startup-reveal;
+  }
+}
+
 .studio-whiteboard-app {
   --studio-ui-system-canvas: Canvas;
   --studio-ui-canvas: #f5f5f5;

@@ -58,6 +58,7 @@ const scopedFixtureImports = new Map(
       ["chooseArchive", "failNextArchiveImport", "holdNextArchiveImport", "imageLoaded"],
     ],
     ["workbench/link", ["workbenchLinkProbe"]],
+    ["workbench/live", ["observeWorkbenchCatalog", "trackWorkbenchCard"]],
     ["whiteboard-basics/organization", ["workbenchLinkProbe"]],
     ["whiteboard-basics/objects", ["controlNextCanvasSave"]],
     [
@@ -71,7 +72,9 @@ const scopedFixtureImports = new Map(
         "embedFrame",
         "chooseHtmlFile",
         "controlNextHtmlSave",
+        "countOverviewEmbeds",
         "inspectEmbedPaint",
+        "observeEmbedPayloadReads",
         "workbenchLinkProbe",
       ],
     ],
@@ -83,7 +86,18 @@ const scopedFixtureImports = new Map(
     ["whiteboard-editing/rich-gestures", ["embedFrame", "workbenchLinkProbe"]],
     ["whiteboard-editing/organization", ["enableCanvasClipboard"]],
     ["whiteboard-editing/inline-editing", ["holdNextInlineTextRefresh", "holdNextInlineTextWrite"]],
-    ["whiteboard-editing/reading-controls", ["readViewingInk", "workbenchLinkProbe"]],
+    [
+      "whiteboard-editing/reading-controls",
+      [
+        "countOverviewEmbeds",
+        "embedFrame",
+        "observeEmbedPayloadReads",
+        "observeViewingFrames",
+        "observeViewingLayers",
+        "readViewingInk",
+        "workbenchLinkProbe",
+      ],
+    ],
     ["whiteboard-editing/zoom-visibility", ["readZoomDetails", "holdNextCanvasMove"]],
     [
       "whiteboard-editing/canvas-extras",
@@ -97,7 +111,7 @@ const scopedFixtureImports = new Map(
     ],
     [
       "whiteboard-topbar/sharing-feedback",
-      ["workbenchLinkProbe", "mediaDisplaySize", "mediaPlaying"],
+      ["workbenchLinkProbe", "mediaDisplaySize", "mediaPlaying", "observeGuestAccessReads"],
     ],
     ["whiteboard-topbar/overlays", ["seedTopbarSuggestion", "seedTopbarAgentWorkspace"]],
     ["whiteboard-topbar/export-fidelity", ["downloadBoardExport", "inspectBoardExport"]],

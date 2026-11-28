@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import { inspectImage } from "./board-export-fidelity.mjs";
 import { controlNextCanvasSave } from "./canvas-persistence.mjs";
 import { readCanvas } from "./canvas-presentation.mjs";
@@ -8,6 +9,48 @@ const ordinary = {
   heading: "文件内的图解正文",
   html: "<main><h1>文件内的图解正文</h1><p>离线文件样例。</p></main>",
 };
+const inlineResource = {
+  title: "含内联资源的图解",
+  html: '<img src="data:image/png;base64,AA==" alt="待替换图片">',
+};
+const htmlFixtures = new Map([
+  ["ordinary", ordinary],
+  ["inline-resource", inlineResource],
+]);
+
+const requireServer = createRequire(new URL("../../apps/server/package.json", import.meta.url));
+
+export function observeEmbedPayloadReads(page, studio) {
+  const reads = [];
+  if (studio.edition === "ii") {
+    const { fromBinary } = requireServer("@bufbuild/protobuf");
+    const { WhiteboardService } = requireServer(
+      "@codexworkbench/luming-studio-ii-contracts/whiteboard/service",
+    );
+    const method = WhiteboardService.method.getObjectPayloads;
+    const url = new URL(`/${method.parent.typeName}/${method.name}`, studio.url).href;
+    page.on("request", (request) => {
+      const body = request.url() === url && request.postDataBuffer();
+      if (body) {
+        reads.push(fromBinary(method.input, body).objectIds);
+      }
+    });
+  }
+
+  return () => reads;
+}
+
+export async function countOverviewEmbeds(page, studio) {
+  if (studio.edition === "initial") {
+    return page.locator(".studio-html-region iframe[srcdoc]").count();
+  }
+
+  return page
+    .locator(".studio-ui-embed__preview")
+    .evaluateAll(
+      (images) => images.filter((image) => image.complete && image.naturalWidth > 0).length,
+    );
+}
 
 export function embedFrame(page, title) {
   const frames = page.locator("[data-element-id] iframe, [data-canvas-object] iframe");
@@ -30,18 +73,19 @@ export async function inspectEmbedPaint(page, studio, id, palette) {
 }
 
 export async function chooseHtmlFile(page, action, fixture) {
-  if (fixture !== "ordinary") {
+  const source = htmlFixtures.get(fixture);
+  if (!source) {
     throw new TypeError("Select a registered offline HTML fixture.");
   }
 
   const [picker] = await Promise.all([page.waitForEvent("filechooser"), action()]);
   await picker.setFiles({
-    name: ordinary.title + ".html",
+    name: source.title + ".html",
     mimeType: "text/html",
-    buffer: Buffer.from(ordinary.html),
+    buffer: Buffer.from(source.html),
   });
 
-  return ordinary;
+  return source;
 }
 
 export function controlNextHtmlSave(page, studio, { boardId, action, mode }) {

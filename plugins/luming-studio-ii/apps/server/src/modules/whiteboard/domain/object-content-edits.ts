@@ -126,7 +126,11 @@ export type TodoContentEdit =
       readonly placement: TodoContentPlacement;
     };
 
-export type ContentEditRejection = 'invalidEdit' | 'tooLarge' | 'versionUnavailable';
+export type ContentEditRejection =
+  | 'invalidEdit'
+  | 'tooLarge'
+  | 'versionUnavailable'
+  | 'inlineHtmlResource';
 
 export type ContentPayloadPlan =
   | {

@@ -2,7 +2,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { BoardHistoryVersion } from '../../data/whiteboard/index.js';
 import { HistoryAgentAvatar } from './HistoryAgentAvatar.js';
-import { historyAuthorName } from './history-records.js';
+import { historyAuthorName, isBoardCreation } from './history-records.js';
 
 interface HistoryRecordProps {
   readonly entry: BoardHistoryVersion;
@@ -14,7 +14,7 @@ interface HistoryRecordProps {
 }
 
 const versionLabels = {
-  baseline: '初始快照',
+  baseline: '历史起点',
   geometry: '对象操作',
   content: '正文编辑',
   image: '插入图片',
@@ -68,7 +68,7 @@ export function HistoryRecord({
             )}
           </span>
           <span className="whiteboard-history__record-summary">
-            {versionLabels[kind]}
+            {isBoardCreation(entry) ? '创建作品' : versionLabels[kind]}
             {changedObjectCount > 0 && <> · {changedObjectCount} 个对象</>}
           </span>
           {boardTitle && (

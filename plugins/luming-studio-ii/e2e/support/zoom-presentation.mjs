@@ -20,16 +20,18 @@ export function readZoomDetails(page, studio) {
       return { x, y, width, height };
     }
 
-    function caption(element, selector) {
+    function caption(element, selector, nested = ".studio-ui-text-object") {
       const node = element.querySelector(selector);
-      const label = node?.querySelector(".studio-ui-text-object") ?? node;
+      const label = node?.querySelector(nested) ?? node;
       if (!label?.textContent.trim() || getComputedStyle(label).visibility !== "visible") {
         return null;
       }
 
+      const transform = getComputedStyle(node).transform;
+      const scale = transform === "none" ? 1 : new DOMMatrixReadOnly(transform).a;
       return {
         text: label.textContent.trim(),
-        screenFont: Number.parseFloat(getComputedStyle(label).fontSize) * zoom,
+        screenFont: Number.parseFloat(getComputedStyle(label).fontSize) * zoom * scale,
         box: bounds(node),
       };
     }
@@ -44,6 +46,12 @@ export function readZoomDetails(page, studio) {
         object: bounds(element),
         label: caption(element, ".studio-element-text,.studio-ui-canvas-object-label"),
         section: caption(element, ".studio-section-title,[data-canvas-section-title]"),
+        htmlCaption: caption(
+          element,
+          legacy ? ".studio-html-caption" : ".studio-ui-canvas-embedded-title:has(strong)",
+          "strong",
+        ),
+        hoverTitle: element.getAttribute("title"),
         document: bounds(element.querySelector("[aria-label^='文档正文']")),
         todo: bounds(element.querySelector("progress,[role='progressbar']")),
         html: bounds(html),

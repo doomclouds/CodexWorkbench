@@ -22,7 +22,7 @@ export type SuggestionChangeGuard = (
 
 export class BoardSuggestionError extends Error {
   constructor(
-    readonly status: 400 | 403 | 404 | 409,
+    readonly status: 400 | 403 | 404 | 409 | 422,
     message: string,
   ) {
     super(message);
@@ -274,6 +274,12 @@ export function planDraftOptions(
     const decision = planSuggestionOption(reader, board, option, sourceIds, decodeEdit);
     if (decision.kind === 'rejected' && decision.reason === 'forbidden') {
       throw new BoardSuggestionError(403, '建议操作超出已附加的白板对象。');
+    }
+    if (decision.kind === 'rejected' && decision.reason === 'inlineHtmlResource') {
+      throw new BoardSuggestionError(
+        422,
+        'HTML 含有新增的 data: 资源。请改用系统回退字体或已导入的白板素材。',
+      );
     }
     if (decision.kind !== 'changes') {
       throw new BoardSuggestionError(409, '建议方案的目标、基线或权限已变化。');

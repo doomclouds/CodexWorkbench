@@ -56,6 +56,22 @@ describe('overview HTML image', () => {
     expect(markup).toContain('<main>x</main><style>p{color:blue}</style></body>');
   });
 
+  it('renders a standalone architecture diagram with viewport metadata, theme variables and inline SVG', () => {
+    const source = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>:root { --paper:#edf4ff } body{background:var(--paper)}</style></head><body>
+<svg viewBox="0 0 80 60" aria-label="架构图"><defs><marker id="arrow" refX="6" refY="5">
+<polygon points="0 0,6 5,0 10" fill="#369" /></marker></defs>
+<path d="M0 5H60" marker-end="url(#arrow)" /></svg></body></html>`;
+    const image = overview(source);
+    expect(image).toMatch(/^data:image\/svg\+xml;charset=utf-8,/u);
+    const markup = decodeURIComponent(image!.split(',')[1]!);
+    expect(markup).toContain('lang="zh-CN"');
+    expect(markup).toContain('html { --paper:#edf4ff }');
+    expect(markup).toContain('marker-end="url(#arrow)"');
+    expect(markup).not.toContain('<meta');
+  });
+
   it.each([
     '<script>init()</script>',
     '<button>Interact</button>',
@@ -65,7 +81,9 @@ describe('overview HTML image', () => {
     '<style>body{background:url(https://example.invalid/image)}</style>',
     '<style>@import "theme.css";</style>',
     '<body style="background:#369"><strong>x</strong></body>',
-    '<svg><circle r="4"></circle></svg>',
+    '<svg><foreignObject><div>Nested HTML</div></foreignObject></svg>',
+    '<svg><rect fill="url(https://example.invalid/paint)" width="2" height="2" /></svg>',
+    '<svg><animate attributeName="r" dur="2s" /></svg>',
     '<style>strong{font-size:5vw}</style>',
   ])('keeps the isolated native document for %s', (source) => {
     expect(overview(source)).toBeUndefined();

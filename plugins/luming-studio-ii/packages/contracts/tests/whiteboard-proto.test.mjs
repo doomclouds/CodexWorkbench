@@ -124,6 +124,7 @@ test('declares the request, response and streaming direction of every Studio RPC
       'BoardCatalogService',
       [
         'ListBoards',
+        'WaitForBoardCatalogChange',
         'ListTrashedBoards',
         'GetBoardThumbnail',
         'CreateBoard',

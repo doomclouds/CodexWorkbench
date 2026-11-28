@@ -92,6 +92,7 @@ export {
   validNewObjectId,
 } from './geometry-edits.js';
 export { initialGeometryPayload, supportsGeometryCreation } from './geometry-edit-payloads.js';
+export { hasInlineEmbedResource } from './embed-resource-validation.js';
 export { adjacentShapeConnector, type BoardCreationAttachment } from './geometry-attachments.js';
 export type {
   ContentOperation,

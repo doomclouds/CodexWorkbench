@@ -140,3 +140,19 @@ test("[TOPBAR-HIST-03] 预览顶栏和历史快照导出", async ({ page, studio
     liveVersionPreserved: true,
   });
 });
+
+test("[TOPBAR-HIST-04] 新白板的创建记录与当前版本", async ({ page, studio }, testInfo) => {
+  await page.goto(studio.url);
+  const creation = page.getByRole("region", { name: "新建作品", exact: true });
+  await button(creation, "新建白板").click();
+  await button(page, "版本历史").click();
+
+  const baseline = record(page, 0);
+  await expect(baseline).toContainText("创建作品");
+  await expect(baseline).toContainText("当前版本");
+  await baseline.click();
+  await expect(page.getByText("此时段没有保留的内容变化。", { exact: true })).toBeVisible();
+  await expect(button(page, "预览版本")).toHaveCount(0);
+  await expect(button(page, "恢复为新版本")).toHaveCount(0);
+  await screenshot(page, testInfo, "board-creation-history");
+});

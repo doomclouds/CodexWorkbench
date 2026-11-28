@@ -16,7 +16,6 @@ const layoutKey = 'luming-studio-ii:library-layout';
 const themeKey = 'luming-studio-ii:theme';
 const pinnedOnlyKey = 'luming-studio-ii:library-pinned-only';
 const darkColorScheme = '(prefers-color-scheme: dark)';
-const guestAccessInterval = 3_000;
 const guestRequestHeaders = { 'x-luming-guest': '1', 'content-type': protobufContentType };
 
 export { createBoardDraftStorage } from './board-drafts.js';
@@ -61,16 +60,6 @@ export function replaceStudioGuestLocation(boardId?: string): void {
     url.searchParams.set(boardParameter, boardId);
   }
   window.history.replaceState({ studioGuest: true }, '', url);
-}
-
-export function subscribeGuestAccessRefresh(listener: () => void): () => void {
-  const timer = window.setInterval(listener, guestAccessInterval);
-  window.addEventListener('focus', listener);
-
-  return () => {
-    window.clearInterval(timer);
-    window.removeEventListener('focus', listener);
-  };
 }
 
 export function readStudioLocation(): StudioLocation {

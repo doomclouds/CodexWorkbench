@@ -25,13 +25,12 @@ interface GuestShellProps {
   readonly entry: StudioGuestEntry;
   readonly service: GuestShellService;
   readonly isAccessDenied: (error: unknown) => boolean;
-  readonly subscribeRefresh: (read: () => void) => () => void;
   readonly onJoin: (boardId: string) => void;
   readonly onExit: () => void;
   readonly renderBoard: (
     boardId: string,
     access: GuestBoardAccess,
-    recheckAccess: () => void,
+    events: { readonly onAccessLost: () => void; readonly onConnected: () => void },
   ) => ReactNode;
 }
 
@@ -50,17 +49,12 @@ type GuestAccessState =
 
 type GuestBoardProps = Pick<
   GuestShellProps,
-  'service' | 'isAccessDenied' | 'subscribeRefresh' | 'onExit' | 'renderBoard'
+  'service' | 'isAccessDenied' | 'onExit' | 'renderBoard'
 > & { readonly boardId: string };
 
-function GuestBoard({
-  boardId,
-  service,
-  isAccessDenied,
-  subscribeRefresh,
-  onExit,
-  renderBoard,
-}: GuestBoardProps) {
+const accessRetryDelayMs = 250;
+
+function GuestBoard({ boardId, service, isAccessDenied, onExit, renderBoard }: GuestBoardProps) {
   const [access, setAccess] = useState<GuestAccessState>({ kind: 'checking' });
   const [accessCheck, setAccessCheck] = useState(0);
   const [displayedBoard, setDisplayedBoard] = useState(false);
@@ -68,11 +62,8 @@ function GuestBoard({
   useEffect(() => {
     const controller = new AbortController();
     const { signal } = controller;
-    let reading = false;
-    let lost = false;
-
+    let retry: ReturnType<typeof setTimeout> | undefined;
     function rejectAccess() {
-      lost = true;
       setAccess({ kind: 'lost' });
     }
 
@@ -90,7 +81,7 @@ function GuestBoard({
       setAccess({ kind: 'ready', access: next });
     }
 
-    function onAccessFailure(error: unknown) {
+    function onAccessFailure(error: unknown, mayRetry: boolean) {
       if (signal.aborted) {
         return;
       }
@@ -100,33 +91,27 @@ function GuestBoard({
         return;
       }
 
+      if (mayRetry) {
+        retry = setTimeout(() => checkAccess(false), accessRetryDelayMs);
+        return;
+      }
+
       const message = error instanceof Error ? error.message : '无法验证白板访问权限。';
       setAccess((current) => (current.kind === 'ready' ? current : { kind: 'failed', message }));
     }
 
-    function checkAccess() {
-      if (reading || lost || signal.aborted) {
-        return;
-      }
-
-      reading = true;
-      service
-        .getBoardSharing(boardId, signal)
-        .then(acceptAccess)
-        .finally(() => {
-          reading = false;
-        })
-        .catch(onAccessFailure);
+    function checkAccess(mayRetry: boolean) {
+      service.getBoardSharing(boardId, signal).then(acceptAccess, (error: unknown) => {
+        onAccessFailure(error, mayRetry);
+      });
     }
 
-    checkAccess();
-    const unsubscribe = subscribeRefresh(checkAccess);
-
+    checkAccess(true);
     return () => {
       controller.abort();
-      unsubscribe();
+      clearTimeout(retry);
     };
-  }, [boardId, service, isAccessDenied, subscribeRefresh, accessCheck]);
+  }, [boardId, service, isAccessDenied, accessCheck]);
 
   function handleRecheckFromRoom() {
     setAccess({ kind: 'checking' });
@@ -134,7 +119,10 @@ function GuestBoard({
   }
 
   if (access.kind === 'ready') {
-    return renderBoard(boardId, access.access, handleRecheckFromRoom);
+    return renderBoard(boardId, access.access, {
+      onAccessLost: handleRecheckFromRoom,
+      onConnected: () => setAccessCheck((current) => current + 1),
+    });
   }
   if (access.kind === 'lost') {
     return <GuestAccessLostSurface activeSession={displayedBoard} onExit={onExit} />;

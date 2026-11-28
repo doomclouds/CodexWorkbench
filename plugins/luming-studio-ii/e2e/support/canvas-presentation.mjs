@@ -158,6 +158,7 @@ export async function readCanvas(page, studio) {
       objects: [...frames].map(renderedObject),
       selection: box(marker),
       toolbar: box(toolbar),
+      toolbarHorizontalOverflow: toolbar ? toolbar.scrollWidth - toolbar.clientWidth : null,
       guides: root.querySelectorAll(".studio-snap-guide,[data-canvas-guide]").length,
       handles: [...root.querySelectorAll(handleSelector)]
         .filter((element) => element.hasAttribute("aria-label"))

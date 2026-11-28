@@ -613,7 +613,7 @@ async function catalogueWrite(
 ) {
   if (input.action === 'create') {
     return callModelRpc(
-      options,
+      { dispatch: options.dispatchCreateBoard ?? options.dispatch },
       routes.createBoard,
       { commandId, title: input.title ?? '' },
       signal,

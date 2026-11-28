@@ -179,3 +179,50 @@ test("[TOPBAR-OVERLAY-02] Agent 工作区出现后可跟随、停止并由房主
   await expect(presence).toHaveCount(0);
   await observe(testInfo, "agent-workspace", { followed: true, endedAfterReload: true });
 });
+
+test("[TOPBAR-OVERLAY-03] 窄屏整板概览可完整显示并操作工作区结束按钮", async ({
+  page,
+  studio,
+}, testInfo) => {
+  const title = "工作区窄屏定位验收";
+  const distant = { ...object, id: "right-workspace-target", x: 5800 };
+  const board = await studio.seedBasicBoard({ title, objects: [object, distant] });
+
+  await page.setViewportSize({ width: 360, height: 640 });
+  await page.goto(board.url);
+  const zoom = button(page, "缩放菜单");
+  if (studio.edition === "initial") {
+    await expect(page.getByRole("textbox", { name: "白板名称" })).toHaveValue(title);
+    await expect(zoom).toHaveText("5%");
+    await expect(page.getByRole("button", { name: /^结束此工作区/u })).toHaveCount(0);
+    await observe(testInfo, "agent-overview-release", { verified: "初代未启动 Agent 工作区" });
+
+    return;
+  }
+
+  const canvas = page.getByRole("region", { name: title, exact: true });
+  await expect(canvas).toBeVisible();
+  await zoom.click();
+  await page.getByRole("menuitem", { name: "适应白板", exact: true }).click();
+  await expect(zoom).toHaveText("5%");
+
+  const label = "逐项复核架构迁移工作区内的接口契约交接顺序权限判断回归验收和数据一致性";
+  await seedTopbarAgentWorkspace(studio, board, distant.id, label);
+  const status = page.getByRole("status").filter({ hasText: label });
+  const release = button(page, "结束此工作区：" + label);
+  await expect(status).toBeVisible();
+  await expect(release).toBeEnabled();
+  await screenshot(page, testInfo, "topbar-agent-overview-release-narrow");
+  const [statusBox, releaseBox, canvasBox] = await Promise.all(
+    [status, release, canvas].map((locator) => locator.boundingBox()),
+  );
+  expect(statusBox.x + statusBox.width).toBeLessThan(releaseBox.x);
+  const right = releaseBox.x + releaseBox.width;
+  const canvasRight = canvasBox.x + canvasBox.width;
+  expect(right).toBeLessThanOrEqual(canvasRight);
+
+  await release.click();
+  await expect(release).toHaveCount(0);
+  await expect(canvas).toBeFocused();
+  await observe(testInfo, "agent-overview-release", { right, canvasRight });
+});

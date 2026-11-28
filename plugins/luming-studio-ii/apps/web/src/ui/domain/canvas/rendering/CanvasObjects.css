@@ -9,6 +9,10 @@
   transform-origin: center;
 }
 
+.studio-ui-canvas-object[hidden] {
+  display: none;
+}
+
 .studio-canvas[data-tool='select']
   > .studio-canvas__world
   > [data-canvas-object]:not(

@@ -396,6 +396,48 @@ test("[COLLAB-PRESENCE-04] 暂离时清理临时画面，重连后恢复视角�
   }
 });
 
+test("[COLLAB-PRESENCE-08] 无跟随时重连只更新顶栏状态，保留窄屏画布位置", async ({
+  page,
+  studio,
+}, testInfo) => {
+  const title = "顶栏重连布局验收";
+  const board = await studio.seedBasicBoard({ title, objects: [] });
+  await page.setViewportSize({ width: 360, height: 640 });
+  await page.goto(board.url);
+
+  const saved = page.getByRole("status", { name: "已保存", exact: true });
+  await expect(saved).toBeVisible();
+  if (studio.edition === "initial") {
+    await observe(testInfo, "initial-chrome-saved", { status: await saved.textContent() });
+
+    return;
+  }
+
+  const canvas = page.getByRole("region", { name: title, exact: true });
+  const reconnecting = page.getByRole("status", { name: "正在重新连接白板", exact: true });
+  const before = await canvas.boundingBox();
+  const statusBefore = await saved.boundingBox();
+
+  await setRoomConnectionOffline(page, studio, true);
+  try {
+    await page.mouse.move(20, 180);
+    await expect(reconnecting).toBeVisible();
+    expect(await canvas.boundingBox()).toEqual(before);
+    expect(await reconnecting.boundingBox()).toEqual(statusBefore);
+    await screenshot(page, testInfo, "chrome-reconnecting");
+  } finally {
+    await setRoomConnectionOffline(page, studio, false);
+  }
+
+  await expect(saved).toBeVisible();
+  expect(await canvas.boundingBox()).toEqual(before);
+  expect(await saved.boundingBox()).toEqual(statusBefore);
+  await observe(testInfo, "reconnect-keeps-canvas-and-slot", {
+    canvas: before,
+    status: statusBefore,
+  });
+});
+
 test("[COLLAB-PRESENCE-06] 分享面板保持打开时更新成员在线和最近访问状态", async ({
   page,
   browser,

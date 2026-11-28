@@ -45,7 +45,7 @@ const inputSchema = z.strictObject({
   scope: scope.optional().describe('begin 必填。对象 ID 与世界坐标矩形二选一'),
   label: begin.label.describe('begin 的任务名称'),
   previousGeneration: begin.previousGeneration.describe('同一任务重开时携带上一代'),
-  generation: identifier.optional().describe('update 和 end 必须携带当前工作区代次'),
+  generation: identifier.optional().describe('仅 update 和 end 使用，且必须携带当前工作区代次'),
   phase: phase.optional().describe('update 必填。准备、处理或验证阶段'),
   activeObjectIds: objectIds.optional().describe('update 必填。当前工作区内正在处理的对象，可为空'),
 });
@@ -260,7 +260,7 @@ export function registerAgentActivity(server: McpServer, options: ActivityOption
     {
       title: '登记 Agent 白板工作区',
       description:
-        '登记、更新、结束或查询当前 Agent 在指定白板的工作范围。begin 需要对象 ID 或世界坐标矩形；update 和 end 需要当前代次。status 查询原任务状态。登记仅用于协作跟随。',
+        '登记、更新、结束或查询当前 Agent 在指定白板的工作范围。begin 需要对象 ID 或世界坐标矩形。update 和 end 需要当前代次。status 只传 action、boardId 和 taskId。登记仅用于协作跟随。',
       inputSchema,
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
       _meta: { ui: { visibility: ['model'] } },

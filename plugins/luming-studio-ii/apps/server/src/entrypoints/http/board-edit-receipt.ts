@@ -22,6 +22,7 @@ const rejection: Readonly<Record<BoardEditRejection, BoardEditRejectionReason>> 
   tooLarge: BoardEditRejectionReason.TOO_LARGE,
   invalidImage: BoardEditRejectionReason.INVALID_IMAGE,
   invalidVideo: BoardEditRejectionReason.INVALID_VIDEO,
+  inlineHtmlResource: BoardEditRejectionReason.INLINE_HTML_RESOURCE,
 };
 
 function encodePayload(payload: PayloadRecord) {

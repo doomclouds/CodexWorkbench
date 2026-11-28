@@ -46,7 +46,6 @@ import {
   renderBrowserVectorExport,
   replaceStudioGuestLocation,
   resolveArchiveAssetUrl,
-  subscribeGuestAccessRefresh,
   subscribeStudioLocation,
   subscribeTheme,
   writeStudioLocation,
@@ -68,7 +67,7 @@ const historyService = createBoardHistoryService(
 );
 const feedbackService = createBoardFeedbackService(postProtobuf);
 const suggestions = createSuggestionService(postProtobuf, editService, resolveArchiveAssetUrl);
-const catalog = createBoardCatalogService(postProtobuf);
+const catalog = createBoardCatalogService(postProtobuf, observeBoardRoomVisibility);
 const catalogManagement = createCatalogManagementService(postProtobuf);
 const archiveImport = createArchiveImportService(postArchive, postProtobuf);
 const sharingService = createBoardSharingService(postProtobuf);
@@ -107,7 +106,6 @@ const guest = {
   readEntry: readStudioGuestEntry,
   replaceEntry: replaceStudioGuestLocation,
   isAccessDenied: isGuestAccessDenied,
-  subscribeRefresh: subscribeGuestAccessRefresh,
 };
 
 createRoot(container).render(

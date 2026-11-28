@@ -49,7 +49,10 @@ import {
   createSuggestionQueries,
 } from './board-suggestions.js';
 
-export { recordBoardLifecycleVersion } from './board-history-storage.js';
+export {
+  recordAgentBoardCreationVersion,
+  recordBoardLifecycleVersion,
+} from './board-history-storage.js';
 
 const sceneFields = `
   SELECT o.object_id, o.kind, o.label, o.x, o.y, o.width, o.height, o.rotation,
@@ -441,7 +444,7 @@ function createPlanningReader(
   };
 }
 
-function createWriter(connection: SqliteConnection): BoardEditWriter {
+function createWriter(connection: SqliteConnection, markChange: () => void): BoardEditWriter {
   const reader = createPlanningReader(connection);
 
   return {
@@ -453,19 +456,52 @@ function createWriter(connection: SqliteConnection): BoardEditWriter {
       if (before && commit) {
         publishBoardVersion(connection, before, revision, commit);
       }
+      markChange();
 
       return revision;
     },
     saveReceipt: (actorId, stored) => saveReceipt(connection, actorId, stored),
-    applyBoardChanges: (board, changes, commit) =>
-      applyBoardChanges(connection, board, changes, commit, (ids) =>
+    applyBoardChanges(board, changes, commit) {
+      const outcome = applyBoardChanges(connection, board, changes, commit, (ids) =>
         reader.getObjects(board.boardId, ids),
-      ),
+      );
+
+      if (outcome.boardRevision > board.revision) {
+        markChange();
+      }
+
+      return outcome;
+    },
     saveEditReceipt: (actorId, stored) => saveEditReceipt(connection, actorId, stored),
   };
 }
 
-export function createWhiteboardRepository(database: SqliteDatabase): BoardEditRepository {
+function writeBoardChanges<T>(
+  database: SqliteDatabase,
+  onChanged: (() => void) | undefined,
+  work: (writer: BoardEditWriter, connection: SqliteConnection) => T,
+): T {
+  let changed = false;
+  const result = database.write((connection) =>
+    work(
+      createWriter(connection, () => {
+        changed = true;
+      }),
+      connection,
+    ),
+  );
+
+  if (changed) {
+    onChanged?.();
+  }
+
+  return result;
+}
+
+export function createWhiteboardRepository(
+  database: SqliteDatabase,
+  onChanged?: () => void,
+): BoardEditRepository {
   database.write((connection) => {
     connection.exec(whiteboardSchema);
     connection.exec(boardEditSchema);
@@ -474,12 +510,13 @@ export function createWhiteboardRepository(database: SqliteDatabase): BoardEditR
 
   return {
     read: (work) => database.read((connection) => work(createReader(connection))),
-    write: (work) => database.write((connection) => work(createWriter(connection))),
+    write: (work) => writeBoardChanges(database, onChanged, work),
   };
 }
 
 export function createBoardSuggestionRepository(
   database: SqliteDatabase,
+  onChanged?: () => void,
 ): BoardSuggestionRepository {
   database.write((connection) => connection.exec(boardSuggestionsSchema));
 
@@ -489,9 +526,9 @@ export function createBoardSuggestionRepository(
         work({ ...createPlanningReader(connection), ...createSuggestionQueries(connection) }),
       ),
     write: (work) =>
-      database.write((connection) =>
+      writeBoardChanges(database, onChanged, (writer, connection) =>
         work({
-          ...createWriter(connection),
+          ...writer,
           ...createSuggestionQueries(connection),
           ...createSuggestionMutations(connection),
         }),

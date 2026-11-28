@@ -2,8 +2,7 @@ import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import type { CanvasPresentation, CanvasViewport } from '../../ui/domain/canvas/index.js';
 
 interface WatchingBoard {
-  readonly scope: CanvasPresentation;
-  readonly viewport: CanvasViewport;
+  readonly scope: CanvasPresentation & { readonly returnViewport: CanvasViewport };
   readonly trigger?: HTMLButtonElement;
 }
 
@@ -17,14 +16,18 @@ interface PresentationOptions {
   readonly findViewingTrigger: () => HTMLButtonElement | undefined;
 }
 
-function presentationScope(objects: PresentationOptions['objects'], objectIds: readonly string[]) {
+function presentationScope(
+  objects: PresentationOptions['objects'],
+  objectIds: readonly string[],
+  returnViewport: CanvasViewport,
+) {
   const [first] = objectIds;
   const kind = first ? objects.get(first)?.kind : undefined;
   const expandedObjectId =
     objectIds.length === 1 && (kind === 'document' || kind === 'todo') ? first : undefined;
   const focusObjectId = kind === 'document' ? expandedObjectId : undefined;
 
-  return { objectIds, focusObjectId, expandedObjectId };
+  return { objectIds, focusObjectId, expandedObjectId, returnViewport };
 }
 
 export function useBoardPresentation({
@@ -39,8 +42,11 @@ export function useBoardPresentation({
   const [watching, setWatching] = useState<WatchingBoard | undefined>(() =>
     initialFocus && objects.has(initialFocus.id)
       ? {
-          scope: presentationScope(objects, [initialFocus.id]),
-          viewport: initialFocus.returnViewport ?? viewport,
+          scope: presentationScope(
+            objects,
+            [initialFocus.id],
+            initialFocus.returnViewport ?? viewport,
+          ),
         }
       : undefined,
   );
@@ -63,14 +69,12 @@ export function useBoardPresentation({
       return;
     }
 
-    const scope = presentationScope(objects, objectIds);
-    setWatching({ scope, viewport, trigger });
-    afterLayout(() => {
-      if (!scope.focusObjectId) {
-        onFit();
-        focusCanvas();
-      }
-    });
+    const scope = presentationScope(objects, objectIds, viewport);
+    setWatching({ scope, trigger });
+    if (!scope.focusObjectId) {
+      onFit();
+      afterLayout(focusCanvas);
+    }
   }
 
   function exit() {
@@ -79,7 +83,7 @@ export function useBoardPresentation({
     }
 
     setWatching(undefined);
-    onRestore(watching.viewport);
+    onRestore(watching.scope.returnViewport);
     afterLayout(() => {
       const origin = watching.trigger;
       const trigger = origin?.isConnected ? origin : origin && findViewingTrigger();
@@ -115,5 +119,5 @@ export function useBoardPresentation({
   const scope = watching?.scope;
   const focusedObjectId = scope?.objectIds.length === 1 ? scope.objectIds[0] : undefined;
 
-  return { scope, focusedObjectId, returnViewport: watching?.viewport, enter, exit };
+  return { scope, focusedObjectId, returnViewport: scope?.returnViewport, enter, exit };
 }

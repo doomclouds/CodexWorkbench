@@ -240,6 +240,16 @@ type RecordLifecycleVersion = (
   },
 ) => void;
 
+type RecordCreationVersion = (
+  connection: SqliteConnection,
+  creation: {
+    readonly boardId: string;
+    readonly title: string;
+    readonly actorId: string;
+    readonly savedAtMillis: number;
+  },
+) => void;
+
 function changeBoard(
   connection: SqliteConnection,
   change: CatalogManagedBoard,
@@ -285,7 +295,7 @@ function saveBoard(
   connection: SqliteConnection,
   actorId: string,
   receipt: CatalogCreatedReceipt,
-): void {
+): number {
   const { commandId, board } = receipt;
   const { boardId, title, updatedAtMillis, pinned, entryVersion } = board;
   if (updatedAtMillis === undefined) {
@@ -313,6 +323,8 @@ function saveBoard(
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `)
     .run(actorId, commandId, boardId, title, updatedAtMillis, pinValue, entryVersion);
+
+  return Number(updatedAtMillis);
 }
 
 function saveDuplicatedBoard(
@@ -341,6 +353,8 @@ function saveDuplicatedBoard(
 export function createCatalogRepository(
   database: SqliteDatabase,
   recordLifecycleVersion: RecordLifecycleVersion,
+  recordCreationVersion: RecordCreationVersion,
+  onChanged?: () => void,
 ): CatalogRepository {
   database.write((connection) => connection.exec(catalogSchema));
 
@@ -356,20 +370,49 @@ export function createCatalogRepository(
       database.read((connection) => readWorkbenchPreferences(connection, actorId)),
     updatePreferences: (actorId, changes) =>
       database.write((connection) => updateWorkbenchPreferences(connection, actorId, changes)),
-    write: (work) =>
-      database.write((connection) =>
+    write: (work) => {
+      let changed = false;
+      const result = database.write((connection) =>
         work({
           getReceipt: (actorId, commandId) => getReceipt(connection, actorId, commandId),
-          saveBoard: (actorId, receipt) => saveBoard(connection, actorId, receipt),
-          duplicateBoard: (actorId, sourceBoardId, receipt) =>
-            saveDuplicatedBoard(connection, actorId, sourceBoardId, receipt),
+          saveBoard: (actorId, receipt, creationAuthorId) => {
+            const savedAtMillis = saveBoard(connection, actorId, receipt);
+            if (creationAuthorId) {
+              const { boardId, title } = receipt.board;
+              recordCreationVersion(connection, {
+                boardId,
+                title,
+                actorId: creationAuthorId,
+                savedAtMillis,
+              });
+            }
+            changed = true;
+          },
+          duplicateBoard: (actorId, sourceBoardId, receipt) => {
+            const rejected = saveDuplicatedBoard(connection, actorId, sourceBoardId, receipt);
+            changed ||= rejected === undefined;
+
+            return rejected;
+          },
           getManagedBoard: (actorId, boardId) => getManagedBoard(connection, actorId, boardId),
-          changeBoard: (board, lifecycle) =>
-            changeBoard(connection, board, recordLifecycleVersion, lifecycle),
-          deleteBoard: (boardId) => deleteBoard(connection, boardId),
+          changeBoard: (board, lifecycle) => {
+            changeBoard(connection, board, recordLifecycleVersion, lifecycle);
+            changed = true;
+          },
+          deleteBoard: (boardId) => {
+            deleteBoard(connection, boardId);
+            changed = true;
+          },
           saveManagementReceipt: (actorId, signature, receipt) =>
             saveManagementReceipt(connection, actorId, signature, receipt),
         }),
-      ),
+      );
+
+      if (changed) {
+        onChanged?.();
+      }
+
+      return result;
+    },
   };
 }

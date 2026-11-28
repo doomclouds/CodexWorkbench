@@ -162,7 +162,7 @@ class RoomEventStream {
       cursor,
       {
         deliver: (event) => this.run(() => this.enqueue(event)),
-        recheck: () => this.run(() => this.checkAccess()),
+        recheck: () => this.run(() => this.refreshGuestAccess()),
         close: () => this.fail(new ConnectError('Room stream closed', Code.Unavailable)),
       },
       'stream',
@@ -186,11 +186,20 @@ class RoomEventStream {
     authorizeBoardRead(actor, boardId);
     const access = application.access(boardId, key.actorId);
     const baseline = this.subscription?.access;
-    if (!access || access.role !== baseline?.role || access.canEdit !== baseline.canEdit) {
+    if (!access) {
       throw new RoomAccessError('Room stream authorization has changed');
+    }
+    if (access.role !== baseline?.role || access.canEdit !== baseline.canEdit) {
+      throw new ConnectError('Room role changed', Code.Unavailable);
     }
 
     return access;
+  }
+
+  private refreshGuestAccess() {
+    if (this.checkAccess().role !== 'owner') {
+      throw new ConnectError('Room sharing changed', Code.Unavailable);
+    }
   }
 
   private tick() {

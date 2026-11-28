@@ -64,6 +64,11 @@ interface StudioMcpOptions extends AppBridgeOptions, ModelToolOptions {
   readonly dispatchAgentWrite?: (body: Uint8Array, signal: AbortSignal) => Promise<Response>;
   readonly dispatchAgentReceipt?: (body: Uint8Array, signal: AbortSignal) => Promise<Response>;
   readonly dispatchAgentChoice?: (body: Uint8Array, signal: AbortSignal) => Promise<Response>;
+  readonly dispatchAgentCreateBoard?: (
+    agentId: string,
+    request: LocalRequest,
+    signal: AbortSignal,
+  ) => Promise<Response>;
   readonly dispatchAgentFeedback?: (
     agentId: string,
     request: LocalRequest,
@@ -138,6 +143,7 @@ export function createStudioMcpServer(options: StudioMcpOptions): McpServer {
     dispatchAgentReceipt,
     dispatchAgentChoice,
     dispatchAgentFeedback,
+    dispatchAgentCreateBoard,
     onError,
   } = options;
   const usesAgentIdentity = Boolean(
@@ -145,7 +151,8 @@ export function createStudioMcpServer(options: StudioMcpOptions): McpServer {
     dispatchAgentWrite ||
     dispatchAgentReceipt ||
     dispatchAgentChoice ||
-    dispatchAgentFeedback,
+    dispatchAgentFeedback ||
+    dispatchAgentCreateBoard,
   );
   const agentId = usesAgentIdentity ? 'agent-' + allocateId() : undefined;
   const agentActivity =
@@ -232,7 +239,12 @@ export function createStudioMcpServer(options: StudioMcpOptions): McpServer {
   const lookupReceipt =
     agentId && dispatchAgentReceipt && createAgentReceiptLookup(agentId, dispatchAgentReceipt);
   registerArtifactRead(server, readOptions, lookupReceipt || undefined);
-  registerArtifactTools(server, { ...options, agentId });
+  const dispatchCreateBoard =
+    agentId && dispatchAgentCreateBoard
+      ? (request: LocalRequest, signal: AbortSignal) =>
+          dispatchAgentCreateBoard(agentId, request, signal)
+      : undefined;
+  registerArtifactTools(server, { ...options, agentId, dispatchCreateBoard });
   if (dispatchAgentWrite && agentId) {
     registerArtifactApply(server, { agentId, dispatch: dispatchAgentWrite, onError });
   }

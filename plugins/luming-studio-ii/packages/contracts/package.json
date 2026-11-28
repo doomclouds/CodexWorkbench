@@ -1,6 +1,6 @@
 {
   "name": "@codexworkbench/luming-studio-ii-contracts",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
   "description": "Luming Studio II cross-language protocol contracts",

@@ -650,6 +650,71 @@ test('restores a permitted board, current selection, camera and object focus aft
   });
 });
 
+test('keeps the mounted board and viewport when a returning tab receives an empty opening replay', async () => {
+  await withBridge(async (bridge, host) => {
+    const fixture = createControlFixture();
+    const sceneReads: string[] = [];
+    const trackScene: WhiteboardService = {
+      ...service,
+      getScene(id) {
+        sceneReads.push(id);
+        return service.getScene(id);
+      },
+    };
+    const views: McpViewContext[] = [];
+    try {
+      await act(async () =>
+        fixture.render(
+          <StudioApp
+            catalog={catalog}
+            service={trackScene}
+            navigation={bridge.navigation}
+            preferences={{ ...bridge.preferences.read(), ...bridge.preferences }}
+            createCommandId={() => 'command'}
+            onViewContext={(view) => {
+              if (view) {
+                views.push(view);
+              }
+            }}
+          />,
+        ),
+      );
+      const canvas = fixture.host.querySelector('[data-canvas-root]');
+      const expectSameView = () => {
+        expect(bridge.navigation.read()).toEqual({ kind: 'whiteboard', boardId });
+        expect(fixture.host.querySelector('[data-canvas-root]')).toBe(canvas);
+        expect(fixture.host.textContent).not.toContain('正在打开白板');
+        expect(sceneReads).toEqual([boardId]);
+        expect(views.at(-1)?.viewport).toEqual(camera);
+      };
+      expect(canvas).not.toBeNull();
+      await act(async () => {
+        host.notify('ui/notifications/host-context-changed', {
+          toolInfo: toolContext('resumed-call'),
+        });
+        host.notify('ui/notifications/tool-input', { arguments: {} });
+      });
+      expectSameView();
+
+      await act(async () =>
+        host.notify('ui/notifications/tool-result', {
+          content: [],
+          structuredContent: { ok: true, data: {} },
+        }),
+      );
+      expectSameView();
+
+      await act(async () =>
+        host.notify('ui/notifications/tool-input', { arguments: { boardId: 'new-board' } }),
+      );
+      expect(bridge.navigation.read()).toEqual({ kind: 'whiteboard', boardId: 'new-board' });
+      expect(sceneReads).toEqual([boardId, 'new-board']);
+    } finally {
+      fixture.dispose();
+    }
+  });
+});
+
 test('publishes the current canvas through its panel lease and clears it on returning to workbench', async () => {
   await withBridge(async (bridge, host) => {
     const original = { boardId, selectedIds: [cardId], viewport: camera, focusedObjectId: cardId };

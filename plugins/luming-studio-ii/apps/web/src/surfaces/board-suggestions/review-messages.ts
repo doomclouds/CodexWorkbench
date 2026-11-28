@@ -13,6 +13,7 @@ const rejectionMessages: Readonly<Record<Rejection, string>> = {
   tooLarge: '建议涉及的内容超过处理上限。',
   invalidImage: '建议依赖的图片已不可用。',
   invalidVideo: '建议依赖的视频已不可用。',
+  inlineHtmlResource: '此方案新增了 HTML 内联资源。请改用系统回退字体或已导入的白板素材。',
   unknown: '服务拒绝了此操作。',
 };
 

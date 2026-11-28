@@ -14,6 +14,7 @@ import {
 import {
   CatalogQueryError,
   type CatalogApplication,
+  type CatalogChangeEvents,
 } from '../../modules/catalog/application/index.js';
 import {
   FeedbackAccessError,
@@ -48,7 +49,8 @@ import {
   createArchiveReceiptRoute,
   createBoardAssetRoutes,
 } from './archive-routes.js';
-import { createCatalogRoutes } from './catalog-routes.js';
+import { catalogChangeWaitPath, serveCatalogChangeWait } from './catalog-change-wait.js';
+import { boardCreateRoutePath, createCatalogRoutes } from './catalog-routes.js';
 import { boardDocumentImageRoutePath, createDocumentImageRoute } from './document-image-route.js';
 import {
   boardImageRequestLimit,
@@ -102,6 +104,7 @@ interface BoardHttpFeatures {
 export interface WhiteboardHttpOptions {
   readonly application: WhiteboardApplication;
   readonly catalogApplication: CatalogApplication;
+  readonly catalogChanges?: CatalogChangeEvents;
   readonly archiveApplication: ArchiveImportApplication;
   readonly features?: BoardHttpFeatures;
   readonly sharing?: SharingRoutesOptions;
@@ -167,13 +170,12 @@ async function handleRequest(
     return;
   }
 
-  const { archiveApplication, features, resolveActor, agentSuggestionPath } = options;
+  const { archiveApplication, resolveActor, agentSuggestionPath } = options;
   const path = request.url ?? '';
-  const rooms = features?.rooms;
   const route = routes.unary.get(path);
   const rawRoute = archiveRoute(path, archiveApplication);
-  const waitForRoom = path === roomEventWaitPath && rooms;
-  if (!route && !rawRoute && !waitForRoom) {
+  const wait = eventWaitRoute(path, options);
+  if (!route && !rawRoute && !wait) {
     sendStatus(response, 404);
     return;
   }
@@ -197,6 +199,7 @@ async function handleRequest(
     agentBoardWritePath,
     agentBoardReceiptPath,
     agentSuggestionChoosePath,
+    boardCreateRoutePath,
   ].includes(path);
 
   const agentFeedback = isAgentFeedbackRequest(path, actor);
@@ -214,14 +217,29 @@ async function handleRequest(
     return;
   }
 
-  if (waitForRoom) {
-    await serveRoomEventWait(waitForRoom, request, response, actor, () => resolveActor(request));
+  if (wait) {
+    await wait(request, response, actor);
     return;
   }
 
   if (route) {
     const limit = requestLimits.get(path);
     sendProtobuf(response, await route(actor, await readBody(request, limit)));
+  }
+}
+
+function eventWaitRoute(
+  path: string,
+  { catalogChanges, features, resolveActor }: WhiteboardHttpOptions,
+) {
+  const rooms = features?.rooms;
+  if (path === roomEventWaitPath && rooms) {
+    return (request: IncomingMessage, response: ServerResponse, actor: HttpActor) =>
+      serveRoomEventWait(rooms, request, response, actor, () => resolveActor(request));
+  }
+  if (path === catalogChangeWaitPath && catalogChanges) {
+    return (request: IncomingMessage, response: ServerResponse, actor: HttpActor) =>
+      serveCatalogChangeWait(catalogChanges, request, response, actor);
   }
 }
 
@@ -347,7 +365,7 @@ export function createWhiteboardRequestHandler(
       ...createWhiteboardRoutes(application),
       ...createMcpPanelViewRoutes(application, Date.now),
       ...studioRoutes,
-      ...createCatalogRoutes(catalogApplication),
+      ...createCatalogRoutes(catalogApplication, options.catalogChanges),
       createArchiveReceiptRoute(archiveApplication),
       ...createBoardAssetRoutes(archiveApplication),
       ...(sharing ? createSharingRoutes(sharing) : []),

@@ -123,7 +123,9 @@ describe('fixed revision board export', () => {
   it('exports the exact source of a grouped imported diagram without collecting assets', () => {
     const diagram = object('diagram', { kind: 'diagram', label: '阶段 / 计划', groupId: 'group' });
     const neighbor = object('neighbor', { groupId: 'group' });
-    const html = `<!doctype html>\r\n<img src="${coverSource}"><p>原始图解</p>\r\n`;
+    const html =
+      `<!doctype html>\r\n<img src="${coverSource}"><p>原始图解</p>\r\n` +
+      `<img src="data:image/png;base64,${png}">\r\n`;
     const repository = new AssetRepository(
       [diagram, neighbor],
       [{ objectId: diagram.objectId, payloadVersion: 0n, bodyKind: 'embed', data: { html } }],

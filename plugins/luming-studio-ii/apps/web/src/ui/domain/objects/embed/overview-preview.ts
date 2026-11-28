@@ -7,6 +7,7 @@ const maxSource = 48_000;
 const maxDimension = 4_096;
 const maxCachedPreviews = 32;
 const cache = new Map<string, string | undefined>();
+const svgNamespace = 'http://www.w3.org/2000/svg';
 const allowedTags = new Set(
   'a abbr article aside b bdi bdo blockquote br caption cite code col colgroup dd del dfn div dl dt em figcaption figure footer h1 h2 h3 h4 h5 h6 header hgroup hr i img ins kbd li main mark nav ol p pre q rp rt ruby s samp section small span strong style sub sup table tbody td tfoot th thead time title tr u ul var wbr'.split(
     ' ',
@@ -17,28 +18,59 @@ const allowedAttributes = new Set(
     ' ',
   ),
 );
+const allowedSvgTags = new Set(
+  'circle clipPath defs desc ellipse g line linearGradient marker mask path pattern polygon polyline radialGradient rect stop style svg text title tspan'.split(
+    ' ',
+  ),
+);
+const allowedSvgAttributes = new Set(
+  'alignment-baseline class clip-path clip-rule clipPathUnits color cx cy d dominant-baseline dx dy fill fill-opacity fill-rule font-family font-size font-style font-weight fx fy gradientTransform gradientUnits height id marker-end marker-mid marker-start markerHeight markerUnits markerWidth mask maskContentUnits maskUnits offset opacity orient paint-order pathLength patternContentUnits patternTransform patternUnits points preserveAspectRatio r refX refY role rx ry stop-color stop-opacity stroke stroke-dasharray stroke-dashoffset stroke-linecap stroke-linejoin stroke-miterlimit stroke-opacity stroke-width style text-anchor textLength lengthAdjust transform vector-effect viewBox width x x1 x2 xmlns y y1 y2'.split(
+    ' ',
+  ),
+);
 const defaultStyle =
-  'html{color-scheme:light;background:#f5f5f5;color:#2d3142}body{margin:0;font-family:Arial,"Microsoft YaHei",sans-serif}*{box-sizing:border-box}';
+  'html{color-scheme:light;background:#f5f5f5;color:#2d3142}body{margin:0;font-family:Arial,"Microsoft YaHei",sans-serif}*{box-sizing:border-box}svg{max-width:100%}';
 const unsupportedCss =
-  /[@\\]|\b(?:url|image-set|element|paint|expression)\s*\(|:root|\banimation(?:-[a-z-]+)?\s*:|(?:\d|\.)\s*[dsl]?v(?:w|h|i|b|min|max)\b/iu;
+  /[@\\]|\b(?:url|image-set|element|paint|expression)\s*\(|\banimation(?:-[a-z-]+)?\s*:|(?:\d|\.)\s*[dsl]?v(?:w|h|i|b|min|max)\b/iu;
+const localPaint = /\burl\s*\(\s*(["']?)#[A-Za-z\d_.:-]+\1\s*\)/giu;
+const htmlRootSelector = /(^|\})(\s*):root(?=\s*\{)/giu;
 const inlineImage = /^data:image\/(?:png|jpeg|webp|avif|bmp);base64,[A-Za-z\d+/]+={0,2}$/u;
 const unstableDocument =
-  /<(?:html|body|head)[\s/]+[^>\s]|<(?:base|iframe|frame|frameset|object|embed|applet|portal|link|script|noscript|template|form|audio|video|source|picture|input|textarea|select|button)(?=[\s/>])/iu;
+  /<(?:base|iframe|frame|frameset|object|embed|applet|portal|link|script|noscript|template|form|audio|video|source|picture|input|textarea|select|button)(?=[\s/>])/iu;
+
+function supportedStyle(value: string) {
+  return !unsupportedCss.test(value.replace(localPaint, ''));
+}
 
 function supportedAttributes(element: Element) {
+  const svg = element.namespaceURI === svgNamespace;
+  const supported = svg ? allowedSvgAttributes : allowedAttributes;
   for (const { name, value } of element.attributes) {
-    if (name === 'src' && element.localName === 'img' && inlineImage.test(value)) {
+    const htmlImageSource = !svg && name === 'src' && element.localName === 'img';
+    if (htmlImageSource && inlineImage.test(value)) {
       continue;
     }
-    if (name === 'style' && unsupportedCss.test(value)) {
+    if ((svg || name === 'style') && !supportedStyle(value)) {
       return false;
     }
-    if (!allowedAttributes.has(name) && !name.startsWith('data-') && !name.startsWith('aria-')) {
+    if (!supported.has(name) && !name.startsWith('data-') && !name.startsWith('aria-')) {
       return false;
     }
   }
 
   return true;
+}
+
+function supportedMetadata(element: Element) {
+  if (element.hasAttribute('charset')) {
+    return element.attributes.length === 1;
+  }
+
+  return (
+    element.attributes.length === 2 &&
+    element.getAttribute('name')?.toLowerCase() === 'viewport' &&
+    element.hasAttribute('content')
+  );
 }
 
 function supportedTree(elements: NodeListOf<Element>) {
@@ -47,17 +79,19 @@ function supportedTree(elements: NodeListOf<Element>) {
   }
 
   for (const element of elements) {
-    if (element.localName === 'meta' && element.hasAttribute('charset')) {
-      if (element.attributes.length !== 1) {
+    if (element.localName === 'meta') {
+      if (!supportedMetadata(element)) {
         return false;
       }
 
       continue;
     }
-    if (element.localName === 'style' && unsupportedCss.test(element.textContent ?? '')) {
+    if (element.localName === 'style' && !supportedStyle(element.textContent ?? '')) {
       return false;
     }
-    if (!allowedTags.has(element.localName) || !supportedAttributes(element)) {
+
+    const tags = element.namespaceURI === svgNamespace ? allowedSvgTags : allowedTags;
+    if (!tags.has(element.localName) || !supportedAttributes(element)) {
       return false;
     }
   }
@@ -74,14 +108,21 @@ function parseStaticDocument(source: string) {
 
   const parsed = new DOMParser().parseFromString(source, 'text/html');
   const shell = [parsed.documentElement, parsed.head, parsed.body];
-  if (shell.some((element) => element.attributes.length > 0)) {
+  if (
+    shell.some((element) =>
+      [...element.attributes].some(({ name }) => name !== 'lang' && name !== 'dir'),
+    )
+  ) {
     return undefined;
   }
   if (!supportedTree(parsed.querySelectorAll('head *, body *'))) {
     return undefined;
   }
 
-  parsed.querySelectorAll('meta[charset]').forEach((element) => element.remove());
+  parsed.querySelectorAll('meta').forEach((element) => element.remove());
+  for (const style of parsed.querySelectorAll('style')) {
+    style.textContent = (style.textContent ?? '').replace(htmlRootSelector, '$1$2html');
+  }
   return parsed;
 }
 

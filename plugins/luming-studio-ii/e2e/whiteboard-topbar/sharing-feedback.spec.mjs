@@ -3,6 +3,7 @@ import {
   mediaDisplaySize,
   mediaPlaying,
   observe,
+  observeGuestAccessReads,
   readCanvas,
   screenshot,
   test,
@@ -78,7 +79,7 @@ async function closeShare(page) {
   await expect(page.getByRole("heading", { name: "邀请链接", exact: true })).toBeHidden();
 }
 
-async function joinViaRole(page, probe, board, role) {
+async function joinViaRole(page, probe, board, role, onGuest) {
   const { label, verb, name } = roles[role];
   const before = probe.copyCount();
   await button(page, "复制" + label + "链接").click();
@@ -91,6 +92,7 @@ async function joinViaRole(page, probe, board, role) {
   });
   await expect(guest.getByRole("heading", { name: board.title, exact: true })).toBeVisible();
   await expect(guest.getByText("你被邀请" + verb + "这块白板。", { exact: true })).toBeVisible();
+  onGuest?.(guest);
   await guest.getByRole("textbox", { name: /你的名字/u }).fill(name);
   await button(guest, "打开白板").click();
   await expect(guest.getByText(object.label, { exact: true })).toBeVisible();
@@ -220,22 +222,51 @@ test("[TOPBAR-SHARE-02] 所有者更改成员角色、移除访问并恢复同�
   try {
     const board = await openBoard(page, studio, "成员角色与撤销恢复");
     await openShare(page);
-    const guest = await joinViaRole(page, probe, board, "editor");
+    let guestReads;
+    const guest = await joinViaRole(page, probe, board, "editor", (view) => {
+      if (studio.edition === "ii") {
+        guestReads = observeGuestAccessReads(view, studio);
+      }
+    });
     await closeShare(page);
     await openShare(page);
 
+    if (guestReads) {
+      await expect.poll(guestReads.snapshot).toEqual({ sharing: 2, scene: 1 });
+    }
+    const initialReads = guestReads?.snapshot();
+    const onlineIdle = await guestReads?.idle();
+    if (onlineIdle) {
+      expect(onlineIdle).toEqual({ sharing: 0, scene: 0 });
+    }
+
     await chooseMemberRole(page, studio, name, "仅查看");
-    await guest.reload();
+    if (!guestReads) {
+      await guest.reload();
+    }
     await expect(guest.getByText(object.label, { exact: true })).toBeVisible();
     await expect(button(guest, "备注")).toBeDisabled();
+    const downgradedReads = guestReads?.snapshot();
+    if (downgradedReads) {
+      expect(downgradedReads).toEqual({ sharing: 3, scene: 1 });
+    }
     await screenshot(page, testInfo, "topbar-member-downgraded");
+
+    if (guestReads) {
+      await chooseMemberRole(page, studio, name, "可编辑");
+      await expect(button(guest, "备注")).toBeEnabled();
+      await expect(guest.getByText("只读", { exact: true })).toBeHidden();
+      expect(guestReads.snapshot()).toEqual({ sharing: 4, scene: 1 });
+    }
 
     await memberAction(page, studio, name).click();
     await menuItem(page, "移除访问权限").click();
     await button(page, "确认移除").click();
     const restore = button(page, "恢复访问：" + name);
     await expect(restore).toBeVisible();
-    await guest.reload();
+    if (!guestReads) {
+      await guest.reload();
+    }
     await expect(guest.getByText(object.label, { exact: true })).toHaveCount(0);
     await expect(guest.getByText(/移除|无法访问此白板|没有分享给你/u).first()).toBeVisible();
 
@@ -250,6 +281,9 @@ test("[TOPBAR-SHARE-02] 所有者更改成员角色、移除访问并恢复同�
     await observe(testInfo, "topbar-member-restoration", {
       downgraded: true,
       removed: true,
+      initialReads,
+      onlineIdle,
+      downgradedReads,
       restoredAsCommenter: true,
     });
   } finally {

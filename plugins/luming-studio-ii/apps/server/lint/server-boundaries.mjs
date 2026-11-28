@@ -344,6 +344,7 @@ const privateLibraries = new Map([
   ['@connectrpc/connect-node', new Set([roomStreamRoute, roomStreamTest])],
   ['proper-lockfile', new Set([mcpRuntime])],
   ['@resvg/resvg-wasm', new Set(['src/infrastructure/platform/png-renderer'])],
+  ['@csstools/css-tokenizer', new Set([whiteboard + 'domain/embed-resource-validation'])],
   [
     'parse5',
     new Set([
@@ -351,6 +352,7 @@ const privateLibraries = new Map([
       catalogAdapters + 'thumbnail-html',
       'src/entrypoints/mcp/artifact-context-content',
       'src/entrypoints/mcp/artifact-read-search',
+      whiteboard + 'domain/embed-resource-validation',
     ]),
   ],
   [

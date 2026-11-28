@@ -42,6 +42,10 @@
   flex-shrink: 0;
 }
 
+.studio-ui-canvas-selection-actions[data-canvas-toolbar-wrapped] {
+  flex-wrap: wrap;
+}
+
 .studio-ui-canvas-marquee {
   border: 1px solid var(--studio-ui-accent, #eb6c36);
   background-color: rgba(235, 108, 54, 0.09);

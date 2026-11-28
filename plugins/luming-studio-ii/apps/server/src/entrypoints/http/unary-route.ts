@@ -13,6 +13,7 @@ export interface HttpActor {
   readonly id: string;
   readonly kind?: 'human' | 'agent';
   readonly feedbackAuthorId?: string;
+  readonly creationAuthorId?: string;
   readonly guestScope?: SharingScope;
   readonly authorize?: (request: object) => void;
   readonly authorizeRead?: (boardId: string) => void;

@@ -54,10 +54,42 @@
 }
 
 .whiteboard-chrome__status {
-  flex: 0 0 auto;
+  position: relative;
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  inline-size: 22px;
+  block-size: 22px;
   color: var(--board-chrome-muted, #5f6368);
-  font-size: 10px;
+}
+
+.whiteboard-chrome__status[data-status='saved'] {
+  color: var(--studio-ui-success, light-dark(#257547, #7db596));
+}
+
+.whiteboard-chrome__status[data-status='save-issue'] {
+  color: var(--studio-ui-danger, light-dark(#be4247, #ff9397));
+}
+
+.whiteboard-chrome__status-label {
+  position: absolute;
+  overflow: hidden;
+  inline-size: 1px;
+  block-size: 1px;
+  clip-path: inset(50%);
   white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .whiteboard-chrome__status[aria-busy='true'] > svg {
+    animation: whiteboard-chrome-status-spin 0.9s linear infinite;
+  }
+}
+
+@keyframes whiteboard-chrome-status-spin {
+  to {
+    transform: rotate(1turn);
+  }
 }
 
 .whiteboard-chrome__guest {

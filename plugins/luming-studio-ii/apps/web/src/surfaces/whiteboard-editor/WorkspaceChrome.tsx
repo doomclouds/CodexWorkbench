@@ -1,7 +1,7 @@
 import { Lightbulb } from 'lucide-react';
 import type { ReactNode, Ref } from 'react';
 import type { BoardEditReceipt } from '../../data/whiteboard/index.js';
-import { OperationNotice, StatusText } from '../../ui/base/index.js';
+import { OperationNotice } from '../../ui/base/index.js';
 import {
   Canvas,
   type CanvasObject,
@@ -13,9 +13,10 @@ import {
   BoardHeader,
   BoardSelectionViewing,
   BoardToolbar,
+  type BoardHeaderStatus,
   type BoardTool,
 } from './BoardChrome.js';
-import { MoveNotice, MoveStatus } from './MoveFeedback.js';
+import { MoveNotice } from './MoveFeedback.js';
 import type {
   BoardFeedbackFrame,
   BoardExportContext,
@@ -30,7 +31,6 @@ import {
   GeometryNotice,
   GeometrySelectionActions,
   GeometrySelectionObjectControls,
-  GeometryStatus,
 } from './geometry-controls.js';
 import type { GeometryActionContext } from './GeometryBoardMenu.js';
 import type { useGeometryEdits } from './geometry-session.js';
@@ -162,13 +162,16 @@ interface WorkspaceHeaderProps {
   readonly annotationActive: boolean;
   readonly unresolvedFeedback: boolean;
   readonly writeAccess: boolean;
+  readonly room?: {
+    readonly connection?: 'connecting' | 'reconnecting';
+    readonly participants: ReactNode;
+  };
   readonly trashed?: boolean;
   readonly moving: boolean;
   readonly move: WorkspaceMove;
   readonly geometry: WorkspaceGeometry;
   readonly notice: ContentNotice;
   readonly readNotices: ReactNode;
-  readonly participants?: ReactNode;
   readonly suggestionTrigger: Ref<HTMLButtonElement>;
   readonly onBack?: () => void;
   readonly titleEditor?: BoardTitleEditor;
@@ -180,26 +183,45 @@ interface WorkspaceHeaderProps {
   readonly onToggleAnnotation?: () => void;
 }
 
-function boardStatus({ writeAccess, moving, geometry, move }: WorkspaceHeaderProps) {
-  if (!writeAccess) {
-    return <StatusText message="只读" />;
+function boardStatus({
+  room,
+  writeAccess,
+  moving,
+  geometry,
+  move,
+}: WorkspaceHeaderProps): BoardHeaderStatus {
+  if (room?.connection) {
+    return room.connection;
   }
-  if (geometry.hasPendingEdit && !moving) {
-    return <GeometryStatus controls={geometry} />;
+  if (!writeAccess) {
+    return 'readonly';
   }
 
-  return <MoveStatus controls={move} />;
+  const { kind } = geometry.hasPendingEdit && !moving ? geometry.state : move.state;
+  switch (kind) {
+    case 'saving':
+    case 'checking':
+      return kind;
+    case 'saved':
+    case 'idle':
+      return 'saved';
+    case 'conflict':
+    case 'rejected':
+    case 'unknown':
+    case 'unsupported':
+      return 'save-issue';
+  }
 }
 
 function headerParticipants({
-  participants,
+  room,
   suggestionsOpen,
   suggestionTrigger,
   onOpenSuggestions,
 }: WorkspaceHeaderProps) {
   return (
     <>
-      {participants}
+      {room?.participants}
       {onOpenSuggestions && (
         <button
           ref={suggestionTrigger}

@@ -4,6 +4,7 @@ import type { ResolvedConnection } from '../connectors/geometry.js';
 import type { CanvasGeometry, CanvasObjectDraft } from '../contracts.js';
 import { CanvasInkPath } from '../ink/CanvasInkPath.js';
 import { CanvasShapeOutline } from './CanvasShapeOutline.js';
+import { sectionOverview, usesSectionOverview } from './caption-metrics.js';
 
 export interface CanvasPrimitiveFrameProps {
   readonly object: CanvasObjectDraft;
@@ -12,12 +13,11 @@ export interface CanvasPrimitiveFrameProps {
   readonly content?: ReactNode;
   readonly showCaption: boolean;
   readonly selected: boolean;
+  readonly sectionCaptionWidth?: number;
   readonly connectorRoute?: ResolvedConnection;
 }
 
 const sectionHitWidth = 8;
-const sectionCaptionFontSize = 17;
-const sectionOverview = { fontSize: 12, height: 16, gap: 4 };
 const connectorCaptionFontSize = 13;
 const minimumConnectorCaptionPixels = 8;
 
@@ -25,6 +25,7 @@ interface SectionOverviewStyle extends CSSProperties {
   '--studio-ui-section-overview-font'?: string;
   '--studio-ui-section-overview-line'?: string;
   '--studio-ui-section-overview-gap'?: string;
+  '--studio-ui-section-overview-width'?: string;
 }
 
 export function CanvasShapeFrame({
@@ -70,19 +71,22 @@ export function CanvasSectionFrame({
   zoom,
   content,
   showCaption,
+  sectionCaptionWidth,
 }: CanvasPrimitiveFrameProps) {
   if (object.kind !== 'section') {
     return null;
   }
 
   const { width, height } = geometry;
-  const overview = zoom < 1 && sectionCaptionFontSize * zoom < sectionOverview.fontSize;
-  const captionFits = width * zoom >= 30 && height * zoom >= 12;
+  const overview = usesSectionOverview(zoom);
+  const available = sectionCaptionWidth ?? width;
+  const captionFits = available * zoom >= sectionOverview.minimumWidth && height * zoom >= 12;
   const overviewStyle: SectionOverviewStyle | undefined = overview
     ? {
         '--studio-ui-section-overview-font': `${sectionOverview.fontSize / zoom}px`,
         '--studio-ui-section-overview-line': `${sectionOverview.height / zoom}px`,
         '--studio-ui-section-overview-gap': `${sectionOverview.gap / zoom}px`,
+        '--studio-ui-section-overview-width': `${available}px`,
       }
     : undefined;
 

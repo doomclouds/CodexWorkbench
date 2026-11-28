@@ -172,7 +172,7 @@ async function mount(bridge: Bridge) {
   root.render(
     <StudioApp
       {...services(bridge)}
-      catalog={createBoardCatalogService(postProtobuf)}
+      catalog={createBoardCatalogService(postProtobuf, observeBoardRoomVisibility)}
       catalogManagement={createCatalogManagementService(postProtobuf)}
       feedbackService={createBoardFeedbackService(postProtobuf)}
       createRoomSession={createRoomSession}
@@ -206,10 +206,21 @@ if (!container) {
 }
 
 const root = createRoot(container);
-root.render(<p role="status">正在连接鹿鸣工作台…</p>);
+root.render(
+  <div className="studio-mcp-startup" role="status">
+    <span className="studio-mcp-startup__spinner" aria-hidden="true" />
+    <span className="studio-mcp-startup__label">正在连接鹿鸣工作台…</span>
+  </div>,
+);
 connectMcpApp(() => root.unmount())
   .then(mount)
   .catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : '鹿鸣面板连接失败。';
-    root.render(<p role="alert">{message}</p>);
+    const message = (error instanceof Error && error.message) || '鹿鸣面板连接失败。';
+    root.render(
+      <div className="studio-mcp-startup">
+        <p className="studio-mcp-startup__error" role="alert">
+          {message}
+        </p>
+      </div>,
+    );
   });

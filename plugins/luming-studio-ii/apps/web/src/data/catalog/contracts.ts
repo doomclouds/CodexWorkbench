@@ -32,7 +32,10 @@ export type ReadCatalogThumbnail = (
 export interface CatalogPage {
   readonly boards: readonly CatalogBoardSummary[];
   readonly nextCursor?: string;
+  readonly catalogCursor?: string;
 }
+
+export type ObserveCatalogVisibility = (listener: (visible: boolean) => void) => () => void;
 
 export interface CatalogCreateRequest {
   readonly commandId: string;
@@ -69,6 +72,7 @@ export type CatalogPost = (
 
 export interface BoardCatalogService {
   listBoards(request: CatalogListRequest, signal?: AbortSignal): Promise<CatalogPage>;
+  watchChanges?(cursor: string, onChange: (cursor: string) => void, signal: AbortSignal): void;
   readonly getBoardThumbnail?: ReadCatalogThumbnail;
   createBoard(request: CatalogCreateRequest, signal?: AbortSignal): Promise<CatalogReceipt>;
   duplicateBoard?(request: CatalogDuplicateRequest, signal?: AbortSignal): Promise<CatalogReceipt>;

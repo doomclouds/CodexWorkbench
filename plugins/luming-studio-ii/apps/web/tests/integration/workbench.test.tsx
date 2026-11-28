@@ -193,6 +193,60 @@ function appMock() {
 }
 
 describe('legacy Workbench creation through the Studio app', () => {
+  it('keeps the mounted directory visible while applying an external catalog event', async () => {
+    const { props } = appMock();
+    type Page = Awaited<ReturnType<BoardCatalogService['listBoards']>>;
+    let resolvePage!: (page: Page) => void;
+    const pending = new Promise<Page>((resolve) => {
+      resolvePage = resolve;
+    });
+    const requests: ListRequest[] = [];
+    let notify: ((cursor: string) => void) | undefined;
+    let subscription: AbortSignal | undefined;
+    const catalog: BoardCatalogService = {
+      ...props.catalog,
+      listBoards(request) {
+        requests.push(request);
+        return requests.length === 1
+          ? Promise.resolve({ boards: [existingBoard], catalogCursor: 'baseline' })
+          : pending;
+      },
+      watchChanges(cursor, onChange, signal) {
+        expect(cursor).toBe('baseline');
+        notify = onChange;
+        subscription = signal;
+      },
+    };
+    const fixture = createControlFixture();
+
+    try {
+      await act(async () => fixture.render(<StudioApp {...props} catalog={catalog} />));
+      const button = () => fixture.host.querySelector('[aria-label="打开白板：产品发布工作台"]');
+      const original = button();
+      expect(original).not.toBeNull();
+      expect(notify).toBeDefined();
+
+      await act(async () => notify?.('baseline'));
+      expect(requests).toHaveLength(1);
+      await act(async () => notify?.('mutation'));
+      expect(requests).toHaveLength(2);
+      expect(button()).toBe(original);
+      expect(fixture.host.textContent).not.toContain('正在读取作品');
+      expect(fixture.host.querySelector('[aria-busy="true"]')).toBeNull();
+
+      await act(async () =>
+        resolvePage({ boards: [{ ...existingBoard }, secondBoard], catalogCursor: 'mutation' }),
+      );
+      expect(button()).toBe(original);
+      expect(fixture.host.textContent).toContain(secondBoard.title);
+      expect(requests).toHaveLength(2);
+    } finally {
+      fixture.dispose();
+    }
+
+    expect(subscription?.aborted).toBe(true);
+  });
+
   it('loads only listed thumbnail revisions and reuses them when returning to the card layout', async () => {
     const { props } = appMock();
     const visibility = observePreviewVisibility();

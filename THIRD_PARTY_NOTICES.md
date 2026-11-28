@@ -21,3 +21,7 @@
 ## 文献插件翻译排版核心
 
 `plugins/agentero-library/src/app/pdf/translation/` 中注明来源的类型、阅读顺序、覆盖检查与排版代码，移植或适配自 poco-ai 的 motif MIT 核心，经由 [agentero-dsh-plugin 固定提交](https://github.com/poco-ai/agentero-dsh-plugin/tree/2c0a7f85e0e3a1b78673f95abc187e04852a7f4f/packages/pdf/src/client/translation) 获取。版权为 `Copyright (c) 2026 poco-ai`，许可原文保留于源码的 `MOTIF-LICENSE.txt`，并随运行包归档到 [sources/motif-translation/MOTIF-LICENSE.txt](plugins/agentero-library/assets/licenses/sources/motif-translation/MOTIF-LICENSE.txt)。这份许可仅适用于有明确声明的翻译核心，不扩展到未确认许可的 DSH 宿主集成或界面代码。
+
+## Studio II 的 CSS 资源校验
+
+Studio II 使用 `@csstools/css-tokenizer@4.0.2` 解析 HTML 内的 CSS 资源引用。MIT 许可随插件分发。[许可原文](plugins/luming-studio-ii/assets/licenses/css-tokenizer.txt)

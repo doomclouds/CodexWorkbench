@@ -644,7 +644,7 @@ export function registerArtifactContext(server: McpServer, options: ModelToolOpt
   server.registerTool(
     'artifact_context',
     {
-      title: '理解白板上下文',
+      title: '读取白板上下文',
       description:
         '按任务从已保存的白板范围或备注来源读取概要、正文、结构、保存态图、原图或源码。大范围按返回游标续读。',
       inputSchema: contextSchema,

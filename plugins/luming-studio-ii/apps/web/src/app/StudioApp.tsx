@@ -42,7 +42,6 @@ interface GuestPorts extends Pick<
   readonly readEntry: () => GuestShell['entry'] | undefined;
   readonly replaceEntry: (boardId?: string) => void;
   readonly isAccessDenied: GuestShell['isAccessDenied'];
-  readonly subscribeRefresh: GuestShell['subscribeRefresh'];
 }
 
 interface StudioNavigation {
@@ -99,27 +98,51 @@ const {
 } = studioPages;
 
 interface GuestWhiteboardProps extends BoardPageProps {
+  readonly boardId: string;
   readonly access: BoardAccess;
   readonly createRoomSession?: CreateRoomSession;
+  readonly onConnected: () => void;
 }
 
-function GuestWhiteboard({ access, service, ...props }: GuestWhiteboardProps) {
-  const visibleService = useMemo<WhiteboardService>(() => {
-    if (access.canEdit) {
-      return service;
+function GuestWhiteboard({
+  access,
+  boardId,
+  createRoomSession,
+  onConnected,
+  ...props
+}: GuestWhiteboardProps) {
+  const room = useMemo(() => createRoomSession?.(boardId), [boardId, createRoomSession]);
+  const checkAccess = useEffectEvent(onConnected);
+  useEffect(() => {
+    if (!room) {
+      return;
     }
 
-    return {
-      ...service,
-      async getScene(boardId, signal) {
-        const scene = await service.getScene(boardId, signal);
+    const session = room;
+    let wasOnline = false;
+    function observeConnection() {
+      const online = session.getSnapshot().status === 'online';
+      const connected = online && !wasOnline;
+      wasOnline = online;
+      if (connected) {
+        checkAccess();
+      }
+    }
 
-        return { ...scene, canEdit: false };
-      },
-    };
-  }, [access.canEdit, service]);
+    const unsubscribe = room.subscribe(observeConnection);
+    observeConnection();
+    return unsubscribe;
+  }, [room]);
 
-  return <RoomWhiteboard {...props} service={visibleService} commentAccess={access.canComment} />;
+  return (
+    <RoomWhiteboard
+      {...props}
+      boardId={boardId}
+      room={room}
+      editAccess={access.canEdit}
+      commentAccess={access.canComment}
+    />
+  );
 }
 
 export function StudioApp({
@@ -360,20 +383,21 @@ export function StudioApp({
     );
   }
 
-  function renderGuestBoard(boardId: string, access: BoardAccess, recheckAccess: () => void) {
+  const renderGuestBoard: RenderGuestBoard = (boardId, access, { onAccessLost, onConnected }) => {
     if (!guest) {
       return null;
     }
 
     return (
       <GuestWhiteboard
-        key={`${boardId}:${access.role}:${access.canEdit}:${access.canComment}`}
+        key={boardId}
         access={access}
         boardId={boardId}
         service={guest.service}
         createCommandId={createCommandId}
         createRoomSession={guest.createRoomSession}
-        onRoomAccessLost={recheckAccess}
+        onRoomAccessLost={onAccessLost}
+        onConnected={onConnected}
         fitOnMount
         initialBoardView={navigation.readBoardView?.()}
         onViewContext={onViewContext}
@@ -395,7 +419,7 @@ export function StudioApp({
         lanSharing={access.scope === 'lan'}
       />
     );
-  }
+  };
 
   const guestShell =
     guest && guestEntry
@@ -403,7 +427,6 @@ export function StudioApp({
           entry: guestEntry,
           service: guest.sharingService,
           isAccessDenied: guest.isAccessDenied,
-          subscribeRefresh: guest.subscribeRefresh,
           onJoin: navigateGuest,
           onExit: exitGuest,
           renderBoard: renderGuestBoard,

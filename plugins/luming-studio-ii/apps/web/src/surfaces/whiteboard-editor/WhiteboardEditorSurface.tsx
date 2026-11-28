@@ -206,7 +206,8 @@ function BoardWorkspace({
     () => projectTextStyles(state.payloads, selection),
     [selection, state.payloads],
   );
-  const mayEdit = board.canEdit && !state.sceneError;
+  const writeAccess = features.editAccess ?? board.canEdit;
+  const mayEdit = writeAccess && !state.sceneError;
   const title = board.title || '白板';
 
   function handleRoomAccessLost() {
@@ -591,13 +592,13 @@ function BoardWorkspace({
           consumeShareEntry={features.consumeShareEntry}
           annotationActive={annotationActive}
           unresolvedFeedback={annotation.unresolved}
-          writeAccess={board.canEdit}
+          writeAccess={writeAccess}
           trashed={board.trashed}
           moving={moving}
           move={move}
           geometry={geometry}
           notice={content.getNotice((objectId) => textSaveIssues.has(objectId))}
-          participants={room?.participants}
+          room={room}
           onBack={onBack}
           titleEditor={boardTitle.editor}
           theme={features.theme}
@@ -685,7 +686,7 @@ function BoardWorkspace({
                 onShowGridChange={setShowGrid}
                 singleKeys={singleKeys}
                 onSingleKeysChange={setSingleKeys}
-                timerEditable={board.canEdit}
+                timerEditable={writeAccess}
                 timer={features.renderSharedTimer?.()}
                 history={viewportHistory}
               />
@@ -693,8 +694,8 @@ function BoardWorkspace({
                 boardId={board.boardId}
                 tool={tool}
                 viewport={viewport}
-                visible={board.canEdit}
-                canInsertImage={board.canEdit}
+                visible={writeAccess}
+                canInsertImage={writeAccess}
                 mediaPaused={!online}
                 canEditGeometry={canChooseTools}
                 renderMedia={features.renderMedia}
@@ -712,7 +713,7 @@ function BoardWorkspace({
             </div>
             {welcomeAvailable(viewOnly, annotationActive, tool, canvasScene.objects.length) && (
               <BoardWelcome
-                canEdit={board.canEdit}
+                canEdit={writeAccess}
                 disabled={!canInsert}
                 onAddDocument={handleAddDocument}
                 onAddHtml={handleOpenHtml}

@@ -35,6 +35,7 @@ type InitialBoardView = Omit<BoardViewContext, 'viewport'> & {
 };
 
 export interface BoardPresenceSlot {
+  readonly connection?: 'connecting' | 'reconnecting';
   readonly participants: ReactNode;
   readonly notice: ReactNode;
   readonly overlay: ReactNode;
@@ -235,6 +236,7 @@ export interface WhiteboardEditorFeatures {
   readonly uploadDocumentImage?: CanvasProps['uploadDocumentImage'];
   readonly clipboard?: BoardClipboardAccess;
   readonly localDrafts?: LocalBoardDraftConfig;
+  readonly editAccess?: boolean;
   readonly commentAccess?: boolean;
   readonly lanSharing?: boolean;
   readonly consumeShareEntry?: () => boolean;

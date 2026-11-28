@@ -46,7 +46,10 @@ function createGuestSharingMock() {
   let joined = false;
   let revoked = false;
   let canComment = true;
+  let canEdit = false;
+  let role: SharingRole = SharingRole.COMMENTER;
   let scope: SharingScope = SharingScope.LAN;
+  let failNextCheck = false;
   const service = createBoardSharingService((path, body) => {
     const method = path.split('/').at(-1) ?? '';
     calls.push(method);
@@ -88,14 +91,19 @@ function createGuestSharingMock() {
       return Promise.reject(new StudioHttpError(joined ? 403 : 401));
     }
 
+    if (failNextCheck) {
+      failNextCheck = false;
+      return Promise.reject(new StudioHttpError(503));
+    }
+
     const result = create(getBoardSharing.output, {
       sharing: {
         boardId: sampleBoardId,
         enabled: true,
         scope,
         version,
-        role: canComment ? SharingRole.COMMENTER : SharingRole.VIEWER,
-        canEdit: false,
+        role,
+        canEdit,
         canComment,
       },
     });
@@ -106,11 +114,21 @@ function createGuestSharingMock() {
   return {
     service,
     calls,
+    failNextCheck() {
+      failNextCheck = true;
+    },
     useLocalScope() {
       scope = SharingScope.LOCAL;
     },
     limitToViewing() {
+      role = SharingRole.VIEWER;
       canComment = false;
+      canEdit = false;
+    },
+    allowEditing() {
+      role = SharingRole.EDITOR;
+      canEdit = true;
+      canComment = true;
     },
     revoke() {
       revoked = true;
@@ -119,6 +137,38 @@ function createGuestSharingMock() {
 }
 
 type ViewReader = NonNullable<StudioAppProps['navigation']['readBoardView']>;
+
+function guestRoomMock() {
+  const listeners = new Set<() => void>();
+  let state: BoardRoomState = {
+    status: 'connecting',
+    viewId: 'test-guest-view',
+    canEdit: false,
+    participants: [],
+  };
+  const session: BoardRoomSession = {
+    open: () => () => undefined,
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    getSnapshot: () => state,
+    publishPresence: () => undefined,
+    changeTimer: () => Promise.reject(new Error('Unexpected guest timer write.')),
+    getTimerReceipt: () => Promise.resolve(undefined),
+    now: () => 0,
+    schedule: () => () => undefined,
+  };
+
+  function update(status: BoardRoomState['status']) {
+    state = { ...state, status };
+    for (const listener of listeners) {
+      listener();
+    }
+  }
+
+  return { session, update };
+}
 
 function createGuestAppMock(
   url: string,
@@ -131,7 +181,7 @@ function createGuestAppMock(
   const guestBoard = createWhiteboardRpcMock();
   const ownerBoard = createWhiteboardRpcMock();
   const sharing = createGuestSharingMock();
-  let refreshAccess: (() => void) | undefined;
+  const room = guestRoomMock();
   let catalogReads = 0;
   let savedView = initialBoardView;
   const props: StudioAppProps = {
@@ -170,7 +220,7 @@ function createGuestAppMock(
     guest: {
       service: createWhiteboardService(guestBoard.post),
       sharingService: sharing.service,
-      createRoomSession,
+      createRoomSession: createRoomSession ?? (() => room.session),
       feedbackService: {
         listThreads: () => Promise.resolve({ items: [], canWrite: true }),
         getThread: () => Promise.reject(new Error('No feedback thread is in this fixture.')),
@@ -180,13 +230,6 @@ function createGuestAppMock(
       readEntry: readStudioGuestEntry,
       replaceEntry: replaceStudioGuestLocation,
       isAccessDenied: isGuestAccessDenied,
-      subscribeRefresh(read) {
-        refreshAccess = read;
-
-        return () => {
-          refreshAccess = undefined;
-        };
-      },
     },
   };
   window.history.replaceState(null, '', url);
@@ -198,7 +241,12 @@ function createGuestAppMock(
     sharing,
     readCatalogCalls: () => catalogReads,
     open: (key: string) => act(async () => fixture.render(<StudioApp key={key} {...props} />)),
-    refresh: () => act(async () => refreshAccess?.()),
+    announceOnline: () => act(async () => room.update('online')),
+    refresh: () =>
+      act(async () => {
+        room.update('reconnecting');
+        room.update('online');
+      }),
     dispose() {
       fixture.dispose();
       window.history.replaceState(previousState, '', previousUrl);
@@ -425,10 +473,18 @@ test('joins an explicit invitation, strips the token and resumes only the guest 
     expect(app.ownerBoard.sceneReads).toEqual([]);
     expect(app.readCatalogCalls()).toBe(0);
 
+    const canvas = app.host.querySelector('[data-canvas-root]');
     app.sharing.limitToViewing();
     await app.refresh();
-    expect(app.host.querySelector('[data-canvas-root]')).not.toBeNull();
+    expect(app.host.querySelector('[data-canvas-root]')).toBe(canvas);
     expect(app.host.querySelector('[aria-label="备注"]')).toHaveProperty('disabled', true);
+    expect(app.guestBoard.sceneReads).toEqual([sampleBoardId, sampleBoardId]);
+
+    app.sharing.allowEditing();
+    await app.refresh();
+    expect(app.host.querySelector('[data-canvas-root]')).toBe(canvas);
+    expect(app.host.querySelector('[aria-label="备注"]')).toHaveProperty('disabled', false);
+    expect(app.host.querySelector('[aria-label="白板工具"]')).not.toBeNull();
 
     app.sharing.revoke();
     await app.refresh();
@@ -440,6 +496,60 @@ test('joins an explicit invitation, strips the token and resumes only the guest 
     expect(window.location.search).toBe('');
     expect(app.host.textContent).toContain('当前没有打开的白板。');
     expect(app.readCatalogCalls()).toBe(0);
+  } finally {
+    app.dispose();
+  }
+});
+
+test('corrects a permission change during first room connection while keeping the original canvas', async () => {
+  const app = createGuestAppMock(boardUrl + '#invite=' + invitationToken);
+  try {
+    await app.open('invited');
+    await act(async () => enterName(app.host, guestName));
+    await act(async () => guestButton(app.host, '打开白板').click());
+    const initial = app.sharing.calls.slice();
+    const canvas = app.host.querySelector('[data-canvas-root]');
+    expect(canvas).not.toBeNull();
+    expect(guestButton(app.host, '备注').disabled).toBe(false);
+
+    app.sharing.limitToViewing();
+    await app.announceOnline();
+    await app.announceOnline();
+    expect(guestButton(app.host, '备注').disabled).toBe(true);
+    expect(app.sharing.calls).toEqual([...initial, getBoardSharing.name]);
+    expect(app.host.querySelector('[data-canvas-root]')).toBe(canvas);
+    expect(app.guestBoard.sceneReads).toEqual([sampleBoardId]);
+  } finally {
+    app.dispose();
+  }
+});
+
+test('retries one temporary access failure after reconnecting without replacing the canvas', async () => {
+  const app = createGuestAppMock(boardUrl + '#invite=' + invitationToken);
+  try {
+    await app.open('invited');
+    await act(async () => enterName(app.host, guestName));
+    await act(async () => guestButton(app.host, '打开白板').click());
+    await app.announceOnline();
+    const initial = app.sharing.calls.slice();
+    const canvas = app.host.querySelector('[data-canvas-root]');
+    expect(canvas).not.toBeNull();
+
+    app.sharing.limitToViewing();
+    app.sharing.failNextCheck();
+    await app.refresh();
+    expect(app.sharing.calls).toEqual([...initial, getBoardSharing.name]);
+    expect(app.host.querySelector('[data-canvas-root]')).toBe(canvas);
+    await expect
+      .poll(async () => {
+        await act(async () => Promise.resolve());
+        return guestButton(app.host, '备注').disabled;
+      })
+      .toBe(true);
+    await app.announceOnline();
+    expect(app.sharing.calls).toEqual([...initial, getBoardSharing.name, getBoardSharing.name]);
+    expect(app.host.querySelector('[data-canvas-root]')).toBe(canvas);
+    expect(app.guestBoard.sceneReads).toEqual([sampleBoardId]);
   } finally {
     app.dispose();
   }
@@ -496,7 +606,12 @@ test('rechecks a terminated guest room and mounts a new view when access is stil
   function createRoomSession(_boardId: string): BoardRoomSession {
     sequence++;
     const viewId = 'guest-view-' + sequence;
-    const state: BoardRoomState = { status: 'online', viewId, canEdit: false, participants: [] };
+    const state: BoardRoomState = {
+      status: 'connecting',
+      viewId,
+      canEdit: false,
+      participants: [],
+    };
 
     return {
       getSnapshot: () => state,

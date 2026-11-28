@@ -48,10 +48,14 @@ export function useCanvasFrame(
   initialViewport: CanvasViewport | undefined,
   present: (viewport: CanvasViewport) => void,
 ) {
-  const [frame, setFrame] = useState<CanvasFrame>(() => ({
-    viewport: normalizeViewport(initialViewport),
-  }));
+  const [snapshot, setSnapshot] = useState<{ frame: CanvasFrame; viewportRequestId?: string }>(
+    () => ({
+      frame: { viewport: normalizeViewport(initialViewport) },
+    }),
+  );
+  const { frame, viewportRequestId } = snapshot;
   const current = useRef(frame);
+  const appliedRequest = useRef<string | undefined>(undefined);
   const committed = useRef(frame);
   const scheduled = useRef<ScheduledFrame | null>(null);
   const drawing = useRef<(() => CanvasFrame) | undefined>(undefined);
@@ -79,7 +83,13 @@ export function useCanvasFrame(
 
     present(current.current.viewport);
     committed.current = current.current;
-    setFrame(current.current);
+    const frame = current.current;
+    const viewportRequestId = appliedRequest.current;
+    setSnapshot((previous) =>
+      previous.frame === frame && previous.viewportRequestId === viewportRequestId
+        ? previous
+        : { frame, viewportRequestId },
+    );
   }, [present]);
 
   const schedule = useCallback(() => {
@@ -114,7 +124,12 @@ export function useCanvasFrame(
     [schedule],
   );
 
-  return { frame, read, update, draw };
+  function applyViewportRequest(id: string, viewport: CanvasViewport) {
+    appliedRequest.current = id;
+    update({ viewport }, 'now');
+  }
+
+  return { frame, viewportRequestId, applyViewportRequest, read, update, draw };
 }
 
 export function useCanvasSize(root: CanvasRoot): CanvasViewportSize {

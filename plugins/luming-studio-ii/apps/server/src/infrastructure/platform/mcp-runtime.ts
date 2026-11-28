@@ -37,6 +37,7 @@ const healthRoute = '/luming.studio.v1.WhiteboardService/GetBoardScene';
 const suggestionAgentRoute = '/luming.studio.v1.BoardSuggestionService/SubmitBoardSuggestion';
 const choiceAgentRoute = '/luming.studio.v1.BoardSuggestionService/ChooseAgentBoardSuggestion';
 const activityAgentRoute = '/luming.studio.v1.BoardRoomService/ChangeAgentActivity';
+const createBoardRoute = '/luming.studio.v1.BoardCatalogService/CreateBoard';
 const writeAgentRoute = '/luming.studio.v1.BoardAgentWriteService/ApplyAgentBoardEdit';
 const receiptAgentRoute = '/luming.studio.v1.BoardAgentWriteService/GetAgentBoardEditReceipt';
 const agentFeedbackRoutes = new Set(
@@ -306,7 +307,7 @@ export async function loadMcpRuntime(input: RuntimeOptions) {
     request: RuntimeRequest,
     signal: AbortSignal,
     role: 'owner' | 'agent',
-    feedbackAuthorId?: string,
+    author?: { readonly purpose: 'feedback' | 'boardCreation'; readonly id: string },
   ) {
     signal.throwIfAborted();
     try {
@@ -325,8 +326,12 @@ export async function loadMcpRuntime(input: RuntimeOptions) {
       if (request.commandId) {
         headers.set('x-studio-command-id', request.commandId);
       }
-      if (feedbackAuthorId) {
-        headers.set('x-studio-feedback-agent-id', feedbackAuthorId);
+      if (author) {
+        const header =
+          author.purpose === 'feedback'
+            ? 'x-studio-feedback-agent-id'
+            : 'x-studio-agent-creator-id';
+        headers.set(header, author.id);
       }
 
       const response = await fetch(endpoint, {
@@ -372,12 +377,19 @@ export async function loadMcpRuntime(input: RuntimeOptions) {
       forwardAgent(writeAgentRoute, body, signal),
     dispatchAgentReceipt: (body: Uint8Array, signal: AbortSignal) =>
       forwardAgent(receiptAgentRoute, body, signal),
+    dispatchAgentCreateBoard: (agentId: string, request: RuntimeRequest, signal: AbortSignal) => {
+      if (request.method !== 'POST' || request.route !== createBoardRoute) {
+        throw new Error('Invalid Studio Agent board creation operation.');
+      }
+
+      return forward(request, signal, 'agent', { purpose: 'boardCreation', id: agentId });
+    },
     dispatchAgentFeedback: (agentId: string, request: RuntimeRequest, signal: AbortSignal) => {
       if (request.method !== 'POST' || !agentFeedbackRoutes.has(request.route)) {
         throw new Error('Invalid Studio Agent feedback operation.');
       }
 
-      return forward(request, signal, 'agent', agentId);
+      return forward(request, signal, 'agent', { purpose: 'feedback', id: agentId });
     },
   };
 }

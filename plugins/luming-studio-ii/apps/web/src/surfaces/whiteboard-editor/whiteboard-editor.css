@@ -9,14 +9,6 @@
   color: var(--studio-ui-text, CanvasText);
 }
 
-.whiteboard-editor__saved {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  color: #7db596;
-  font-size: 11px;
-}
-
 .whiteboard-editor__notices {
   --studio-ui-operation-notice-surface: var(--board-chrome, Canvas);
   --studio-ui-operation-notice-error: var(--studio-ui-danger, light-dark(#be4247, #ff9397));

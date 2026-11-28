@@ -62,6 +62,7 @@ const rejectionMessages = new Map<string, string>([
   ['commandIdReuse', '保存命令已被另一项更改使用。'],
   ['unsupportedKind', '该对象暂不支持正文编辑。'],
   ['tooLarge', '正文超过单次保存的容量。'],
+  ['inlineHtmlResource', 'HTML 含有新增的 data: 资源。请改用系统回退字体或已导入的白板素材。'],
 ]);
 
 function rejection(message: string): CanvasObjectReceipt {

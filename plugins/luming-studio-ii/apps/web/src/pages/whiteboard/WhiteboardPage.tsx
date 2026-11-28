@@ -73,6 +73,7 @@ export interface WhiteboardPageProps {
   readonly theme?: WhiteboardEditorFeatures['theme'];
   readonly lanSharing?: boolean;
   readonly consumeShareEntry?: () => boolean;
+  readonly editAccess?: boolean;
   readonly commentAccess?: boolean;
   readonly room?: BoardRoomSession;
   readonly onRoomAccessLost?: () => void;
@@ -223,6 +224,7 @@ function whiteboardFeatures(props: WhiteboardPageProps): WhiteboardEditorFeature
     prepareImage,
     prepareVideo,
     readHtmlSource,
+    editAccess,
     commentAccess,
     suggestions,
     onAttachReviewSource,
@@ -240,6 +242,7 @@ function whiteboardFeatures(props: WhiteboardPageProps): WhiteboardEditorFeature
     downloadObjectFile,
     clipboard,
     localDrafts,
+    editAccess,
     commentAccess,
     lanSharing: props.lanSharing,
     consumeShareEntry: props.consumeShareEntry,

@@ -64,7 +64,7 @@
   inset-block-end: calc(100% + var(--studio-ui-section-overview-gap));
   inset-inline-start: 0;
   inline-size: max-content;
-  max-inline-size: 100%;
+  max-inline-size: min(100%, var(--studio-ui-section-overview-width, 100%));
   min-block-size: 0;
   overflow: hidden;
   font-size: var(--studio-ui-section-overview-font);

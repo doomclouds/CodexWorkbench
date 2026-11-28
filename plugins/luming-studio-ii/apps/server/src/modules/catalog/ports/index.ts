@@ -59,7 +59,7 @@ export interface CatalogLifecycleChange {
 
 export interface CatalogWriter {
   getReceipt(actorId: string, commandId: string): StoredCatalogReceipt | undefined;
-  saveBoard(actorId: string, receipt: CatalogCreatedReceipt): void;
+  saveBoard(actorId: string, receipt: CatalogCreatedReceipt, creationAuthorId?: string): void;
   duplicateBoard(
     actorId: string,
     sourceBoardId: string,

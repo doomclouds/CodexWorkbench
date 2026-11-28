@@ -69,6 +69,7 @@ type ConflictingEdit = Extract<BoardEditReceipt, { kind: 'conflict' }>;
 const maxUnpublishedPayloadBatches = 4;
 const payloadPublicationWindowMs = 40;
 const maxBoundedPageIds = 192;
+const maxBufferedRoomChanges = 32;
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -88,8 +89,9 @@ export function createWhiteboardSession(
   let readingPayloads: AbortSignal | undefined;
   let sceneRequest = 0;
   let readingScene: number | undefined;
-  let roomReloadQueued = false;
+  let sceneReloadQueued = false;
   let confirmedRevision = 0n;
+  const bufferedRoomChanges = new Map<bigint, WhiteboardContentChange>();
 
   function rememberRevision(revision: bigint) {
     if (revision < confirmedRevision) {
@@ -238,17 +240,49 @@ export function createWhiteboardSession(
     publish({ kind: 'failed', message });
   }
 
+  function bufferRoomChange(change: WhiteboardContentChange) {
+    if (
+      !bufferedRoomChanges.has(change.revision) &&
+      bufferedRoomChanges.size === maxBufferedRoomChanges
+    ) {
+      const oldest = bufferedRoomChanges.keys().next();
+      if (!oldest.done) {
+        bufferedRoomChanges.delete(oldest.value);
+      }
+    }
+    bufferedRoomChanges.set(change.revision, change);
+  }
+
+  function replayRoomChanges(base: WhiteboardScene): WhiteboardScene {
+    let scene = base;
+    while (scene.revision < confirmedRevision) {
+      const change = bufferedRoomChanges.get(scene.revision + 1n);
+      const updated = change && mergeRoomContent(scene, change);
+      if (!updated) {
+        break;
+      }
+
+      scene = updated;
+    }
+
+    return scene;
+  }
+
   async function loadScene(request: number, signal: AbortSignal) {
-    const scene = await service.getScene(boardId, signal);
+    const baseline = await service.getScene(boardId, signal);
     if (!sceneIsCurrent(request, signal)) {
       return;
     }
-    if (scene.boardId !== boardId) {
+    if (baseline.boardId !== boardId) {
       throw new Error('服务返回了其他白板。');
     }
 
+    const scene = replayRoomChanges(baseline);
     if (!rememberRevision(scene.revision)) {
-      if (roomReloadQueued) {
+      const alreadyRecovered =
+        snapshot.kind === 'ready' && snapshot.scene.revision >= confirmedRevision;
+
+      if (sceneReloadQueued || alreadyRecovered) {
         return;
       }
 
@@ -270,7 +304,7 @@ export function createWhiteboardSession(
 
     const request = ++sceneRequest;
     readingScene = request;
-    roomReloadQueued = false;
+    sceneReloadQueued = false;
     loadScene(request, signal)
       .catch((error: unknown) => failScene(error, request, signal))
       .finally(() => finishScene(request, signal));
@@ -283,16 +317,18 @@ export function createWhiteboardSession(
 
     readingScene = undefined;
     const outOfDate = snapshot.kind !== 'ready' || snapshot.scene.revision < confirmedRevision;
-    const needsRoomReload = roomReloadQueued && !signal.aborted;
-    roomReloadQueued = false;
-    if (outOfDate && needsRoomReload) {
+    const needsReload = sceneReloadQueued && !signal.aborted;
+    sceneReloadQueued = false;
+    if (outOfDate && needsReload) {
       reload();
+    } else {
+      bufferedRoomChanges.clear();
     }
   }
 
-  function refreshRoomScene() {
+  function refreshScene() {
     if (readingScene !== undefined) {
-      roomReloadQueued = true;
+      sceneReloadQueued = true;
     } else {
       reload();
     }
@@ -300,6 +336,7 @@ export function createWhiteboardSession(
 
   function open() {
     controller?.abort();
+    bufferedRoomChanges.clear();
     const lifetime = new AbortController();
     controller = lifetime;
     reload();
@@ -344,7 +381,7 @@ export function createWhiteboardSession(
     }
 
     if (revision > snapshot.scene.revision + 1n) {
-      reload();
+      refreshScene();
       return;
     }
 
@@ -389,13 +426,13 @@ export function createWhiteboardSession(
     }
 
     if (receipt.detailsExpired) {
-      reload();
+      refreshScene();
       return;
     }
 
     const scene = mergeConfirmedEdit(snapshot.scene, receipt);
     if (!scene) {
-      reload();
+      refreshScene();
     } else if (scene !== snapshot.scene) {
       acceptScene(scene, receipt.payloads);
     }
@@ -409,7 +446,15 @@ export function createWhiteboardSession(
 
     const scene = snapshot.kind === 'ready' ? snapshot.scene : undefined;
     const outdated = scene !== undefined && change.revision <= scene.revision;
-    if (outdated || !rememberRevision(change.revision)) {
+    if (outdated) {
+      return;
+    }
+
+    if (!rememberRevision(change.revision)) {
+      if (readingScene !== undefined) {
+        bufferRoomChange(change);
+      }
+
       return;
     }
 
@@ -417,7 +462,8 @@ export function createWhiteboardSession(
     if (updated) {
       acceptScene(updated);
     } else {
-      refreshRoomScene();
+      bufferRoomChange(change);
+      refreshScene();
     }
   }
 

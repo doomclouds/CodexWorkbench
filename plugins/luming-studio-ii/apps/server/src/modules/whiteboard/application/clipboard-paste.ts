@@ -2,6 +2,7 @@ import {
   boardWritePayloadLimit,
   clipboardObject,
   connectorAttachmentIds,
+  hasInlineEmbedResource,
   validNewObjectId,
   type Actor,
   type BoardEditDecision,
@@ -195,6 +196,9 @@ export function pasteBoardObjects(
   const source = readSource(writer, actor, operation);
   if (typeof source === 'string') {
     return rejected(source);
+  }
+  if (source.payloads.some(hasInlineEmbedResource)) {
+    return rejected('inlineHtmlResource');
   }
 
   const groups = destinationGroups(writer, boardId, source.objects, ids);

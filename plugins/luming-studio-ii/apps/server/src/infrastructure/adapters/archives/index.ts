@@ -174,6 +174,7 @@ async function importCurrent(
   database: SqliteDatabase,
   command: ArchiveImportCommand,
   validate: ValidateNativeObject,
+  onChanged?: () => void,
 ): Promise<ArchiveImportReceipt> {
   let archive: StagedCurrentArchive;
   try {
@@ -187,7 +188,15 @@ async function importCurrent(
   }
 
   try {
-    return database.write((connection) => publishArchive(connection, command, archive, validate));
+    const receipt = database.write((connection) =>
+      publishArchive(connection, command, archive, validate),
+    );
+
+    if (receipt.outcome.kind === 'imported' && receipt.outcome.boardId === command.boardId) {
+      onChanged?.();
+    }
+
+    return receipt;
   } finally {
     await archive.dispose();
   }
@@ -196,11 +205,12 @@ async function importCurrent(
 export function createArchiveImportRepository(
   database: SqliteDatabase,
   validate: ValidateNativeObject,
+  onChanged?: () => void,
 ): ArchiveImportPort {
   database.write((connection) => connection.exec(archiveSchema));
 
   return {
-    importCurrent: (command) => importCurrent(database, command, validate),
+    importCurrent: (command) => importCurrent(database, command, validate, onChanged),
     getReceipt: (actorId, commandId) =>
       database.read((connection) => readReceipt(connection, actorId, commandId)?.receipt),
     getAsset: (actorId, boardId, assetId, allowTrashedOwner) =>

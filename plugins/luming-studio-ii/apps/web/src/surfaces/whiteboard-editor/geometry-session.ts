@@ -77,6 +77,7 @@ const rejectionDetails: Readonly<Record<BoardEditRejection, string>> = {
   tooLarge: '这次编辑超出白板允许的范围。',
   invalidImage: '图片内容无法使用。',
   invalidVideo: '视频内容无法使用。',
+  inlineHtmlResource: 'HTML 含有新增的 data: 资源。请改用系统回退字体或已导入的白板素材。',
   unknown: '服务端拒绝了这次编辑。',
 };
 

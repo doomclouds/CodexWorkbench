@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { Buffer } from 'node:buffer';
-import { create, toBinary } from '@bufbuild/protobuf';
+import { create, fromBinary, toBinary } from '@bufbuild/protobuf';
 import { BoardCatalogService } from '@codexworkbench/luming-studio-ii-contracts/catalog/service';
 import {
   BoardRoomService,
@@ -290,9 +290,12 @@ async function openLanBoard() {
   });
   expect(joined.ok).toBe(true);
 
-  await joined.arrayBuffer();
+  const { session } = fromBinary(join.output, new Uint8Array(await joined.arrayBuffer()));
+  if (!session?.actorId) {
+    throw new Error('The invitation did not admit the guest');
+  }
 
-  return { boardId, address, cookie };
+  return { boardId, address, cookie, actorId: session.actorId };
 }
 
 async function setScope(boardId: string, scope: SharingScope, expectedVersion: bigint) {
@@ -334,6 +337,55 @@ test('closes the live LAN guest stream when its board authorization changes', as
     });
     const denied = expect(stream.next()).rejects.toMatchObject({ code: Code.PermissionDenied });
     await setScope(boardId, SharingScope.LOCAL, 1n);
+    await denied;
+    expect(server.errors).toEqual([]);
+  } finally {
+    lifetime.abort();
+  }
+});
+
+test('reconnects a guest stream with changed permissions and still denies revoked access', async () => {
+  const { boardId, address, cookie, actorId } = await openLanBoard();
+  const lifetime = abortScope();
+  const client = streamClient(address, 'grpc-web');
+  function guestStream() {
+    return client
+      .streamBoardRoomEvents(
+        { ...scope, boardId },
+        { headers: { cookie, origin: address.origin }, signal: lifetime.signal },
+      )
+      [Symbol.asyncIterator]();
+  }
+
+  try {
+    const viewing = guestStream();
+    expect(await readEvent(viewing)).toMatchObject({
+      payload: { case: 'snapshot', value: { canEdit: false } },
+    });
+    const recovering = expect(viewing.next()).rejects.toMatchObject({ code: Code.Unavailable });
+    const { sharing } = await callWhiteboard(server.owner, owner, share.getBoardSharing, {
+      boardId,
+    });
+    const upgraded = await callWhiteboard(server.owner, owner, share.updateBoardSharing, {
+      boardId,
+      commandId: 'stream-guest-editor',
+      expectedVersion: sharing?.version,
+      operation: { case: 'changeMemberRole', value: { actorId, role: SharingRole.EDITOR } },
+    });
+    expect(upgraded.receipt?.outcome.case).toBe('applied');
+    await recovering;
+
+    const editing = guestStream();
+    expect(await readEvent(editing)).toMatchObject({
+      payload: { case: 'snapshot', value: { canEdit: true } },
+    });
+    const denied = expect(editing.next()).rejects.toMatchObject({ code: Code.PermissionDenied });
+    await callWhiteboard(server.owner, owner, share.updateBoardSharing, {
+      boardId,
+      commandId: 'stream-guest-removed',
+      expectedVersion: (sharing?.version ?? 0n) + 1n,
+      operation: { case: 'removeMember', value: { actorId } },
+    });
     await denied;
     expect(server.errors).toEqual([]);
   } finally {

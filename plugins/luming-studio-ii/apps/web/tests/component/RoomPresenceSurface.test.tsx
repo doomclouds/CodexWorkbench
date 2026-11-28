@@ -456,6 +456,25 @@ test('retains the chosen actor while reconnecting without adopting a different p
   expect(surface.onViewportRequest).toHaveBeenCalledTimes(2);
 });
 
+test('shows no avatar while a solo view reconnects and restores actual collaborators', () => {
+  const room = mockRoom();
+  room.update({ participants: [self] });
+  mount(room);
+  const trigger = () => fixture.host.querySelector('[aria-label="此刻在这里"]');
+  expect(trigger()).toBeNull();
+
+  room.update({ status: 'reconnecting', participants: [] });
+  expect(trigger()).toBeNull();
+
+  const previousView = { ...self, viewId: 'previous-local-view' };
+  room.update({
+    status: 'online',
+    participants: [self, previousView, peer],
+    onlineAgentIds: ['agent-one'],
+  });
+  expect(button('此刻在这里').title).toBe('Agent、作者');
+});
+
 test('keeps one edit outline per remote person and object inside the active viewport', () => {
   const room = mockRoom();
   const geometry = { x: 90, y: 45, width: 80, height: 50, rotation: 30 };

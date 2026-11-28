@@ -4,6 +4,7 @@ package luming.studio.v1;
 
 service BoardCatalogService {
   rpc ListBoards(ListBoardsRequest) returns (ListBoardsResponse);
+  rpc WaitForBoardCatalogChange(WaitForBoardCatalogChangeRequest) returns (WaitForBoardCatalogChangeResponse);
   rpc ListTrashedBoards(ListTrashedBoardsRequest) returns (ListTrashedBoardsResponse);
   rpc GetBoardThumbnail(GetBoardThumbnailRequest) returns (GetBoardThumbnailResponse);
   rpc CreateBoard(CreateBoardRequest) returns (CreateBoardResponse);
@@ -61,6 +62,15 @@ message ListBoardsRequest {
 message ListBoardsResponse {
   repeated BoardSummary boards = 1;
   optional string next_cursor = 2;
+  string catalog_cursor = 3;
+}
+
+message WaitForBoardCatalogChangeRequest {
+  string after_cursor = 1;
+}
+
+message WaitForBoardCatalogChangeResponse {
+  string catalog_cursor = 1;
 }
 
 message TrashedBoardSummary {

@@ -193,6 +193,7 @@ export function SelectionToolbar({
       const canvasBounds = canvas.getBoundingClientRect();
       node.style.removeProperty('max-inline-size');
       node.removeAttribute('data-canvas-toolbar-compact');
+      node.removeAttribute('data-canvas-toolbar-wrapped');
       const bounds = node.getBoundingClientRect();
       const size = {
         width: bounds.width + Math.max(0, node.scrollWidth - node.clientWidth),
@@ -221,7 +222,7 @@ export function SelectionToolbar({
       const target = mergeRects([anchor, ...handleBounds, ...selectedTitles]) ?? anchor;
       const controls = [...controlBounds, ...handleBounds, ...selectedTitles];
       const visible = rectsIntersect(target, { x: 0, y: 0, ...viewportSize });
-      const position =
+      let position =
         visible &&
         positionAgainstTitles(
           anchor,
@@ -235,9 +236,38 @@ export function SelectionToolbar({
       node.style.visibility = position ? 'visible' : 'hidden';
       if (position) {
         node.toggleAttribute('data-canvas-toolbar-compact', position.width < size.width);
+        node.style.maxInlineSize = position.width + 'px';
+
+        if (node.scrollWidth > node.clientWidth) {
+          node.setAttribute('data-canvas-toolbar-wrapped', '');
+          const wrapped = { width: position.width, height: node.getBoundingClientRect().height };
+          const preferred = positionAgainstTitles(
+            anchor,
+            target,
+            wrapped,
+            viewportSize,
+            canvasBounds,
+            controls,
+            nearbyTitles,
+          );
+          const fit =
+            preferred?.width === wrapped.width
+              ? preferred
+              : placeToolbar(target, wrapped, viewportSize, controlBounds);
+          position =
+            fit?.width === wrapped.width
+              ? fit
+              : {
+                  ...position,
+                  y: Math.max(
+                    margin,
+                    Math.min(position.y, viewportSize.height - wrapped.height - margin),
+                  ),
+                };
+        }
+
         node.style.left = position.x + 'px';
         node.style.top = position.y + 'px';
-        node.style.maxInlineSize = position.width + 'px';
       }
     };
 

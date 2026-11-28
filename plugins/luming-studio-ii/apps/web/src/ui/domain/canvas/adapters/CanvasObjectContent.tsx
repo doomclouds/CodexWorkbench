@@ -2,6 +2,7 @@ import type { ComponentType, ReactNode } from 'react';
 import type { ResolvedConnection } from '../connectors/geometry.js';
 import type { CanvasGeometry, CanvasObjectCapabilities, CanvasObjectDraft } from '../contracts.js';
 import type { CanvasPrimitiveFrameProps } from './built-in-frames.js';
+import { showsIdleHtmlCaption } from './caption-metrics.js';
 import './CanvasObjectContent.css';
 
 interface CanvasObjectContentProps {
@@ -16,6 +17,7 @@ interface CanvasObjectContentProps {
   readonly canEdit: boolean;
   readonly locked: boolean;
   readonly selected: boolean;
+  readonly sectionCaptionWidth?: number;
   readonly mode: CanvasObjectCapabilities['content'];
   readonly Frame?: ComponentType<CanvasPrimitiveFrameProps>;
 }
@@ -37,7 +39,7 @@ function FrameDragCaption({
   CanvasObjectContentProps,
   'object' | 'geometry' | 'zoom' | 'selected' | 'canEdit' | 'locked'
 >) {
-  const captionVisible = object.kind === 'html' && zoom >= 0.5 && geometry.width * zoom >= 96;
+  const captionVisible = object.kind === 'html' && showsIdleHtmlCaption(geometry.width, zoom);
   if (!selected && !captionVisible) {
     return null;
   }
@@ -98,6 +100,7 @@ export function CanvasObjectContent({
   canEdit,
   locked,
   selected,
+  sectionCaptionWidth,
   mode,
   Frame,
 }: CanvasObjectContentProps) {
@@ -111,6 +114,7 @@ export function CanvasObjectContent({
       content={showCaption ? content : undefined}
       showCaption={showCaption}
       selected={selected}
+      sectionCaptionWidth={sectionCaptionWidth}
     />
   );
 

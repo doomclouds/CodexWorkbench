@@ -2,6 +2,7 @@ import { memo, useCallback, useMemo, useRef, useSyncExternalStore } from 'react'
 import type { CSSProperties, ReactNode } from 'react';
 
 import { builtInFrame, CanvasObjectContent } from '../adapters/index.js';
+import { showsIdleHtmlCaption } from '../adapters/caption-metrics.js';
 import type { ResolvedConnection } from '../connectors/geometry.js';
 import type {
   CanvasObjectCapabilities,
@@ -36,12 +37,15 @@ interface CanvasObjectsProps {
   payloads: CanvasObjectStore<CanvasObjectPayload>;
   drafts?: readonly CanvasDraftView[];
   zoom?: number;
+  sectionCaptionWidths?: ReadonlyMap<string, number>;
   activeZoom: CanvasObjectStore<number>;
   activeZoomIds: ReadonlySet<string>;
   activeEmbedId?: string;
   editRequest?: { readonly id: string; readonly sequence: number };
   formatObjectRequest?: CanvasProps['formatObjectRequest'];
   viewing?: boolean;
+  presentationIds?: ReadonlySet<string>;
+  backgroundZoom?: number;
   focusObjectId?: string;
   expandedObjectId?: string;
   canEditExpandedObject?: boolean;
@@ -75,8 +79,10 @@ interface CanvasRenderedObjectProps {
   connectorRoute?: ResolvedConnection;
   extension?: CanvasObjectExtension;
   frame?: ReturnType<typeof builtInFrame>;
+  hidden?: boolean;
   selected?: boolean;
   singleSelected?: boolean;
+  sectionCaptionWidth?: number;
   keepPassiveContent?: boolean;
   embedActive?: boolean;
   canEdit?: boolean;
@@ -243,6 +249,20 @@ function passiveBody(
   return extension.isPassiveContentVisible?.(view) === false ? false : body;
 }
 
+function hoverTitle(
+  object: CanvasObjectDraft,
+  width: number,
+  zoom: number,
+  id: string | undefined,
+  focusedReading: boolean | undefined,
+) {
+  const available = id !== undefined && !focusedReading;
+
+  return available && object.kind === 'html' && !showsIdleHtmlCaption(width, zoom)
+    ? object.label
+    : undefined;
+}
+
 const CanvasObjectView = memo(
   ({
     object,
@@ -253,8 +273,10 @@ const CanvasObjectView = memo(
     connectorRoute,
     extension,
     frame,
+    hidden,
     selected = false,
     singleSelected,
+    sectionCaptionWidth,
     keepPassiveContent,
     embedActive = false,
     canEdit = false,
@@ -361,7 +383,10 @@ const CanvasObjectView = memo(
         data-canvas-locked={locked ? '' : undefined}
         data-canvas-focused-reading={focusedAttribute}
         data-canvas-controls={focusedAttribute}
+        hidden={hidden}
+        inert={hidden}
         aria-hidden={draft || undefined}
+        title={hoverTitle(object, geometry.width, zoom, id, focusedReading)}
         style={objectStyle(object, geometry, zoom, focusedReading)}
       >
         <CanvasObjectContent
@@ -376,6 +401,7 @@ const CanvasObjectView = memo(
           canEdit={canEdit}
           locked={locked === true}
           selected={selected}
+          sectionCaptionWidth={sectionCaptionWidth}
           mode={mode}
           Frame={frame?.Frame}
         />
@@ -415,7 +441,11 @@ const SubscribedCanvasObject = memo(
         {...props}
         id={id}
         payload={payload}
-        zoom={objectZoom(props.frame, extension, exactZoom ?? props.zoom)}
+        zoom={objectZoom(
+          props.frame,
+          extension,
+          props.hidden ? props.zoom : (exactZoom ?? props.zoom),
+        )}
         canEdit={props.canEdit && caption}
         object={preview?.object ?? props.object}
         geometry={preview?.geometry ?? props.geometry}
@@ -445,6 +475,31 @@ function allowedFormatRequest(
   return request;
 }
 
+function objectPresentation(
+  id: string,
+  {
+    presentationIds,
+    backgroundZoom,
+    zoom = 1,
+    viewing,
+    activeEmbedId,
+    annotateEmbeds,
+  }: Pick<
+    CanvasObjectsProps,
+    'presentationIds' | 'backgroundZoom' | 'zoom' | 'viewing' | 'activeEmbedId'
+  > & {
+    annotateEmbeds: boolean;
+  },
+) {
+  const hidden = presentationIds?.has(id) === false;
+
+  return {
+    hidden,
+    embedActive: !hidden && (viewing || id === activeEmbedId || annotateEmbeds),
+    zoom: hidden ? (backgroundZoom ?? zoom) : zoom,
+  };
+}
+
 export const CanvasObjects = memo(
   ({
     objects,
@@ -456,12 +511,15 @@ export const CanvasObjects = memo(
     payloads,
     drafts,
     zoom = 1,
+    sectionCaptionWidths,
     activeZoom,
     activeZoomIds,
     activeEmbedId,
     editRequest,
     formatObjectRequest,
     viewing,
+    presentationIds,
+    backgroundZoom,
     focusObjectId,
     expandedObjectId,
     canEditExpandedObject,
@@ -487,6 +545,14 @@ export const CanvasObjects = memo(
   }: CanvasObjectsProps) => {
     const selectedIds = useMemo(() => new Set(selection), [selection]);
     const annotateEmbeds = Boolean(annotationActive && onAnnotateContent);
+    const presentation = {
+      presentationIds,
+      backgroundZoom,
+      zoom,
+      viewing,
+      activeEmbedId,
+      annotateEmbeds,
+    };
     const documentTools = { readDocumentAsset, uploadDocumentImage };
     const editPermissions = { canEdit, canEditExpandedObject };
     const allowManagedAnnotation = Boolean(annotationActive && hasContentEditPermission);
@@ -527,10 +593,11 @@ export const CanvasObjects = memo(
           connectorRoute={connectorRoute}
           extension={extension}
           frame={frame}
+          {...objectPresentation(id, presentation)}
           selected={selected}
           singleSelected={singleSelected}
+          sectionCaptionWidth={sectionCaptionWidths?.get(id)}
           keepPassiveContent={extension?.isPassiveContentVisible ? activeLabel : undefined}
-          embedActive={viewing || id === activeEmbedId || annotateEmbeds}
           focusedReading={focused}
           expanded={expanded}
           canEdit={editable}
@@ -553,7 +620,6 @@ export const CanvasObjects = memo(
           onObjectNavigation={onObjectNavigation}
           onObjectRetentionChange={onObjectRetentionChange}
           onObjectEditingChange={onObjectEditingChange}
-          zoom={zoom}
         />
       );
     });

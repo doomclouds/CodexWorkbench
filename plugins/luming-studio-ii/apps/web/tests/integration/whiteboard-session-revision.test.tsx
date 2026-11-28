@@ -586,3 +586,79 @@ test('coalesces room revision gaps and ordering invalidations while a scene is a
     close();
   }
 });
+
+test.each(['room', 'receipt before room'] as const)(
+  'replays the continuous room changes received during a scene recovery with %s',
+  async (source) => {
+    const initial = documentObject('原版正文', 0n, 0n);
+    const baseline = { ...initial, geometryVersion: 2n };
+    const moved = { ...baseline, geometryVersion: 3n, geometry: { ...baseline.geometry, x: 48 } };
+    const latest = { ...moved, geometryVersion: 4n, geometry: { ...moved.geometry, y: 32 } };
+    const recovery = deferScene();
+    const payloadReads: (readonly string[])[] = [];
+    const responses = [
+      Promise.resolve(boardScene(0n, initial)),
+      recovery.response,
+      Promise.resolve(boardScene(4n, latest)),
+    ];
+    let sceneReads = 0;
+    const session = createWhiteboardSession(
+      {
+        getScene() {
+          return responses[sceneReads++] ?? Promise.reject(new Error('Unexpected scene request.'));
+        },
+        async getPayloads(_board, ids) {
+          payloadReads.push(ids);
+          return documentPayloads(ids);
+        },
+      },
+      boardId,
+    );
+    const opened = nextSnapshot(session);
+    const close = session.open();
+    try {
+      await opened;
+      const loaded = nextSnapshot(session);
+      session.observeVisible([objectId]);
+      const before = await loaded;
+      if (before.kind !== 'ready') {
+        throw new Error('The initial whiteboard did not become ready.');
+      }
+
+      const invalidation = { changedObjectIds: [], removedObjectIds: [], refreshScene: true };
+      session.acceptRoomContent({ ...invalidation, revision: 0n });
+      expect(sceneReads).toBe(1);
+      session.acceptRoomContent({ ...invalidation, revision: 2n });
+      if (source === 'receipt before room') {
+        session.acceptEdit({
+          kind: 'applied',
+          boardId,
+          commandId: 'recovery-confirmed-write',
+          revision: 4n,
+          objects: [latest],
+          removedIds: [],
+          order: [],
+          payloads: [],
+        });
+      }
+      const update = { changedObjectIds: [objectId], removedObjectIds: [], refreshScene: false };
+      session.acceptRoomContent({ ...update, revision: 3n, changedObjects: [moved] });
+      session.acceptRoomContent({ ...update, revision: 4n, changedObjects: [latest] });
+      expect(session.getSnapshot()).toBe(before);
+      expect(sceneReads).toBe(2);
+
+      const ready = nextSnapshot(session);
+      recovery.deliver(boardScene(2n, baseline));
+      const after = await ready;
+      expect(after).toMatchObject({ kind: 'ready', scene: boardScene(4n, latest) });
+      expect(after.kind === 'ready' && after.payloads.get(objectId)).toBe(
+        before.payloads.get(objectId),
+      );
+      session.acceptRoomContent({ ...invalidation, revision: 4n });
+      expect(sceneReads).toBe(2);
+      expect(payloadReads).toEqual([[objectId]]);
+    } finally {
+      close();
+    }
+  },
+);

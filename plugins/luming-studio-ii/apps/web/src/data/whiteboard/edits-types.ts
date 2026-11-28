@@ -324,6 +324,7 @@ export type BoardEditRejection =
   | 'tooLarge'
   | 'invalidImage'
   | 'invalidVideo'
+  | 'inlineHtmlResource'
   | 'unknown';
 
 interface BoardEditApplied extends BoardEditIdentity {

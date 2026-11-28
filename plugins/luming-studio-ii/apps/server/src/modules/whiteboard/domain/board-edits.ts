@@ -10,7 +10,8 @@ export type BoardEditRejection =
   | 'versionUnavailable'
   | 'tooLarge'
   | 'invalidImage'
-  | 'invalidVideo';
+  | 'invalidVideo'
+  | 'inlineHtmlResource';
 
 export interface BoardEditIdentity {
   readonly boardId: string;

@@ -36,6 +36,7 @@ export interface RoomPresenceSlot {
   readonly participants: ReactNode;
   readonly notice: ReactNode;
   readonly overlay: ReactNode;
+  readonly connection?: 'connecting' | 'reconnecting';
   readonly accessLost: boolean;
   readonly feedbackUpdateKey?: string;
   readonly viewerActorId?: string;
@@ -98,11 +99,7 @@ function RoomPresenceNotice({
 
   const reconnecting = status === 'reconnecting';
   if (!name) {
-    return reconnecting ? (
-      <div className="room-presence-banner" role="status">
-        正在重新连接白板
-      </div>
-    ) : null;
+    return null;
   }
 
   let text = '正在跟随 ' + name + (agent ? ' 的工作区' : ' 的视角');
@@ -401,6 +398,7 @@ export function RoomPresenceSurface(props: RoomPresenceSurfaceProps) {
 
   return render({
     accessLost: status === 'accessLost',
+    connection: status === 'connecting' || status === 'reconnecting' ? status : undefined,
     feedbackUpdateKey: snapshot.feedbackUpdateKey,
     viewerActorId: snapshot.actorId,
     suggestionsUpdateKey: snapshot.suggestionsUpdateKey,

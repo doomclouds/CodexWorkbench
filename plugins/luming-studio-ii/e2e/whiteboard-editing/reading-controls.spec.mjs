@@ -1,6 +1,11 @@
 import {
+  countOverviewEmbeds,
+  embedFrame,
   expect,
   observe,
+  observeEmbedPayloadReads,
+  observeViewingFrames,
+  observeViewingLayers,
   readCanvas,
   readViewingInk,
   screenshot,
@@ -221,6 +226,146 @@ test("[EDIT-VIEW-02] 单选与混选全屏观看支持缩放、适配、返回�
     cameraRestored: true,
     triggerFocusRestored: true,
   });
+});
+
+test("[EDIT-VIEW-06] 连续打开 A、B 的首帧只显示当前 HTML，退出保留画布", async ({
+  page,
+  studio,
+}, testInfo) => {
+  const objects = [
+    { id: "reading-html-a", label: "图解 A", x: 100, heading: "A 的正文" },
+    { id: "reading-html-b", label: "图解 B", x: 1040, heading: "B 的正文" },
+  ].map((object) => ({
+    ...object,
+    kind: "html",
+    y: 120,
+    width: 220,
+    height: 210,
+    html: `<h1>${object.heading}</h1>`,
+  }));
+  const board = await studio.seedBasicBoard({ title: "HTML 全屏切换", objects });
+  const reads = observeEmbedPayloadReads(page, studio);
+  await openBoard(page, board);
+  for (const { label, heading } of objects) {
+    await expect(embedFrame(page, label).getByRole("heading", { name: heading })).toBeVisible();
+  }
+  const before = await readCanvas(page, studio);
+  const initialReads = reads().length;
+  const sample = await observeViewingFrames(
+    page,
+    studio,
+    objects.map(({ id }) => id),
+  );
+
+  for (const [index, { id, label, heading }] of objects.entries()) {
+    await openViewing(page, studio, id);
+    await expect
+      .poll(async () => (await sample()).opens[index]?.firstFrame)
+      .toEqual([{ id, width: expect.any(Number) }]);
+    const { opened, firstFrame } = (await sample()).opens[index];
+    expect(opened.map((entry) => entry.id)).toEqual([id]);
+    if (studio.edition === "ii") {
+      const ordinaryWidth = before.objects.find((entry) => entry.id === id).box.width;
+      expect.soft(firstFrame[0].width).toBeGreaterThan(ordinaryWidth * 2);
+    }
+    await expect(embedFrame(page, label).getByRole("heading", { name: heading })).toBeVisible();
+    await screenshot(page, testInfo, "viewing-html-" + (index === 0 ? "a" : "b"));
+    await button(page, "退出全屏观看").click();
+    await expect(viewing(page)).toBeHidden();
+    await expectCamera(page, studio, before);
+    for (const frame of (await sample()).frames) {
+      expect.soft(frame).toMatchObject({ sameNode: true, detached: false, loads: 0 });
+    }
+    expect(reads()).toHaveLength(initialReads);
+  }
+
+  await screenshot(page, testInfo, "viewing-html-original-canvas");
+  await observe(testInfo, "viewing-html-continuity", {
+    ...(await sample()),
+    newPayloadReads: reads().length - initialReads,
+    restoredCamera: before.pan,
+    restoredZoom: before.zoom,
+  });
+});
+
+test("[EDIT-VIEW-07] 从 5% 图解缩略图连续观看时只应用一次目标视口", async ({
+  page,
+  studio,
+}, testInfo) => {
+  const objects = [
+    { id: "low-html-a", label: "概览 A", x: 100, heading: "低倍正文 A", color: "#d4eaff" },
+    { id: "low-html-b", label: "概览 B", x: 4000, heading: "低倍正文 B", color: "#ffe6b5" },
+  ].map((object) => ({
+    ...object,
+    kind: "html",
+    y: 120,
+    width: 1440,
+    height: 1120,
+    html: `<main style="background:${object.color};width:100%;height:100%"><h1>${object.heading}</h1></main>`,
+  }));
+  const board = await studio.seedBasicBoard({ title: "低倍 HTML 全屏", objects });
+  await openBoard(page, board);
+  const zoom = button(page, "缩放菜单");
+  await zoom.click();
+  const menu = page.getByRole("menu", { name: "缩放与视图", exact: true });
+  await menu.getByRole("menuitem", { name: "25%", exact: true }).click();
+  await expect(zoom).toHaveText("25%");
+  const { bounds } = await readCanvas(page, studio);
+  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+  await page.keyboard.down("Control");
+  try {
+    for (let index = 0; index < 13; index++) {
+      await page.mouse.wheel(0, 120);
+    }
+  } finally {
+    await page.keyboard.up("Control");
+  }
+  await expect(zoom).toHaveText("5%");
+  await expect.poll(() => countOverviewEmbeds(page, studio)).toBe(2);
+  const before = await readCanvas(page, studio);
+  const layers =
+    studio.edition === "ii"
+      ? await observeViewingLayers(
+          page,
+          objects.map(({ id }) => id),
+        )
+      : undefined;
+
+  if (layers) {
+    expect((await layers()).current.visible.map(({ kind }) => kind)).toEqual(["img", "img"]);
+  }
+  await screenshot(page, testInfo, "viewing-low-overview");
+
+  for (const [index, { id, label, heading }] of objects.entries()) {
+    await openViewing(page, studio, id);
+    if (layers) {
+      await expect.poll(async () => (await layers()).opens[index]?.length).toBe(5);
+      const frames = (await layers()).opens[index];
+      const settled = frames.at(-1);
+      const current = settled.visible[0];
+      const centeredY = settled.canvas.y + (settled.canvas.height - current.height) / 2;
+
+      expect.soft(Math.abs(current.y - centeredY)).toBeLessThan(2);
+      for (const frame of frames) {
+        expect.soft(frame).toEqual(settled);
+        expect.soft(frame.mounted).toBe(true);
+        expect.soft(frame.visible).toEqual([expect.objectContaining({ id, kind: "iframe" })]);
+        expect.soft(frame.visible[0]?.width ?? 0).toBeGreaterThan(600);
+        expect.soft(Number(frame.visible[0]?.zoom)).toBeGreaterThan(0.5);
+      }
+    }
+    await expect(embedFrame(page, label).getByRole("heading", { name: heading })).toBeVisible();
+    await screenshot(page, testInfo, "viewing-low-" + (index === 0 ? "a" : "b"));
+    await button(page, "退出全屏观看").click();
+    await expect(viewing(page)).toBeHidden();
+    await expectCamera(page, studio, before);
+  }
+
+  await observe(
+    testInfo,
+    "viewing-low-layers",
+    (await layers?.()) ?? { restoredZoom: before.zoom },
+  );
 });
 
 test("[EDIT-VIEW-03] 临时荧光笔可取消、淡出、清除，白板零持久", async ({

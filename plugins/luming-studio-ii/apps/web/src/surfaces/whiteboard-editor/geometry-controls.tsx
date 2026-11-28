@@ -1,6 +1,6 @@
-import { Check, Ellipsis, Layers, Lock, LockOpen, MessageSquare } from 'lucide-react';
+import { Ellipsis, Layers, Lock, LockOpen, MessageSquare } from 'lucide-react';
 import { useEffect, useEffectEvent, useState } from 'react';
-import { ActionMenu, OperationNotice, StatusText } from '../../ui/base/index.js';
+import { ActionMenu, OperationNotice } from '../../ui/base/index.js';
 import type {
   WhiteboardArrangePreset,
   WhiteboardLayerDirection,
@@ -309,27 +309,6 @@ export function GeometrySelectionActions({
 
 interface GeometryFeedbackProps {
   readonly controls: ReturnType<typeof useGeometryEdits>;
-}
-
-export function GeometryStatus({ controls }: GeometryFeedbackProps) {
-  switch (controls.state.kind) {
-    case 'saving':
-      return <StatusText message="保存中" busy announcement="polite" />;
-    case 'checking':
-      return <StatusText message="正在查询回执" busy announcement="polite" />;
-    case 'saved':
-      return (
-        <span className="whiteboard-editor__saved" role="status">
-          <Check size={13} />
-          已保存
-        </span>
-      );
-    case 'idle':
-    case 'unknown':
-    case 'conflict':
-    case 'rejected':
-      return null;
-  }
 }
 
 export function GeometryNotice({ controls }: GeometryFeedbackProps) {

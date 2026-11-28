@@ -37,6 +37,7 @@ const restoreMessages: Readonly<Record<BoardEditRejection, string>> = {
   tooLarge: '恢复范围超过大小限制。',
   invalidImage: '恢复所需图片已不可用。',
   invalidVideo: '恢复所需视频已不可用。',
+  inlineHtmlResource: 'HTML 含有新增的 data: 资源。',
   unknown: '恢复未能完成。',
 };
 

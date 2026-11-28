@@ -1,7 +1,11 @@
 import {
+  AlertCircle,
   ArrowLeft,
+  Check,
   ChevronDown,
   Clock3,
+  LoaderCircle,
+  Lock,
   Maximize,
   MessageSquare,
   Moon,
@@ -26,9 +30,21 @@ export { GeometryToolbar as BoardToolbar } from './GeometryToolbar.js';
 
 export type BoardTool = GeometryToolbarProps['tool'];
 
+const boardStatuses = {
+  saved: { label: '已保存', icon: Check, pending: false },
+  saving: { label: '保存中', icon: LoaderCircle, pending: true },
+  checking: { label: '正在查询回执', icon: LoaderCircle, pending: true },
+  readonly: { label: '只读', icon: Lock, pending: false },
+  connecting: { label: '正在连接白板', icon: LoaderCircle, pending: true },
+  reconnecting: { label: '正在重新连接白板', icon: LoaderCircle, pending: true },
+  'save-issue': { label: '保存未完成', icon: AlertCircle, pending: false },
+} as const;
+
+export type BoardHeaderStatus = keyof typeof boardStatuses;
+
 interface BoardHeaderProps {
   readonly title: string;
-  readonly status: ReactNode;
+  readonly status: BoardHeaderStatus;
   readonly participants?: ReactNode;
   readonly canManage?: boolean;
   readonly onBack?: () => void;
@@ -68,6 +84,24 @@ export function BoardDocumentChrome(props: FeedbackToolsProps) {
 const unavailable = '当前白板服务暂未提供此操作';
 const lanSharingLabel = '局域网共享已开启';
 const titleLimit = 200;
+
+function BoardStatus({ status }: Pick<BoardHeaderProps, 'status'>) {
+  const { label, icon: Icon, pending } = boardStatuses[status];
+
+  return (
+    <span
+      className="whiteboard-chrome__status"
+      data-status={status}
+      role="status"
+      aria-busy={pending || undefined}
+      aria-label={label}
+      title={label}
+    >
+      <Icon size={15} aria-hidden="true" />
+      <span className="whiteboard-chrome__status-label">{label}</span>
+    </span>
+  );
+}
 
 function BoardTitle({ title, titleEditor }: BoardTitleProps) {
   const skipBlur = useRef(false);
@@ -236,7 +270,7 @@ export function BoardHeader({
         )}
         {!canManage && <Share2 className="whiteboard-chrome__guest" size={22} aria-hidden="true" />}
         <BoardTitle title={title} titleEditor={canManage ? titleEditor : undefined} />
-        <div className="whiteboard-chrome__status">{status}</div>
+        <BoardStatus status={status} />
       </div>
       <div className="whiteboard-chrome__actions">
         {participants}

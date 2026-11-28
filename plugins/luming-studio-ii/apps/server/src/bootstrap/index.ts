@@ -15,6 +15,7 @@ import { createFeedbackRepository } from '../infrastructure/adapters/feedback/in
 import {
   createBoardSuggestionRepository,
   createWhiteboardRepository,
+  recordAgentBoardCreationVersion,
   recordBoardLifecycleVersion,
   validateImportedObject,
 } from '../infrastructure/adapters/index.js';
@@ -27,7 +28,10 @@ import {
   validateSvgUpload,
 } from '../infrastructure/platform/index.js';
 import { createArchiveImportApplication } from '../modules/archives/application/index.js';
-import { createCatalogApplication } from '../modules/catalog/application/index.js';
+import {
+  createCatalogApplication,
+  createCatalogChangeEvents,
+} from '../modules/catalog/application/index.js';
 import {
   createFeedbackApplication,
   FeedbackThreadNotFoundError,
@@ -130,6 +134,7 @@ function stopListening(server: HttpServer): Promise<void> {
 
 export function createWhiteboardServer(options: WhiteboardServerOptions): WhiteboardServer {
   const database = openSqliteDatabase(options.databasePath);
+  const catalogChanges = createCatalogChangeEvents(randomUUID());
   const ownerDisplayName = options.sharing?.ownerDisplayName?.trim() || undefined;
   let server: HttpServer;
   let httpOptions: HttpOptions;
@@ -142,7 +147,7 @@ export function createWhiteboardServer(options: WhiteboardServerOptions): Whiteb
   };
 
   try {
-    const repository = createWhiteboardRepository(database);
+    const repository = createWhiteboardRepository(database, catalogChanges.publish);
     const application = createWhiteboardApplication(repository, Date.now, {
       boardChanges,
       renderPng: renderSvgPng,
@@ -153,8 +158,17 @@ export function createWhiteboardServer(options: WhiteboardServerOptions): Whiteb
         ownerDisplayName,
       ),
     });
-    const archives = createArchiveImportRepository(database, validateImportedObject);
-    const catalog = createCatalogRepository(database, recordBoardLifecycleVersion);
+    const archives = createArchiveImportRepository(
+      database,
+      validateImportedObject,
+      catalogChanges.publish,
+    );
+    const catalog = createCatalogRepository(
+      database,
+      recordBoardLifecycleVersion,
+      recordAgentBoardCreationVersion,
+      catalogChanges.publish,
+    );
     const catalogApplication = createCatalogApplication(catalog, {
       newBoardId: randomUUID,
       now: Date.now,
@@ -174,7 +188,7 @@ export function createWhiteboardServer(options: WhiteboardServerOptions): Whiteb
       onChanged: (boardId) => rooms.publishDiscussionChange(boardId, 'feedbackChanged'),
     });
     const suggestions = createBoardSuggestionApplication(
-      createBoardSuggestionRepository(database),
+      createBoardSuggestionRepository(database, catalogChanges.publish),
       {
         now: Date.now,
         newId: randomUUID,
@@ -231,6 +245,7 @@ export function createWhiteboardServer(options: WhiteboardServerOptions): Whiteb
     httpOptions = {
       application,
       catalogApplication,
+      catalogChanges,
       archiveApplication,
       features: {
         editor: createBoardEditorApplication(repository, Date.now, validateSvgUpload, boardChanges),
@@ -282,6 +297,7 @@ export function createWhiteboardServer(options: WhiteboardServerOptions): Whiteb
 
   async function shutDown() {
     try {
+      catalogChanges.close();
       rooms.close();
       if (starting) {
         await starting;

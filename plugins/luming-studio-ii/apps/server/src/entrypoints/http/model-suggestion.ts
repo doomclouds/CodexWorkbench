@@ -47,6 +47,12 @@ function responseFailure(status: number) {
   if (status === 413) {
     return refusal('TOO_LARGE', '建议内容超过单次提交限制。');
   }
+  if (status === 422) {
+    return refusal(
+      'INLINE_HTML_RESOURCE',
+      'HTML 含有新增的 data: 资源。请改用系统回退字体或已导入的白板素材。',
+    );
+  }
   if (status >= 500) {
     return refusal('UNAVAILABLE', '本机白板服务暂时无法接收建议。');
   }

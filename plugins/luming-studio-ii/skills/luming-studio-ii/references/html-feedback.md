@@ -14,6 +14,12 @@
 
 给可能被引用的节点、连线、标签、分组写入区域内唯一的 `data-studio-id`，如 `gateway`、`gateway-to-worker`。局部改名、换色或移动时保留稳定标识。已有内容缺失标识时，对照原文、父级和界面可见目标定位。确定用户确要删除节点后保留备注的历史证据。节点不存在或有歧义时先说明，不把旧备注改挂到邻近的相似节点。
 
+## HTML 资源检查
+
+- 新建、导入、复制或修改 HTML 时，检查 `@font-face`、CSS `url()` 和 `image-set()`、`img` 的 `src` 与 `srcset`、SVG `image` 的 `href` 与 `xlink:href` 等资源位置。禁止新增 `data:` 资源，包括 Base64 和百分号编码。普通 HTML、直接编写的 SVG 图形和 `href="#node"` 等本页引用可继续使用。
+- 字体使用设备上的字体及系统回退，见[外观规则](appearance.md)。图解需要使用本地图片时，仅导入一次，通过 `artifact_manage action: "asset-import"` 取得该白板管理的 `asset.src`，在 HTML 中复用返回的引用。
+- 已保存的旧区域仍可打开和导出。编辑无关文字或布局时可保留已有内联引用及其次数，适当时用已导入资源替换旧引用。若保存或提交建议收到 `INLINE_HTML_RESOURCE`，去掉新引入的内联资源再提交。
+
 ## 读取与更新
 
 1. 从附件取得 `sourceRef: {kind: "feedback", boardId, feedbackThreadId}`，用 `artifact_context` 读冻结摘录、目标和保存版次。已知备注 ID 时也可用 `artifact_read mode: "context", feedbackId`。`artifact_feedback action: "get"` 读取讨论和回复。建议使用附件提供的 `sourceId`，含义见[上下文读取](context-reading.md)。

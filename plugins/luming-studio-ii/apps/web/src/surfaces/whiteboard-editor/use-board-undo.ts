@@ -63,6 +63,7 @@ const reversalRejections = {
   tooLarge: '这次编辑超出可撤销的大小。',
   invalidImage: '相关图片已无法使用。',
   invalidVideo: '相关视频已无法使用。',
+  inlineHtmlResource: 'HTML 含有新增的 data: 资源。',
   unknown: '这次编辑无法撤销或重做。',
 } satisfies Readonly<Record<BoardEditRejection, string>>;
 

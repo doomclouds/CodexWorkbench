@@ -1,3 +1,4 @@
+import { addsInlineEmbedResource } from './embed-resource-validation.js';
 import type { JsonObject, JsonValue, PayloadRecord } from './model.js';
 import { canAdvanceVersion } from './movement.js';
 import {
@@ -75,6 +76,11 @@ export function editEmbedSource(
   const label = title.trim() || 'HTML 图解';
   if (label.length > contentTitleLimit || html.length > 1024 * 1024) {
     return { kind: 'rejected', reason: 'tooLarge' };
+  }
+
+  const previous = typeof current.data.html === 'string' ? current.data.html : '';
+  if (addsInlineEmbedResource(html, previous)) {
+    return { kind: 'rejected', reason: 'inlineHtmlResource' };
   }
 
   const sourceRevision = (sourceChanged ? revision + 1n : revision).toString();

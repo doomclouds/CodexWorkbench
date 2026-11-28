@@ -155,6 +155,7 @@ async function setPercent(page, studio, percent) {
   const preset =
     new Map([
       [5, 25],
+      [10, 25],
       [60, 50],
     ]).get(percent) ?? percent;
   await zoomAction(page, `${preset}%`);
@@ -162,6 +163,9 @@ async function setPercent(page, studio, percent) {
   let wheel;
   if (percent === 5) {
     wheel = await zoomByWheel(page, studio, 120, 13);
+  }
+  if (percent === 10) {
+    wheel = await zoomByWheel(page, studio, 120, 5);
   }
   if (percent === 60) {
     wheel = await zoomByWheel(page, studio, -120);
@@ -310,27 +314,54 @@ test("[EDIT-ZOOM-01] 5% 到 200% 的标签可读性和富内容呈现随视口�
   expect(await studio.readBoard(board)).toEqual(saved);
 });
 
+async function checkSelectionToolbar(page, studio) {
+  const items = page.getByRole("toolbar", { name: "选区格式", exact: true });
+  await expect(items).toBeVisible();
+  const horizontalOverflow = (await readCanvas(page, studio)).toolbarHorizontalOverflow;
+  expect(horizontalOverflow).not.toBeNull();
+  expect(horizontalOverflow).toBeLessThanOrEqual(1);
+  for (const action of await items.getByRole("button").all()) {
+    await expect(action).toBeInViewport({ ratio: 1 });
+    if (await action.isEnabled()) {
+      await action.click({ trial: true });
+    }
+  }
+  return { items, horizontalOverflow };
+}
+
 test("[EDIT-ZOOM-02] 60% 窄短窗口选中 HTML 时菜单界限与入口可用，低倍率手柄保持可操作大小", async ({
   page,
   studio,
 }, testInfo) => {
+  const longTitle = "发布进展图解、里程碑与交付风险的长期架构验收记录";
   const objects = [
-    { ...embed, x: 399, y: 146 },
+    { ...embed, label: longTitle, x: 399, y: 146 },
     { ...shape, x: 90, y: 360 },
     { ...peer, x: 730, y: 360 },
     { ...connection, x: 242, y: 400, width: 488 },
   ];
   const board = await studio.seedBasicBoard({ title: "短窗口缩放与选择", objects });
-  const viewport = { width: 420, height: 345 };
-  await page.setViewportSize(viewport);
+  await page.setViewportSize({ width: 1366, height: 820 });
   await page.emulateMedia({ colorScheme: "light" });
   await openBoard(page, board);
   await setPercent(page, studio, 60);
-  await page.getByText(embed.label, { exact: true }).click();
+  await page.getByText(longTitle, { exact: true }).click();
+  const desktop = await checkSelectionToolbar(page, studio);
+  await expect(desktop.items.getByText(longTitle, { exact: true })).toHaveAttribute(
+    "title",
+    longTitle,
+  );
+  await screenshot(page, testInfo, "html-selection-actions-desktop-60");
+  await page.reload();
+  const viewport = { width: 420, height: 345 };
+  await page.setViewportSize(viewport);
+  await openBoard(page, board);
+  await setPercent(page, studio, 60);
+  await page.getByText(longTitle, { exact: true }).click();
   await expect.poll(async () => Boolean((await readCanvas(page, studio)).selection)).toBe(true);
   const beforeFit = await readCanvas(page, studio);
   expect(Math.abs(beforeFit.selection.width - embed.width * beforeFit.zoom)).toBeLessThan(4);
-  const items = page.getByRole("toolbar", { name: "选区格式", exact: true });
+  const { items, horizontalOverflow } = await checkSelectionToolbar(page, studio);
   const more = button(items, "更多操作");
   await expect(more).toBeVisible();
   await expect(more).toBeInViewport({ ratio: 1 });
@@ -344,7 +375,13 @@ test("[EDIT-ZOOM-02] 60% 窄短窗口选中 HTML 时菜单界限与入口可用�
   const screen = { x: 0, y: 0, ...viewport };
   const toolbarFits = viewportContains(screen, toolbarBox);
   const menuFits = viewportContains(screen, menuBox);
-  await observe(testInfo, "short-window-zoom-actions", { toolbarFits, menuFits, viewport });
+  await observe(testInfo, "short-window-zoom-actions", {
+    toolbarFits,
+    menuFits,
+    desktopHorizontalOverflow: desktop.horizontalOverflow,
+    narrowHorizontalOverflow: horizontalOverflow,
+    viewport,
+  });
   await screenshot(page, testInfo, "html-selection-actions-60");
   expect.soft(toolbarFits).toBe(true);
   expect.soft(menuFits).toBe(true);
@@ -380,6 +417,85 @@ test("[EDIT-ZOOM-02] 60% 窄短窗口选中 HTML 时菜单界限与入口可用�
     handlePointerTarget: handleBox.width >= 6 && handleBox.height >= 6,
   });
   await screenshot(page, testInfo, "connector-handles-25");
+});
+
+test("[EDIT-ZOOM-04] 大白板概览标题避让相邻图解，低倍率可识别 HTML 名称", async ({
+  page,
+  studio,
+}, testInfo) => {
+  const enclosing = {
+    ...section,
+    id: "architecture-frame",
+    label: "架构设计全景",
+    x: -80,
+    y: -600,
+    width: 2580,
+    height: 2300,
+  };
+  const nested = {
+    ...section,
+    id: "architecture-section",
+    parentId: enclosing.id,
+    label: "业务架构设计、应用服务和模块依赖关系概览",
+    x: 0,
+    y: 500,
+    width: 2200,
+    height: 950,
+  };
+  const diagram = {
+    ...embed,
+    id: "architecture-diagram",
+    label: "系统边界和部署层级",
+    parentId: enclosing.id,
+    x: 1200,
+    y: -300,
+    width: 700,
+    height: 760,
+    locked: true,
+  };
+  const board = await studio.seedBasicBoard({
+    title: "架构白板概览标题",
+    objects: [enclosing, nested, diagram],
+  });
+  const saved = await studio.readBoard(board);
+  await openBoard(page, board);
+
+  for (const percent of [5, 10, 25, 50]) {
+    await setPercent(page, studio, percent);
+    await expect
+      .poll(async () => {
+        const details = await readZoomDetails(page, studio);
+        const title = item(details, nested.id)?.section;
+        const neighbor = item(details, diagram.id)?.object;
+        return (
+          title &&
+          neighbor &&
+          Math.round(title.screenFont) === 12 &&
+          title.box.x + title.box.width <= neighbor.x
+        );
+      })
+      .toBe(true);
+    const view = await readZoomDetails(page, studio);
+    const object = item(view, diagram.id);
+    if (percent < 50) {
+      expect(object.htmlCaption).toBeNull();
+      expect(object.hoverTitle).toContain(diagram.label);
+    } else {
+      expect(object.htmlCaption?.text).toBe(diagram.label);
+    }
+    const pick = center(object.object);
+    await page.mouse.move(pick.x, pick.y);
+    await page.mouse.click(pick.x, pick.y);
+    await expect.poll(async () => Boolean((await readCanvas(page, studio)).selection)).toBe(true);
+    const toolbar = page.getByRole("toolbar", { name: "选区格式", exact: true });
+    await expect(toolbar.getByText(diagram.label, { exact: true })).toBeInViewport({ ratio: 1 });
+    await screenshot(page, testInfo, `architecture-caption-${percent}`);
+    const { bounds } = await readCanvas(page, studio);
+    await page.mouse.click(bounds.x + 16, bounds.y + bounds.height - 50);
+    await expect.poll(async () => (await readCanvas(page, studio)).selection).toBeNull();
+  }
+
+  expect(await studio.readBoard(board)).toEqual(saved);
 });
 
 async function moveObject(page, point, delta) {

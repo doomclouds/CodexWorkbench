@@ -7,7 +7,8 @@ import { registerTopbarOverlayRuntime } from "./topbar-overlays.mjs";
 import { registerWorkbenchLinkRuntime } from "./workbench-link.mjs";
 
 export { workbenchLinkProbe } from "./workbench-link.mjs";
-export { setRoomConnectionOffline } from "./room-connection.mjs";
+export { observeWorkbenchCatalog, trackWorkbenchCard } from "./workbench-live.mjs";
+export { observeGuestAccessReads, setRoomConnectionOffline } from "./room-connection.mjs";
 export { failNextOlderVersions } from "./history-topbar.mjs";
 export { downloadBoardExport, failNextBoardExport, readBoardDownload } from "./board-download.mjs";
 export { seedTopbarAgentWorkspace, seedTopbarSuggestion } from "./topbar-overlays.mjs";
@@ -15,7 +16,14 @@ export { inspectBoardExport } from "./board-export-fidelity.mjs";
 export { readPeerCursors, readPlacementPreview } from "./canvas-peer-observation.mjs";
 export { controlNextTextSave } from "./canvas-persistence.mjs";
 export { chooseBoardMedia, mediaDisplaySize, mediaPlaying } from "./media.mjs";
-export { chooseHtmlFile, controlNextHtmlSave, embedFrame, inspectEmbedPaint } from "./embed.mjs";
+export {
+  chooseHtmlFile,
+  controlNextHtmlSave,
+  countOverviewEmbeds,
+  embedFrame,
+  inspectEmbedPaint,
+  observeEmbedPayloadReads,
+} from "./embed.mjs";
 export { chooseDocumentImage, readDocumentDownload } from "./document-download.mjs";
 export { failNextDocumentSave } from "./document-failure.mjs";
 export { controlNextTodoSave } from "./todo-save.mjs";
@@ -167,6 +175,7 @@ export { controlNextThumbnail } from "./thumbnails.mjs";
 export { readCanvas } from "./canvas-presentation.mjs";
 export { readZoomDetails } from "./zoom-presentation.mjs";
 export { readViewingInk } from "./reading-ink.mjs";
+export { observeViewingFrames, observeViewingLayers } from "./viewing-frames.mjs";
 export {
   controlNextCanvasSave,
   enableCanvasClipboard,

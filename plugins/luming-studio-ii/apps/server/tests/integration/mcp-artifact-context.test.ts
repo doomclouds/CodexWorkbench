@@ -474,6 +474,42 @@ test('returns exact HTML source only on request and reports a browser-required p
   }
 });
 
+test('reads Markdown, original markup, and plain text by object ID in one request', async () => {
+  const fixture = await contextFixture();
+  try {
+    const { tools } = await fixture.client.listTools();
+    expect(tools.find(({ name }) => name === 'artifact_context')?.title).toBe('读取白板上下文');
+    const result = await fixture.call({
+      boardId,
+      scope: { kind: 'objects', objectIds: ['document-a', 'embed-a', 'card-a'] },
+      include: ['text', 'source'],
+    });
+    expect(result.content).toEqual(
+      expect.arrayContaining([
+        { type: 'text', text: '重点 [card-a]\n准备发布' },
+        { type: 'text', text: expect.stringMatching(/发布记录 \[document-a\]\n#{1,6} 所选记录/u) },
+        {
+          type: 'text',
+          text: '待检查图解 [embed-a]\n<main>图解原文</main><script>privateScript</script><p hidden>hiddenMarker</p>',
+        },
+      ]),
+    );
+    expect(result.structuredContent).toMatchObject({
+      ok: true,
+      data: {
+        revision: '7',
+        objects: expect.arrayContaining([
+          expect.objectContaining({ id: 'card-a', kind: 'text', label: '重点' }),
+          expect.objectContaining({ id: 'document-a', kind: 'document', label: '发布记录' }),
+          expect.objectContaining({ id: 'embed-a', source: { revision: '9', truncated: false } }),
+        ]),
+      },
+    });
+  } finally {
+    await fixture.close();
+  }
+});
+
 test('reads the saved markup text without executing script or returning hidden elements', async () => {
   const fixture = await contextFixture();
   try {

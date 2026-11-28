@@ -143,18 +143,14 @@ export async function workbenchLinkProbe({ page, browser, studio }) {
       const guestContext = await browser.newContext({ locale: "zh-CN", viewport });
       contexts.add(guestContext);
       const guest = await guestContext.newPage();
-      await guest
-        .evaluate((url) => {
-          window.setTimeout(() => window.location.replace(url), 0);
-        }, invite.href)
-        .catch((error) => {
-          const timedOut = error instanceof Error && error.name === "TimeoutError";
-          throw new Error(
-            timedOut
-              ? "The isolated guest invitation did not open in time."
-              : "Unable to open the isolated guest invitation.",
-          );
-        });
+      await guest.goto(invite.href, { waitUntil: "domcontentloaded" }).catch((error) => {
+        const timedOut = error instanceof Error && error.name === "TimeoutError";
+        throw new Error(
+          timedOut
+            ? "The isolated guest invitation did not open in time."
+            : "Unable to open the isolated guest invitation.",
+        );
+      });
 
       return guest;
     },
