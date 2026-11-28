@@ -19,7 +19,7 @@ import { useCanvasInput } from './canvas-input.js';
 import { selectionControls, useCanvasModel } from './canvas-model.js';
 import { createCanvasObjectRegistry } from './canvas-registry.js';
 import { useCanvasRenderActions } from './canvas-render-actions.js';
-import { sectionCaptionWidths } from './canvas-section-captions.js';
+import { canvasCaptionLayout } from './canvas-section-captions.js';
 import type {
   CanvasFitScope,
   CanvasObjectActivation,
@@ -359,7 +359,7 @@ function CanvasSession(props: CanvasProps) {
 
   const isLocked = useCallback((id: string) => isObjectLocked(index, id), [index]);
   const overviewTitles = useMemo(
-    () => sectionCaptionWidths(index, painted, detailZoom),
+    () => canvasCaptionLayout(index, painted, detailZoom),
     [index, painted, detailZoom],
   );
   const activeZoomIds = useMemo(() => {
@@ -429,7 +429,8 @@ function CanvasSession(props: CanvasProps) {
           contentById={props.contentById}
           drafts={drafts}
           zoom={detailZoom}
-          sectionCaptionWidths={overviewTitles}
+          sectionCaptionWidths={overviewTitles.sectionWidths}
+          embedCaptionPlacements={overviewTitles.embedPlacements}
           activeZoom={activeZoom}
           activeZoomIds={activeZoomIds}
           activeEmbedId={activeEmbedId}

@@ -28,6 +28,7 @@ import {
   type UpdateBoardSharingRequestSchema,
 } from '@codexworkbench/luming-studio-ii-contracts/sharing/service';
 import { BoardEditService } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/edits';
+import { BoardHistoryService } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/history';
 import { WhiteboardService } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/service';
 import { expect, test } from 'vitest';
 import { pngImage } from '../fixtures/board-image-bytes.js';
@@ -364,6 +365,47 @@ test('scopes cookie sessions, access tiers and asset bytes to each whiteboard', 
     expect(cookie).not.toContain(String(token_hash));
   }
   expect(stored.invitations.every(({ seed }) => !viewerToken.includes(String(seed)))).toBe(true);
+});
+
+test('keeps trusted owner and guest names with their stable author IDs in board history', async () => {
+  const boardId = await board('History authors');
+  const { listBoardVersions } = BoardHistoryService.method;
+  const creation = await callWhiteboard(server.owner, owner, listBoardVersions, { boardId });
+  expect(creation.versions).toMatchObject([
+    { revision: 0n, actorId: owner, actorName: 'Studio Test Owner' },
+  ]);
+
+  expect((await addImage(boardId)).receipt?.outcome.case).toBe('applied');
+  await update(boardId, 'publish-history-authors', 0n, scopeOperation(SharingScope.LAN));
+  const { cookie, session } = await join(
+    boardId,
+    await invitation(boardId, SharingRole.EDITOR),
+    '现场评审同事',
+  );
+  const guestEdit = await sendGuest(
+    'lan',
+    attachBoardImage,
+    {
+      boardId,
+      commandId: 'guest-drawing',
+      objectId: 'review-drawing',
+      displayName: 'Review.png',
+      geometry: { x: 200, y: 0, width: 200, height: 300 },
+      content: pngImage,
+    },
+    { cookie },
+  );
+  expect((await decodeGuest(guestEdit, attachBoardImage.output)).receipt?.outcome.case).toBe(
+    'applied',
+  );
+
+  await server.restart();
+  const history = await callWhiteboard(server.owner, owner, listBoardVersions, { boardId });
+  expect(history.versions).toMatchObject([
+    { revision: 2n, actorId: session.actorId, actorName: '现场评审同事' },
+    { revision: 1n, actorId: owner, actorName: 'Studio Test Owner' },
+    { revision: 0n, actorId: owner, actorName: 'Studio Test Owner' },
+  ]);
 });
 
 test('revokes active sessions, rejects old links, and persists membership across process restarts', async () => {

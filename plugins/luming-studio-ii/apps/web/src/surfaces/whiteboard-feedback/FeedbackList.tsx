@@ -126,6 +126,7 @@ export function FeedbackList({
   const ready = !pending && !error;
   const empty = ready && threads.length === 0 && !hasVisibleSuggestions;
   const filtered = scope !== 'all' || Boolean(authorId);
+  const emptyMessage = filtered ? '没有符合筛选的备注' : '还没有备注';
 
   return (
     <>
@@ -187,7 +188,10 @@ export function FeedbackList({
       {empty && (
         <div className="whiteboard-feedback__empty">
           <MessageSquare size={24} />
-          <p>{filtered ? '没有符合筛选的备注' : '还没有备注'}</p>
+          <p>{scope === 'pending' ? '暂无待附加备注' : emptyMessage}</p>
+          {scope === 'pending' && (
+            <small>来宾在备注菜单选择「请求房主附加到 Codex」，待处理的备注会显示在这里。</small>
+          )}
           {!filtered && <small>点击顶部备注图标，再选择要讨论的目标。</small>}
         </div>
       )}

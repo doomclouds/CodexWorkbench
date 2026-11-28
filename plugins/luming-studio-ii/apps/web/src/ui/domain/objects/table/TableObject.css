@@ -12,6 +12,17 @@
   flex: 1 1 auto;
 }
 
+.studio-object-table-placeholder {
+  display: grid;
+  inline-size: 100%;
+  block-size: 100%;
+  box-sizing: border-box;
+  place-items: center;
+  overflow: hidden;
+  border: solid var(--studio-ui-border, #cdd0d5);
+  border-radius: 5px;
+}
+
 .studio-object-table-frame {
   display: contents;
 }

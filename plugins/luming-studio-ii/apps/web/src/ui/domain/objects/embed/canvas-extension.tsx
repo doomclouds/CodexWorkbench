@@ -129,6 +129,7 @@ function CanvasEmbedView(props: CanvasObjectViewProps) {
     id,
     interactive,
     selected,
+    viewing,
     focusedReading,
     expanded,
     readOnly,
@@ -165,6 +166,7 @@ function CanvasEmbedView(props: CanvasObjectViewProps) {
   const kind = object.kind === 'diagram' || object.kind === 'chart' ? object.kind : 'html';
   const active = selected || focusedReading || expanded;
   const overviewSize = active || annotationLocations?.nodeIds.length ? undefined : geometry;
+  const frameZoom = viewing ? 1 : zoom;
 
   async function requestValue(operation: CanvasObjectOperation) {
     const receipt = await request(operation);
@@ -252,7 +254,7 @@ function CanvasEmbedView(props: CanvasObjectViewProps) {
         editRequest={editRequest}
         useCanvasTools
         readHtmlSource={readHtmlSource}
-        zoom={zoom}
+        zoom={frameZoom}
         overviewSize={overviewSize}
         preserveScroll
         onNavigation={onNavigation ? handleNavigation : undefined}

@@ -1,7 +1,7 @@
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { BoardHistoryVersion } from '../../data/whiteboard/index.js';
-import { HistoryAgentAvatar } from './HistoryAgentAvatar.js';
+import { HistoryAuthorAvatar } from './HistoryAuthorAvatar.js';
 import { historyAuthorName, isBoardCreation } from './history-records.js';
 
 interface HistoryRecordProps {
@@ -53,13 +53,7 @@ export function HistoryRecord({
         aria-expanded={expanded}
         onClick={onToggle}
       >
-        {agent ? (
-          <HistoryAgentAvatar actorId={entry.actorId} />
-        ) : (
-          <span className="whiteboard-history__avatar" aria-hidden="true">
-            {avatar.slice(0, 1)}
-          </span>
-        )}
+        <HistoryAuthorAvatar actorId={entry.actorId} name={avatar} agent={agent} />
         <span className="whiteboard-history__record-body">
           <span className="whiteboard-history__record-top">
             {actor && <strong title={actor}>{actor}</strong>}

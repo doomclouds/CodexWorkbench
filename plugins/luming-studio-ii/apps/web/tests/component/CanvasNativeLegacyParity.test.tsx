@@ -114,6 +114,91 @@ describe('Canvas legacy native content parity', () => {
     );
   }
 
+  it.each([
+    { fill: undefined, scheme: 'light', zoom: 1 },
+    { fill: '#232730', scheme: 'dark', zoom: 0.25 },
+  ])(
+    'preserves document and todo paper at zoom $zoom before empty payloads arrive',
+    ({ fill, scheme, zoom }) => {
+      fixture.host.style.colorScheme = 'dark';
+      const sceneWithPaper = {
+        ...scene,
+        objects: scene.objects.map((object) =>
+          object.kind === 'document' || object.kind === 'todo' ? { ...object, fill } : object,
+        ),
+      };
+      const props = { scene: sceneWithPaper, initialViewport: { x: 0, y: 0, zoom } };
+
+      render({ ...props, payloadById: new Map() });
+      const docFrame = element(fixture.host, '[data-document-content-unavailable]');
+      const todoFrame = element(fixture.host, '[data-todo-content-unavailable]');
+      const paper = element(docFrame, '.studio-document-unavailable');
+      const todoPaper = todoFrame.style.getPropertyValue('--todo-paper');
+
+      expect(docFrame.dataset.paperScheme).toBe(scheme);
+      expect(todoFrame.dataset.todoScheme).toBe(scheme);
+      expect(docFrame.querySelector('.studio-document-title')?.textContent).toBe('文档');
+      expect(todoFrame.querySelector('.studio-object-todo__title')?.textContent).toBe('清单');
+      expect(paper.style.backgroundColor).not.toBe('');
+      expect(todoPaper).toBe(fill ?? '#EFEFEF');
+
+      render(props);
+      expect(fixture.host.querySelector('[data-document-content-unavailable]')).toBeNull();
+      expect(fixture.host.querySelector('[data-todo-content-unavailable]')).toBeNull();
+      expect(element(fixture.host, '.studio-document-paper').style.backgroundColor).toBe(
+        paper.style.backgroundColor,
+      );
+      expect(
+        element(fixture.host, '[data-todo-id="todo"]').style.getPropertyValue('--todo-paper'),
+      ).toBe(todoPaper);
+    },
+  );
+
+  it.each([
+    { zoom: 0.05, width: 540, height: 420, docLayout: 'outline', todoLayout: 'outline', size: 12 },
+    { zoom: 0.05, width: 1280, height: 560, docLayout: 'thumbnail', todoLayout: 'title', size: 12 },
+    { zoom: 0.18, width: 540, height: 420, docLayout: 'thumbnail', todoLayout: 'title', size: 12 },
+    {
+      zoom: 0.4,
+      width: 680,
+      height: 560,
+      docLayout: 'compact',
+      todoLayout: undefined,
+      size: 12.24,
+    },
+  ])(
+    'uses the same native title layout at $zoom for $width px cards while loading',
+    ({ zoom, width, height, docLayout, todoLayout, size }) => {
+      const props = {
+        scene: {
+          ...scene,
+          objects: scene.objects.map((object) =>
+            object.kind === 'document' || object.kind === 'todo'
+              ? { ...object, geometry: { ...object.geometry, width, height } }
+              : object,
+          ),
+        },
+        initialViewport: { x: 0, y: 0, zoom },
+      };
+
+      render({ ...props, payloadById: new Map() });
+      const waitingDoc = element(fixture.host, '[data-document-content-unavailable]');
+      const waitingTodo = element(fixture.host, '[data-todo-content-unavailable]');
+      expect(waitingDoc.dataset.documentLayout).toBe(docLayout);
+      expect(waitingTodo.dataset.todoHeadingLayout).toBe(todoLayout);
+      const titleSize = waitingTodo.style.getPropertyValue('--todo-title-size');
+      expect(Number.parseFloat(titleSize) * zoom).toBeCloseTo(size);
+
+      render(props);
+      expect(element(fixture.host, '.studio-document-surface').dataset.documentLayout).toBe(
+        docLayout,
+      );
+      const todo = element(fixture.host, '[data-todo-id="todo"]');
+      expect(todo.dataset.todoHeadingLayout).toBe(todoLayout);
+      expect(todo.style.getPropertyValue('--todo-title-size')).toBe(titleSize);
+    },
+  );
+
   it('leaves document and todo scrolling with Canvas until the body owns a single selection', () => {
     render();
     const doc = element(fixture.host, '[aria-label="文档正文"]');

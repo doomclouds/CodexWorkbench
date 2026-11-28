@@ -117,7 +117,7 @@ function ImageObject({
   const openCrop = canCrop ? editor.open : undefined;
 
   return (
-    <div className="luming-media-object">
+    <div className="luming-media-object" data-media-loading={decodedSize ? undefined : ''}>
       <ImagePreview
         src={src}
         label={label}

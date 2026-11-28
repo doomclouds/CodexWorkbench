@@ -8,6 +8,7 @@ import type {
   BoardInvitationJoin,
   SharingCommand,
   SharingGuestSession,
+  SharingMember,
 } from '../../src/data/sharing/index.js';
 import {
   createWhiteboardService,
@@ -341,6 +342,53 @@ test('cancels invite reset with its focus restored, then applies member changes 
       },
     ]);
     expect(button(app.host, '访客甲的访问权限').textContent).toContain('可评论');
+  } finally {
+    app.dispose();
+  }
+});
+
+test('shows relative visits and keeps online, inactive, and removed status authoritative', async () => {
+  const now = Date.now();
+  const minuteAgo = new Date(now - 70_000);
+  const member = { role: 'viewer', active: true, removed: false, online: false } as const;
+  const cases = [
+    ['最近', { lastSeenAtMillis: now - 5000 }, '离线 · 刚刚来过'],
+    ['分钟', { lastSeenAtMillis: minuteAgo.getTime() }, '离线 · 1分钟前来过'],
+    ['小时', { lastSeenAtMillis: now - 3_610_000 }, '离线 · 1小时前来过'],
+    ['旧访客', { lastSeenAtMillis: now - 86_410_000 }, '离线 · 昨天来过'],
+    ['在线', { online: true, lastSeenAtMillis: now - 60_000 }, '在线'],
+    ['停用', { active: false, lastSeenAtMillis: now }, '链接已停用'],
+    ['移除', { removed: true, lastSeenAtMillis: now }, '访问权限已移除'],
+    ['未知状态', { online: undefined, lastSeenAtMillis: now + 1000 }, '刚刚来过'],
+    ['缺少时间', { online: undefined }, '有权访问'],
+    ['无效时间', { lastSeenAtMillis: Number.MAX_SAFE_INTEGER }, '离线'],
+  ] satisfies ReadonlyArray<readonly [string, Partial<SharingMember>, string]>;
+  const sharing = {
+    ...owner,
+    enabled: true,
+    links: [viewerLink],
+    members: cases.map(([name, overrides], index) => ({
+      ...member,
+      ...overrides,
+      name,
+      actorId: 'visited-' + index,
+    })),
+  };
+  const app = appFixture(fixtureService({ getBoardSharing: async () => sharing }));
+
+  try {
+    await app.open();
+    expect(app.host.textContent).toContain('加入的人');
+    for (const [name, , expected] of cases) {
+      const row = [...app.host.querySelectorAll('.board-sharing__row')].find(
+        (candidate) => candidate.querySelector('strong')?.textContent === name,
+      );
+      expect(row?.querySelector('small')?.textContent).toBe(expected);
+    }
+
+    const firstVisit = app.host.querySelector('time[datetime="' + minuteAgo.toISOString() + '"]');
+    expect(firstVisit?.textContent).toBe('1分钟前来过');
+    expect(firstVisit?.getAttribute('title')).toBe(minuteAgo.toLocaleString('zh-CN'));
   } finally {
     app.dispose();
   }

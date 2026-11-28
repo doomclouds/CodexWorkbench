@@ -364,14 +364,13 @@ function withHistoryAuthor(
 
   const profile = actors.get(actorId);
   const agent = profile ? profile.kind === 'agent' : generatedAgentId.test(actorId);
+  const name = profile?.name.trim();
+  if (agent) {
+    return { ...version, actorKind: 'agent', actorName: name || historyAgentName(actorId) };
+  }
 
-  return agent
-    ? {
-        ...version,
-        actorKind: 'agent',
-        actorName: profile?.name.trim() || historyAgentName(actorId),
-      }
-    : version;
+  const ownerPlaceholder = actorId === 'local' && name === '我';
+  return name && name !== actorId && !ownerPlaceholder ? { ...version, actorName: name } : version;
 }
 
 export function readBoardVersions(
@@ -379,6 +378,7 @@ export function readBoardVersions(
   boardId: string,
   before?: bigint,
   limit = defaultPageSize,
+  ownerDisplayName?: string,
 ): readonly BoardVersionSummary[] {
   const cutoff = before === undefined ? '' : 'AND revision < ?3';
   const query = connection.prepare(`
@@ -391,7 +391,7 @@ export function readBoardVersions(
     return [];
   }
 
-  const authors = readBackupActors(connection, boardId);
+  const authors = readBackupActors(connection, boardId, ownerDisplayName);
 
   return rows.map((row) =>
     withHistoryAuthor(withCreationVersion(connection, boardId, row), authors),
@@ -402,23 +402,25 @@ export function readBoardVersion(
   connection: SqliteConnection,
   boardId: string,
   revision: bigint,
+  ownerDisplayName?: string,
 ): BoardVersionSummary | undefined {
   const query = connection.prepare(`
     SELECT ${readVersionColumns} FROM board_versions WHERE board_id = ? AND revision = ?
   `);
   query.setReadBigInts(true);
   const row = query.get(boardId, revision);
-  if (row) {
-    return withCreationVersion(connection, boardId, row);
-  }
-
-  if (revision === 0n) {
+  let version = row ? withCreationVersion(connection, boardId, row) : undefined;
+  if (!version && revision === 0n) {
     const initial = connection
       .prepare('SELECT 1 FROM boards WHERE board_id = ? AND revision = 0')
       .get(boardId);
 
-    return initial && readCreationVersion(connection, boardId);
+    version = initial && readCreationVersion(connection, boardId);
   }
+
+  return (
+    version && withHistoryAuthor(version, readBackupActors(connection, boardId, ownerDisplayName))
+  );
 }
 
 function payloadHistoryJoin(source: string): string {

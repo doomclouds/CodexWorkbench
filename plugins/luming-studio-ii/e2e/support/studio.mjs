@@ -9,12 +9,13 @@ import { registerWorkbenchLinkRuntime } from "./workbench-link.mjs";
 export { workbenchLinkProbe } from "./workbench-link.mjs";
 export { observeWorkbenchCatalog, trackWorkbenchCard } from "./workbench-live.mjs";
 export { observeGuestAccessReads, setRoomConnectionOffline } from "./room-connection.mjs";
-export { failNextOlderVersions } from "./history-topbar.mjs";
+export { failNextOlderVersions, readHistoryAuthorPresentation } from "./history-topbar.mjs";
 export { downloadBoardExport, failNextBoardExport, readBoardDownload } from "./board-download.mjs";
 export { seedTopbarAgentWorkspace, seedTopbarSuggestion } from "./topbar-overlays.mjs";
 export { inspectBoardExport } from "./board-export-fidelity.mjs";
 export { readPeerCursors, readPlacementPreview } from "./canvas-peer-observation.mjs";
 export { controlNextTextSave } from "./canvas-persistence.mjs";
+export { holdObjectPayloads, readObjectLoading } from "./object-payloads.mjs";
 export { chooseBoardMedia, mediaDisplaySize, mediaPlaying } from "./media.mjs";
 export {
   chooseHtmlFile,
@@ -175,7 +176,11 @@ export { controlNextThumbnail } from "./thumbnails.mjs";
 export { readCanvas } from "./canvas-presentation.mjs";
 export { readZoomDetails } from "./zoom-presentation.mjs";
 export { readViewingInk } from "./reading-ink.mjs";
-export { observeViewingFrames, observeViewingLayers } from "./viewing-frames.mjs";
+export {
+  observeEmbedViewport,
+  observeViewingFrames,
+  observeViewingLayers,
+} from "./viewing-frames.mjs";
 export {
   controlNextCanvasSave,
   enableCanvasClipboard,

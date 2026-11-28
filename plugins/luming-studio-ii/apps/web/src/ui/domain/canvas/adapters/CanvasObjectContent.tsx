@@ -2,7 +2,12 @@ import type { ComponentType, ReactNode } from 'react';
 import type { ResolvedConnection } from '../connectors/geometry.js';
 import type { CanvasGeometry, CanvasObjectCapabilities, CanvasObjectDraft } from '../contracts.js';
 import type { CanvasPrimitiveFrameProps } from './built-in-frames.js';
-import { showsIdleHtmlCaption } from './caption-metrics.js';
+import {
+  embedCaptionFont,
+  embedCaptionGap,
+  embedCaptionHeight,
+  type EmbedCaptionPlacement,
+} from './caption-metrics.js';
 import './CanvasObjectContent.css';
 
 interface CanvasObjectContentProps {
@@ -18,6 +23,7 @@ interface CanvasObjectContentProps {
   readonly locked: boolean;
   readonly selected: boolean;
   readonly sectionCaptionWidth?: number;
+  readonly embedCaption?: EmbedCaptionPlacement;
   readonly mode: CanvasObjectCapabilities['content'];
   readonly Frame?: ComponentType<CanvasPrimitiveFrameProps>;
 }
@@ -25,27 +31,18 @@ interface CanvasObjectContentProps {
 const draggableBodyKinds = new Set<CanvasObjectDraft['kind']>(['link', 'image', 'table']);
 const namedFrames = new Map<CanvasObjectDraft['kind'], string>([
   ['html', 'HTML 图解'],
+  ['diagram', '图解'],
+  ['chart', '图表'],
   ['video', '视频'],
 ]);
 
 function FrameDragCaption({
   object,
-  geometry,
   zoom,
-  selected,
   canEdit,
   locked,
-}: Pick<
-  CanvasObjectContentProps,
-  'object' | 'geometry' | 'zoom' | 'selected' | 'canEdit' | 'locked'
->) {
-  const captionVisible = object.kind === 'html' && showsIdleHtmlCaption(geometry.width, zoom);
-  if (!selected && !captionVisible) {
-    return null;
-  }
-
-  const scale = selected ? 1 / zoom : Math.min(1 / zoom, 1);
-  const width = geometry.width / scale;
+}: Pick<CanvasObjectContentProps, 'object' | 'zoom' | 'canEdit' | 'locked'>) {
+  const scale = 1 / zoom;
   const name = namedFrames.get(object.kind) ?? '嵌入对象';
 
   return (
@@ -53,38 +50,68 @@ function FrameDragCaption({
       className="studio-ui-canvas-embedded-title"
       data-canvas-external-title=""
       style={{
-        width: selected ? Math.max(width, 24) : width,
-        bottom: `calc(100% + ${8 * scale}px)`,
+        bottom: `calc(100% + ${embedCaptionGap * scale}px)`,
         transform: `scale(${scale})`,
       }}
     >
-      {selected && (
-        <button
-          className="studio-ui-canvas-embedded-grip"
-          data-canvas-drag-surface="title"
-          type="button"
-          aria-label={`移动 ${name}`}
-          title={locked ? `${name}位置已锁定` : `拖动把手移动 ${name}`}
-          disabled={!canEdit || locked}
+      <button
+        className="studio-ui-canvas-embedded-grip"
+        data-canvas-drag-surface="title"
+        type="button"
+        aria-label={`移动 ${name}`}
+        title={locked ? `${name}位置已锁定` : `拖动把手移动 ${name}`}
+        disabled={!canEdit || locked}
+      >
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          aria-hidden="true"
         >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            aria-hidden="true"
-          >
-            <circle cx="9" cy="6" r="1" />
-            <circle cx="15" cy="6" r="1" />
-            <circle cx="9" cy="12" r="1" />
-            <circle cx="15" cy="12" r="1" />
-            <circle cx="9" cy="18" r="1" />
-            <circle cx="15" cy="18" r="1" />
-          </svg>
-        </button>
-      )}
-      {captionVisible && <strong title={object.label}>{object.label}</strong>}
+          <circle cx="9" cy="6" r="1" />
+          <circle cx="15" cy="6" r="1" />
+          <circle cx="9" cy="12" r="1" />
+          <circle cx="15" cy="12" r="1" />
+          <circle cx="9" cy="18" r="1" />
+          <circle cx="15" cy="18" r="1" />
+        </svg>
+      </button>
     </div>
+  );
+}
+
+function EmbedCaption({
+  label,
+  placement,
+  zoom,
+  grip,
+}: {
+  readonly label: string;
+  readonly placement: EmbedCaptionPlacement;
+  readonly zoom: number;
+  readonly grip: boolean;
+}) {
+  const above = placement === 'above';
+  const gap = embedCaptionGap / zoom;
+  const height = embedCaptionHeight(zoom) / zoom;
+
+  return (
+    <strong
+      className="studio-ui-canvas-embed-caption"
+      data-canvas-embed-caption={placement}
+      data-canvas-external-title={above ? '' : undefined}
+      style={{
+        fontSize: embedCaptionFont(zoom) / zoom,
+        lineHeight: `${height}px`,
+        insetBlockEnd: above ? `calc(100% + ${gap}px)` : undefined,
+        insetInlineStart: above && grip ? 30 / zoom : 0,
+        paddingInline: above ? 0 : 4 / zoom,
+      }}
+      title={label}
+    >
+      {label}
+    </strong>
   );
 }
 
@@ -101,6 +128,7 @@ export function CanvasObjectContent({
   locked,
   selected,
   sectionCaptionWidth,
+  embedCaption,
   mode,
   Frame,
 }: CanvasObjectContentProps) {
@@ -118,8 +146,7 @@ export function CanvasObjectContent({
     />
   );
 
-  const showDragCaption =
-    ownsFrame && (mode === 'embedded' || (object.kind === 'video' && selected));
+  const hasGrip = ownsFrame && selected && (mode === 'embedded' || object.kind === 'video');
   const canDragBody = ownsFrame && draggableBodyKinds.has(object.kind);
 
   if (showCaption) {
@@ -141,15 +168,11 @@ export function CanvasObjectContent({
       >
         {content}
       </div>
-      {showDragCaption && (
-        <FrameDragCaption
-          object={object}
-          geometry={geometry}
-          zoom={zoom}
-          selected={selected}
-          canEdit={canEdit}
-          locked={locked}
-        />
+      {hasGrip && (
+        <FrameDragCaption object={object} zoom={zoom} canEdit={canEdit} locked={locked} />
+      )}
+      {embedCaption && ownsFrame && (
+        <EmbedCaption label={object.label} placement={embedCaption} zoom={zoom} grip={hasGrip} />
       )}
     </>
   );

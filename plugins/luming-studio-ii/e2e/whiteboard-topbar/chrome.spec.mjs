@@ -127,17 +127,8 @@ test("[TOPBAR-CHROME-02] 主题切换改变画布颜色并沿用工作台偏好"
   await observe(testInfo, "theme-shared-preference", { persisted: true, canvasTheme: "light" });
 });
 
-test("[TOPBAR-CHROME-03] 真实移动回执到达前后，顶栏状态和画布布局稳定", async ({
-  page,
-  studio,
-}, testInfo) => {
-  const title = "顶栏保存状态验收";
+async function moveAndCheckStatus(page, studio, board, testInfo, view, expectedX) {
   const ii = studio.edition === "ii";
-  const board = await studio.seedBasicBoard({ title, objects: [shape] });
-  if (ii) {
-    await page.setViewportSize({ width: 360, height: 640 });
-  }
-  await page.goto(board.url);
   await expect(saved(page)).toBeVisible();
   await page.getByText(shape.label, { exact: true }).click();
   const hold = await controlNextCanvasSave(page, studio, {
@@ -145,7 +136,7 @@ test("[TOPBAR-CHROME-03] 真实移动回执到达前后，顶栏状态和画布�
     action: "move",
     mode: "hold",
   });
-  const before = ii && (await statusLayout(page, title, saved(page)));
+  const before = ii && (await statusLayout(page, board.title, saved(page)));
 
   try {
     await page.keyboard.press("ArrowRight");
@@ -153,9 +144,9 @@ test("[TOPBAR-CHROME-03] 真实移动回执到达前后，顶栏状态和画布�
     const saving = page.getByRole("status", { name: /^保存中…?$/u });
     await expect(saving).toBeVisible();
     if (ii) {
-      expect(await statusLayout(page, title, saving)).toEqual(before);
+      expect(await statusLayout(page, board.title, saving)).toEqual(before);
     }
-    await screenshot(page, testInfo, "chrome-saving");
+    await screenshot(page, testInfo, "chrome-saving-" + view);
   } finally {
     hold.release();
   }
@@ -163,12 +154,50 @@ test("[TOPBAR-CHROME-03] 真实移动回执到达前后，顶栏状态和画布�
   await expect(saved(page)).toBeVisible();
   await expect
     .poll(async () => (await studio.readBoard(board)).objects.find(({ id }) => id === shape.id)?.x)
-    .toBe(shape.x + 1);
+    .toBe(expectedX);
 
   if (ii) {
-    expect(await statusLayout(page, title, saved(page))).toEqual(before);
+    expect(await statusLayout(page, board.title, saved(page))).toEqual(before);
   }
 
-  await screenshot(page, testInfo, "chrome-saved");
-  await observe(testInfo, "save-status-after-receipt", { status: "已保存", x: shape.x + 1 });
+  await screenshot(page, testInfo, "chrome-saved-" + view);
+  await observe(testInfo, "save-status-after-receipt-" + view, { status: "已保存", x: expectedX });
+}
+
+test("[TOPBAR-CHROME-03] 真实移动回执到达前后，顶栏状态和画布布局稳定", async ({
+  page,
+  studio,
+}, testInfo) => {
+  const board = await studio.seedBasicBoard({ title: "顶栏保存状态验收", objects: [shape] });
+  const ii = studio.edition === "ii";
+  await page.goto(board.url);
+  const label = saved(page).getByText("已保存", { exact: true });
+  if (ii) {
+    await expect(label).toHaveCSS("clip-path", "none");
+  }
+  await moveAndCheckStatus(page, studio, board, testInfo, "wide", shape.x + 1);
+
+  if (ii) {
+    await page.setViewportSize({ width: 360, height: 640 });
+    await expect(saved(page)).toHaveAttribute("title", "已保存");
+    await expect(label).toHaveCSS("clip-path", "inset(50%)");
+    await button(page, "缩放菜单").click();
+    await page.getByRole("menuitem", { name: "适应白板", exact: true }).click();
+    await moveAndCheckStatus(page, studio, board, testInfo, "narrow", shape.x + 2);
+
+    await page.setViewportSize({ width: 1366, height: 820 });
+    const before = await statusLayout(page, board.title, saved(page));
+    const fault = await controlNextCanvasSave(page, studio, {
+      boardId: board.id,
+      action: "move",
+      mode: "before",
+    });
+    await page.keyboard.press("ArrowRight");
+    await fault.observed;
+    const failed = page.getByRole("status", { name: "保存未完成", exact: true });
+    await expect(failed).toBeVisible();
+    await expect(button(page, "重试原移动")).toBeVisible();
+    expect((await statusLayout(page, board.title, failed)).slice(0, 3)).toEqual(before.slice(0, 3));
+    await screenshot(page, testInfo, "chrome-save-interrupted");
+  }
 });

@@ -339,11 +339,12 @@ test("[WB-OBJECT-04] 连线端点样式和分区标题从菜单真实写回", as
   await screenshot(page, testInfo, "connector-and-renamed-section");
 });
 
-async function placeSticker(page, studio, board, name, position) {
+async function placeSticker(page, studio, board, { name, iconId, position }) {
   const search = page.getByRole("searchbox", { name: "搜索贴纸" });
   await search.fill(name);
   await button(page, "贴纸 " + name).click();
   await canvas(page, studio, board).click({ position });
+  await savedObject(studio, board, { kind: "sticker", stickerIconId: iconId });
   await expect(canvas(page, studio, board).getByRole("img", { name, exact: true })).toBeVisible();
 }
 
@@ -355,9 +356,17 @@ test("[WB-OBJECT-05] 贴纸搜索换图并保留旧字符编辑入口", async ({
   await expect(page.getByRole("group", { name: "彩色图形贴纸" }).getByRole("button")).toHaveCount(
     42,
   );
-  await placeSticker(page, studio, board, "爱心", { x: 630, y: 210 });
+  await placeSticker(page, studio, board, {
+    name: "爱心",
+    iconId: "heart",
+    position: { x: 630, y: 210 },
+  });
   await tool(page, "贴纸").click();
-  await placeSticker(page, studio, board, "火箭", { x: 850, y: 210 });
+  await placeSticker(page, studio, board, {
+    name: "火箭",
+    iconId: "rocket",
+    position: { x: 850, y: 210 },
+  });
   const graphic = canvas(page, studio, board).getByRole("img", { name: "火箭", exact: true });
   const bounds = await graphic.boundingBox();
   expect(bounds).toBeTruthy();

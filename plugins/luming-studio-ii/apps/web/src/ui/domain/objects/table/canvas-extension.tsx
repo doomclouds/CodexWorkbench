@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 
+import { StatusText } from '../../../base/index.js';
 import type { CanvasObjectExtension, CanvasObjectViewProps } from '../../canvas/index.js';
 import type {
   TableCellValue,
@@ -181,8 +182,24 @@ function TableCanvasView({
   if (id === undefined) {
     return <TablePlacementPreview headerPaint={headerPaint} />;
   }
+
+  const detail = tableDetail(geometry, zoom);
   if (!value) {
-    return content;
+    return (
+      content ?? (
+        <div
+          className="studio-object-table-placeholder"
+          style={{ ...tableBodyPaint, borderWidth: 0.75 / (zoom > 0 ? zoom : 1) }}
+        >
+          {detail !== 'outline' && (
+            <StatusText
+              message={payload ? '暂未取得表格正文' : '正在加载表格…'}
+              announcement="polite"
+            />
+          )}
+        </div>
+      )
+    );
   }
 
   async function handleSave(draft: TableObjectDraft) {
@@ -221,7 +238,7 @@ function TableCanvasView({
       selected={selected}
       canEdit={interactive && !readOnly}
       locked={locked}
-      detail={tableDetail(geometry, zoom)}
+      detail={detail}
       frameHeight={geometry.height}
       zoom={zoom}
       bodyPaint={tableBodyPaint}

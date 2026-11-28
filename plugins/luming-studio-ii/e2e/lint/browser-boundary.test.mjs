@@ -203,6 +203,7 @@ const whiteboardScopedFixtures = [
       "countOverviewEmbeds",
       "embedFrame",
       "observeEmbedPayloadReads",
+      "observeEmbedViewport",
       "observeViewingFrames",
       "observeViewingLayers",
       "readViewingInk",

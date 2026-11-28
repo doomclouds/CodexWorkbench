@@ -31,6 +31,7 @@ const mediaCapabilities = {
   content: 'native',
 } as const;
 const minimumControlSize = { width: 128, height: 72 };
+const loadingMedia: MediaObjectStatus = { status: 'loading' };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -140,7 +141,7 @@ function ImageView({
       href={href}
       crop={crop}
       naturalSize={naturalSize}
-      status={status}
+      status={payload ? status : loadingMedia}
       interactive={interactive}
       readOnly={readOnly}
       locked={locked}
@@ -169,7 +170,7 @@ function VideoView({
       label={object.label}
       src={text(value.src)}
       poster={text(value.poster)}
-      status={mediaStatus(value.status)}
+      status={payload ? mediaStatus(value.status) : loadingMedia}
       interactive={!annotationActive && Boolean(interactive || expanded || focusedReading)}
     />
   );

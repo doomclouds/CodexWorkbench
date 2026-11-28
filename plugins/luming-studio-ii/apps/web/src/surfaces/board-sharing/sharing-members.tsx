@@ -24,13 +24,22 @@ interface MemberActions {
 }
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
-const visitDateFormat = new Intl.DateTimeFormat('zh-CN', {
-  year: 'numeric',
-  month: 'short',
-  day: 'numeric',
-  hour: '2-digit',
-  minute: '2-digit',
-});
+const relativeVisitFormat = new Intl.RelativeTimeFormat('zh-CN', { numeric: 'auto' });
+
+function relativeVisit(seenAt: Date) {
+  const elapsed = (Date.now() - seenAt.getTime()) / 1000;
+  if (elapsed < 60) {
+    return '刚刚来过';
+  }
+  if (elapsed < 3600) {
+    return relativeVisitFormat.format(-Math.floor(elapsed / 60), 'minute') + '来过';
+  }
+  if (elapsed < 86400) {
+    return relativeVisitFormat.format(-Math.floor(elapsed / 3600), 'hour') + '来过';
+  }
+
+  return relativeVisitFormat.format(-Math.floor(elapsed / 86400), 'day') + '来过';
+}
 
 function memberRole(role: SharingRole) {
   return role === 'owner' ? '所有者' : roleLabels[role];
@@ -61,11 +70,21 @@ function memberStatus({ removed, active, online, lastSeenAtMillis }: SharingMemb
   if (online) {
     return '在线';
   }
-  if (lastSeenAtMillis !== undefined) {
-    return '最近访问 ' + visitDateFormat.format(lastSeenAtMillis);
+
+  const seenAt = lastSeenAtMillis === undefined ? undefined : new Date(lastSeenAtMillis);
+  const offline = online === false;
+  if (!seenAt || !Number.isFinite(seenAt.getTime())) {
+    return offline ? '离线' : '有权访问';
   }
 
-  return online === undefined ? '有权访问' : '未在线';
+  return (
+    <>
+      {offline && '离线 · '}
+      <time dateTime={seenAt.toISOString()} title={seenAt.toLocaleString('zh-CN')}>
+        {relativeVisit(seenAt)}
+      </time>
+    </>
+  );
 }
 
 function MemberRow({

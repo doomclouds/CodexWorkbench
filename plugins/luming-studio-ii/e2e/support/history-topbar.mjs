@@ -91,3 +91,24 @@ export async function failNextOlderVersions(page, studio, board) {
     await route.continue();
   });
 }
+
+export async function readHistoryAuthorPresentation(participant, record) {
+  const avatarColor = await participant
+    .locator(".room-presence-avatar")
+    .evaluate((node) => getComputedStyle(node).backgroundColor);
+
+  return record.evaluate((entry, color) => {
+    const author = entry.querySelector(".whiteboard-history__record-top strong");
+    const time = entry.querySelector("time");
+    const avatar = entry.querySelector(".whiteboard-history__avatar");
+    const authorBox = author?.getBoundingClientRect();
+    const timeBox = time?.getBoundingClientRect();
+
+    return {
+      sameColor: !!avatar && getComputedStyle(avatar).backgroundColor === color,
+      shortened: !!author && author.scrollWidth > author.clientWidth,
+      timeReadable:
+        !!authorBox && !!timeBox && timeBox.width > 0 && timeBox.left >= authorBox.right,
+    };
+  }, avatarColor);
+}

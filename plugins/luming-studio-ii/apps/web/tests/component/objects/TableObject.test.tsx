@@ -100,6 +100,24 @@ function find<T extends HTMLElement = HTMLElement>(
   return node;
 }
 
+it('keeps an unpopulated frame while a persisted table waits for content', () => {
+  const request = vi.fn<TableViewProps['request']>();
+  mountExtension(request, { payload: undefined });
+  expect(find('.studio-object-table-placeholder').textContent).toBe('正在加载表格…');
+  expect(view.host.querySelector('table')).toBeNull();
+
+  mountExtension(request, { payload: undefined, zoom: 0.05 });
+  const outline = find('.studio-object-table-placeholder');
+  expect(outline.style.borderWidth).toBe('15px');
+  expect(outline.textContent).toBe('');
+  expect(view.host.querySelector('table')).toBeNull();
+
+  mountExtension(request);
+  expect(view.host.querySelector('.studio-object-table-placeholder')).toBeNull();
+  expect(find('table').textContent).toContain('A');
+  expect(request).not.toHaveBeenCalled();
+});
+
 function cell(row: number, column: number) {
   return find<HTMLTableCellElement>('[data-cell="' + row + ':' + column + '"]');
 }

@@ -263,6 +263,7 @@ export interface CanvasObjectViewProps extends CanvasObjectGeometryContext {
   readonly locked?: boolean;
   readonly editRequest?: number;
   readonly formatRequest?: CanvasObjectFormatRequest;
+  readonly viewing?: boolean;
   readonly focusedReading?: boolean;
   readonly expanded?: boolean;
   readonly readHtmlSource?: (file: File) => Promise<string>;

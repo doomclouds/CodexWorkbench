@@ -5,7 +5,7 @@ import type {
   WhiteboardScene,
 } from '../../data/whiteboard/index.js';
 import type { WhiteboardHistorySurfaceProps } from './contracts.js';
-import { HistoryAuthorColor } from './HistoryAgentAvatar.js';
+import { HistoryAuthorColor } from './HistoryAuthorAvatar.js';
 import { RestoreConfirmation } from './RestoreConfirmation.js';
 import { RestoreRecovery } from './RestoreRecovery.js';
 import { useVersionRestore } from './useVersionRestore.js';

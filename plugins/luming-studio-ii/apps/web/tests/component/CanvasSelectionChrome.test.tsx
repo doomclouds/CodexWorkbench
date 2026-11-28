@@ -219,6 +219,76 @@ describe('Canvas selection chrome', () => {
     expect(toolbar?.style.top).toBe('38px');
   });
 
+  it('places readable names on dense embeds while keeping chapters above them', () => {
+    const item = (
+      id: string,
+      kind: 'section' | 'html' | 'diagram' | 'chart' | 'document' | 'todo',
+      x: number,
+      y: number,
+      width: number,
+      height: number,
+    ) => ({ id, kind, label: id, geometry: { x, y, width, height, rotation: 0 }, version: 1 });
+    const denseScene = {
+      ...scene,
+      objects: [
+        item('outer', 'section', 0, 0, 5000, 5000),
+        item('chart', 'chart', 200, 0, 1440, 800),
+        item('diagram', 'diagram', 200, 880, 1440, 780),
+        item('html', 'html', 2200, 900, 1440, 800),
+        item('tiny-html', 'html', 3900, 900, 400, 400),
+        item('document', 'document', 3900, 1500, 400, 400),
+        item('todo', 'todo', 3900, 2100, 400, 400),
+        item('first-section', 'section', 0, 2800, 2200, 1200),
+        item('second-section', 'section', 1900, 2800, 2400, 1200),
+      ],
+    };
+    const payloadById = new Map([
+      ['chart', { version: 1, value: { id: 'chart', version: 1, html: '<details></details>' } }],
+    ]);
+    const props = {
+      scene: denseScene,
+      initialViewport: { x: 80, y: 120, zoom: 0.05 },
+      objectExtensions: studioObjectExtensions,
+      payloadById,
+    };
+    renderCanvas({ ...props, selection: [] });
+
+    function frame(id: string) {
+      return fixture.host.querySelector(`[data-canvas-object="${id}"]`);
+    }
+
+    function caption(id: string) {
+      return frame(id)?.querySelector<HTMLElement>('[data-canvas-embed-caption]');
+    }
+
+    const placements = [
+      ['chart', 'inside'],
+      ['diagram', 'inside'],
+      ['html', 'above'],
+    ] as const;
+
+    for (const [id, placement] of placements) {
+      expect(caption(id)?.getAttribute('data-canvas-embed-caption')).toBe(placement);
+      expect(caption(id)?.style.fontSize).toBe('240px');
+      expect(caption(id)?.textContent).toBe(id);
+    }
+    expect(caption('tiny-html')).toBeNull();
+    for (const id of ['tiny-html', 'document', 'todo']) {
+      expect(frame(id)?.getAttribute('title')).toBe(id);
+    }
+    const outerTitle = frame('outer')?.querySelector<HTMLElement>('[data-canvas-section-title]');
+    expect(outerTitle?.style.getPropertyValue('--studio-ui-section-overview-font')).toBe('280px');
+    const clipped = frame('second-section')?.querySelector('[data-canvas-section-title]');
+    expect(clipped?.getAttribute('data-canvas-caption-below-threshold')).toBe('true');
+
+    const iframe = frame('chart')?.querySelector('iframe');
+    expect(iframe).not.toBeNull();
+    renderCanvas({ ...props, selection: ['chart'] });
+    expect(frame('chart')?.querySelector('iframe')).toBe(iframe);
+    expect(frame('chart')?.querySelector('[aria-label="移动 图表"]')).not.toBeNull();
+    expect(caption('chart')?.textContent).toBe('chart');
+  });
+
   it('uses the space above the selected HTML grip in a short viewport', () => {
     canvasBounds = new DOMRect(0, 0, 420, 290);
     controlBounds = new DOMRect(274, 12, 132, 38);

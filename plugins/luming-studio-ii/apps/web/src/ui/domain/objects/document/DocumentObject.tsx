@@ -56,7 +56,7 @@ function panelPresentation(
 function documentLayout(canvas: NonNullable<DocumentObjectProps['canvas']>) {
   const width = canvas.width * canvas.zoom;
   const height = canvas.height * canvas.zoom;
-  if (width < 120 || height < 56) {
+  if (width < 64 || height < 28) {
     return 'outline';
   }
   if (width < 220 || height < 90) {
@@ -67,6 +67,43 @@ function documentLayout(canvas: NonNullable<DocumentObjectProps['canvas']>) {
   }
 
   return 'detail';
+}
+
+export function DocumentContentUnavailable({
+  title,
+  paper,
+  canvas,
+  focusedReading = false,
+}: Pick<DocumentObjectProps, 'paper' | 'canvas' | 'focusedReading'> & {
+  readonly title: string;
+}) {
+  const { layout, shell, surface } = panelPresentation(paper, canvas, focusedReading);
+  const label = title.trim() || untitledDocument;
+
+  return (
+    <div
+      className="studio-document-surface"
+      data-document-layout={layout}
+      data-document-focused-reading={focusedReading || undefined}
+      data-document-content-unavailable=""
+      data-paper-scheme={shell.colorScheme}
+      style={surface}
+    >
+      <div className={focusedReading ? 'studio-document-focused-heading' : 'studio-document-top'}>
+        <DocumentCanvasHeading
+          visible={layout !== undefined || focusedReading}
+          moveHandle={false}
+          locked
+        />
+        <h3 className="studio-document-title" title={label}>
+          {label}
+        </h3>
+      </div>
+      <div className="studio-document-unavailable" style={shell}>
+        <StatusText message="暂未取得文档正文" announcement="polite" />
+      </div>
+    </div>
+  );
 }
 
 function DocumentCanvasHeading({

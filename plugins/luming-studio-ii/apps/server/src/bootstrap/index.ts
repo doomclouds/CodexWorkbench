@@ -147,7 +147,11 @@ export function createWhiteboardServer(options: WhiteboardServerOptions): Whiteb
   };
 
   try {
-    const repository = createWhiteboardRepository(database, catalogChanges.publish);
+    const repository = createWhiteboardRepository(
+      database,
+      catalogChanges.publish,
+      ownerDisplayName,
+    );
     const application = createWhiteboardApplication(repository, Date.now, {
       boardChanges,
       renderPng: renderSvgPng,

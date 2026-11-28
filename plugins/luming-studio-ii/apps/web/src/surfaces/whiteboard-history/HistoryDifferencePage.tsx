@@ -6,7 +6,7 @@ import type {
   WhiteboardPayload,
 } from '../../data/whiteboard/index.js';
 import { StatusText } from '../../ui/base/index.js';
-import { HistoryAgentAvatar } from './HistoryAgentAvatar.js';
+import { HistoryAuthorAvatar } from './HistoryAuthorAvatar.js';
 import { diffHistoryText, historyTexts } from './history-difference.js';
 import { changeLabel, historyAuthorName, type HistoryChange } from './history-records.js';
 
@@ -111,15 +111,14 @@ function useDifferenceBodies({
 
 function DifferenceAuthor({ version }: { readonly version: BoardHistoryVersion }) {
   const { actorKind, actorId, savedAtMillis } = version;
-  const savedAt = savedAtMillis === undefined ? undefined : recordDateFormat.format(savedAtMillis);
+  const name = historyAuthorName(version) || '协作者';
+  const savedAt = savedAtMillis === undefined ? undefined : new Date(savedAtMillis);
 
   return (
     <p className="whiteboard-history__difference-meta">
-      {actorKind === 'agent' && <HistoryAgentAvatar actorId={actorId} compact />}
-      <span>
-        {historyAuthorName(version) || '协作者'}
-        {savedAt && ' · ' + savedAt}
-      </span>
+      <HistoryAuthorAvatar actorId={actorId} name={name} agent={actorKind === 'agent'} compact />
+      <span title={name}>{name}</span>
+      {savedAt && <time dateTime={savedAt.toISOString()}>{recordDateFormat.format(savedAt)}</time>}
     </p>
   );
 }

@@ -1,5 +1,5 @@
 import { useEffect, useEffectEvent, useMemo, useState } from 'react';
-import { Dialog, StatusText } from '../../../base/index.js';
+import { Dialog } from '../../../base/index.js';
 import type {
   CanvasObjectExtension,
   CanvasObjectPayload,
@@ -11,7 +11,13 @@ import type {
   TodoObjectSnapshot,
   TodoSourceRef,
 } from './contracts.js';
-import { isTodoOverview, TodoObject, visibleTodoOverviewRows } from './TodoObject.js';
+import {
+  isTodoOverview,
+  TodoContentUnavailable,
+  todoHeadingLayout,
+  TodoObject,
+  visibleTodoOverviewRows,
+} from './TodoObject.js';
 import { TodoContentConflict } from './useTodoEditor.js';
 
 const todoPaper = '#EFEFEF';
@@ -160,8 +166,27 @@ function TodoCanvasBody({
     onRetentionChange,
   });
 
+  const width = geometry.width * zoom;
+  const height = geometry.height * zoom;
+  const overview = isTodoOverview(width, height);
+  const appearance = {
+    paper: object.fill ?? todoPaper,
+    uiScale: focusedReading ? 1 : 1 / zoom,
+    headingLayout: todoHeadingLayout(width, height),
+  };
+
   if (!value) {
-    return content ?? (id ? <StatusText message="任务清单正文尚未加载" /> : null);
+    return (
+      content ?? (
+        <TodoContentUnavailable
+          title={object.label}
+          appearance={appearance}
+          overview={overview}
+          expanded={nativeExpanded}
+          focusedReading={focusedReading}
+        />
+      )
+    );
   }
 
   async function handleEdit(operation: TodoObjectEdit) {
@@ -187,8 +212,6 @@ function TodoCanvasBody({
     return false;
   }
 
-  const appearance = { paper: object.fill ?? todoPaper, uiScale: focusedReading ? 1 : 1 / zoom };
-  const overview = isTodoOverview(geometry.width * zoom, geometry.height * zoom);
   const open = onOpenPresentation ?? (() => setExpanded(true));
   const nativeControls = {
     onOpenSource: onOpenNativeSource,

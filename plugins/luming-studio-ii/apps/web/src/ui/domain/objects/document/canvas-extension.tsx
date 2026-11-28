@@ -1,5 +1,4 @@
 import { useCallback } from 'react';
-import { StatusText } from '../../../base/index.js';
 import type { CanvasObjectExtension, CanvasObjectViewProps } from '../../canvas/index.js';
 import type {
   DocumentActivity,
@@ -13,7 +12,7 @@ import type {
 } from './contracts.js';
 import { exportDocumentFile, resolveDocumentAsset } from './document-export.js';
 import { canvasDocumentPaper, defaultDocumentPaper } from './document-paper.js';
-import { DocumentObject } from './DocumentObject.js';
+import { DocumentContentUnavailable, DocumentObject } from './DocumentObject.js';
 import { DocumentReadIcon } from './DocumentToolbar.js';
 import { documentTreeDepth, isRecord } from './model.js';
 import './document-object.css';
@@ -105,11 +104,19 @@ function DocumentCanvasView({
   }
 
   const value = readDocument(payload?.value);
+  const paper = canvasDocumentPaper(object.fill);
+  const canvas = { width: geometry.width, height: geometry.height, zoom };
   if (!value) {
-    return <StatusText message="暂未取得文档正文" announcement="polite" />;
+    return (
+      <DocumentContentUnavailable
+        title={object.label}
+        paper={paper}
+        canvas={canvas}
+        focusedReading={focusedReading}
+      />
+    );
   }
 
-  const paper = canvasDocumentPaper(object.fill);
   const source = nativeSourceRequest?.source;
   const blockId = source?.elementId === id ? source?.blockId : undefined;
   const nativeBlockRequest =
@@ -165,7 +172,7 @@ function DocumentCanvasView({
     <DocumentObject
       value={value}
       paper={paper}
-      canvas={{ width: geometry.width, height: geometry.height, zoom }}
+      canvas={canvas}
       interactive={interactive}
       readOnly={readOnly}
       editRequest={editRequest}

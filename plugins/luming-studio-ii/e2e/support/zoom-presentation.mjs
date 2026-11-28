@@ -23,7 +23,13 @@ export function readZoomDetails(page, studio) {
     function caption(element, selector, nested = ".studio-ui-text-object") {
       const node = element.querySelector(selector);
       const label = node?.querySelector(nested) ?? node;
-      if (!label?.textContent.trim() || getComputedStyle(label).visibility !== "visible") {
+      const box = bounds(node);
+      const painted = box?.width && box.height;
+      if (
+        !label?.textContent.trim() ||
+        !painted ||
+        getComputedStyle(label).visibility !== "visible"
+      ) {
         return null;
       }
 
@@ -32,7 +38,7 @@ export function readZoomDetails(page, studio) {
       return {
         text: label.textContent.trim(),
         screenFont: Number.parseFloat(getComputedStyle(label).fontSize) * zoom * scale,
-        box: bounds(node),
+        box,
       };
     }
 
@@ -48,10 +54,17 @@ export function readZoomDetails(page, studio) {
         section: caption(element, ".studio-section-title,[data-canvas-section-title]"),
         htmlCaption: caption(
           element,
-          legacy ? ".studio-html-caption" : ".studio-ui-canvas-embedded-title:has(strong)",
+          legacy
+            ? ".studio-html-caption"
+            : "[data-canvas-embed-caption],.studio-ui-canvas-embedded-title:has(strong)",
           "strong",
         ),
         hoverTitle: element.getAttribute("title"),
+        documentTitle: caption(element, ".studio-document-title"),
+        todoTitle: caption(
+          element,
+          legacy ? ".studio-todo-title" : ".studio-object-todo__title > :is(h3, button)",
+        ),
         document: bounds(element.querySelector("[aria-label^='文档正文']")),
         todo: bounds(element.querySelector("progress,[role='progressbar']")),
         html: bounds(html),

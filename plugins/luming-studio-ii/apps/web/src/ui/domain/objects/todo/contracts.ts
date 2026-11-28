@@ -65,6 +65,7 @@ export interface TodoContentAnnotation {
 export interface TodoObjectAppearance {
   readonly paper?: string;
   readonly uiScale?: number;
+  readonly headingLayout?: 'outline' | 'title';
 }
 
 export interface TodoObjectProps {

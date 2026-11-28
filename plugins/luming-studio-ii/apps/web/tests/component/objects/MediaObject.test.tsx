@@ -196,7 +196,16 @@ describe('MediaObject', () => {
 
     fixture.render(<MediaObject {...imageProps} status={{ status: 'ready' }} />);
     expect(fixture.host.textContent).not.toContain('图片不可用');
-    expect(element('img').getAttribute('src')).toBe(photo);
+    const image = element('img');
+    const stage = element('.luming-media-object');
+    expect(image.getAttribute('src')).toBe(photo);
+    expect(stage.hasAttribute('data-media-loading')).toBe(true);
+    Object.defineProperties(image, {
+      naturalWidth: { value: 400, configurable: true },
+      naturalHeight: { value: 200, configurable: true },
+    });
+    dispatch(image, new Event('load'));
+    expect(stage.hasAttribute('data-media-loading')).toBe(false);
   });
 
   it('keeps video playback controls independent of the canvas transforms', () => {
@@ -262,6 +271,27 @@ describe('LinkObject', () => {
 
 describe('legacy media canvas controls', () => {
   const geometry = { x: 0, y: 0, width: 100, height: 55, rotation: 0 };
+
+  it.each([imageExtension, videoExtension])(
+    'distinguishes pending and unavailable $kind data',
+    ({ kind, View }) => {
+      const props = {
+        id: 'media',
+        object: { kind, label: '媒体', geometry },
+        geometry,
+        zoom: 1,
+        selected: false,
+        interactive: false,
+        readOnly: true,
+        request: vi.fn<Parameters<typeof View>[0]['request']>(),
+      };
+      fixture.render(<View {...props} />);
+      expect(element('.luming-media-placeholder').textContent).toBe('正在加载媒体…');
+
+      fixture.render(<View {...props} payload={{ version: 1, value: {} }} />);
+      expect(element('.luming-media-placeholder').textContent).toBe('无法读取媒体');
+    },
+  );
 
   it('hands video clicks to the canvas during annotations and restores the same player', () => {
     const Video = videoExtension.View;

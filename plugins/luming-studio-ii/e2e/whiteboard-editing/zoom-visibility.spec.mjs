@@ -156,6 +156,7 @@ async function setPercent(page, studio, percent) {
     new Map([
       [5, 25],
       [10, 25],
+      [18, 25],
       [60, 50],
     ]).get(percent) ?? percent;
   await zoomAction(page, `${preset}%`);
@@ -166,6 +167,9 @@ async function setPercent(page, studio, percent) {
   }
   if (percent === 10) {
     wheel = await zoomByWheel(page, studio, 120, 5);
+  }
+  if (percent === 18) {
+    wheel = await zoomByWheel(page, studio, 110, 2);
   }
   if (percent === 60) {
     wheel = await zoomByWheel(page, studio, -120);
@@ -227,7 +231,7 @@ function displaysCaption(details, frame, id, expected) {
   );
 }
 
-function settledDetails(details, frame, percent) {
+function settledDetails(details, frame, percent, sectionFont) {
   const sectionDetails = item(details, section.id);
   const videoDetails = item(details, video.id)?.video;
   const expectedShape = percent <= 25 ? null : shape.label;
@@ -240,7 +244,7 @@ function settledDetails(details, frame, percent) {
   return {
     shapeCaption: displaysCaption(details, frame, shape.id, expectedShape),
     largeShapeCaption: displaysCaption(details, frame, peer.id, expectedPeer),
-    sectionCaption: !overview || (sectionFits === true && measuredSection === 12),
+    sectionCaption: !overview || (sectionFits === true && measuredSection === sectionFont),
     smallestSectionHidden: percent !== 5 || !sectionCaption,
     videoControls:
       !videoDetails ||
@@ -257,6 +261,7 @@ test("[EDIT-ZOOM-01] 5% 到 200% 的标签可读性和富内容呈现随视口�
   const board = await studio.seedBasicBoard({ title: "混合内容缩放样板", objects: mixed });
   const saved = await studio.readBoard(board);
   const measurements = [];
+  const sectionFont = studio.edition === "initial" ? 12 : 14;
   for (const { name, viewport, colorScheme } of profiles) {
     await page.setViewportSize(viewport);
     await page.emulateMedia({ colorScheme });
@@ -290,16 +295,20 @@ test("[EDIT-ZOOM-01] 5% 到 200% 的标签可读性和富内容呈现随视口�
         videoReady: true,
       };
       await checks
-        .poll(async () => settledDetails(await readZoomDetails(page, studio), frame, percent), {
-          timeout: 1600,
-        })
+        .poll(
+          async () =>
+            settledDetails(await readZoomDetails(page, studio), frame, percent, sectionFont),
+          {
+            timeout: 1600,
+          },
+        )
         .toEqual(expected);
       const details = await readZoomDetails(page, studio);
       measurements.push({
         profile: name,
         percent,
         zoom: Math.round(frame.zoom * 100),
-        ...settledDetails(details, frame, percent),
+        ...settledDetails(details, frame, percent, sectionFont),
       });
       await screenshot(page, testInfo, `${name}-${percent}`);
       checkProjectedSize(details, frame, saved);
@@ -419,7 +428,49 @@ test("[EDIT-ZOOM-02] 60% 窄短窗口选中 HTML 时菜单界限与入口可用�
   await screenshot(page, testInfo, "connector-handles-25");
 });
 
-test("[EDIT-ZOOM-04] 大白板概览标题避让相邻图解，低倍率可识别 HTML 名称", async ({
+function architectureCaptionFonts({ section, object, following, document, todo }, percent) {
+  return {
+    percent,
+    section: section?.section?.screenFont,
+    html: object?.htmlCaption?.screenFont ?? null,
+    nextHtml: following?.htmlCaption?.screenFont ?? null,
+    document: document?.documentTitle?.screenFont ?? null,
+    todo: todo?.todoTitle?.screenFont ?? null,
+  };
+}
+
+function checkArchitectureCaptions(
+  { object, following, document, todo },
+  expected,
+  percent,
+  initial,
+) {
+  if (initial && percent < 50) {
+    expect(object.htmlCaption).toBeNull();
+    expect(object.hoverTitle).toContain(expected.diagram.label);
+  } else {
+    expect(object.htmlCaption?.text).toBe(expected.diagram.label);
+  }
+  if (initial) {
+    return;
+  }
+
+  expect(object.htmlCaption.screenFont).toBeGreaterThanOrEqual(11.75);
+  expect(following?.htmlCaption?.text).toBe(expected.nextDiagram.label);
+  expect(following.htmlCaption.box.y).toBeGreaterThanOrEqual(
+    object.object.y + object.object.height - 1,
+  );
+
+  if (percent >= 18) {
+    expect(document?.documentTitle?.screenFont).toBeGreaterThanOrEqual(11.75);
+    expect(todo?.todoTitle?.screenFont).toBeGreaterThanOrEqual(11.75);
+  } else {
+    expect(document?.hoverTitle).toBe(expected.designDoc.label);
+    expect(todo?.hoverTitle).toBe(expected.releaseTodo.label);
+  }
+}
+
+test("[EDIT-ZOOM-04] 架构白板中图解、文档、待办和分区标题在低倍率下可辨认", async ({
   page,
   studio,
 }, testInfo) => {
@@ -439,7 +490,7 @@ test("[EDIT-ZOOM-04] 大白板概览标题避让相邻图解，低倍率可识�
     label: "业务架构设计、应用服务和模块依赖关系概览",
     x: 0,
     y: 500,
-    width: 2200,
+    width: 2480,
     height: 950,
   };
   const diagram = {
@@ -447,20 +498,31 @@ test("[EDIT-ZOOM-04] 大白板概览标题避让相邻图解，低倍率可识�
     id: "architecture-diagram",
     label: "系统边界和部署层级",
     parentId: enclosing.id,
-    x: 1200,
+    x: 1020,
     y: -300,
-    width: 700,
+    width: 1440,
     height: 760,
     locked: true,
   };
+  const nextDiagram = {
+    ...diagram,
+    id: "architecture-diagram-next",
+    parentId: nested.id,
+    label: "部署检查和上线顺序",
+    y: 520,
+  };
+  const designDoc = { ...document, x: 0, y: -500, width: 980, height: 505 };
+  const releaseTodo = { ...todo, x: 0, y: 550, width: 940, height: 700 };
   const board = await studio.seedBasicBoard({
     title: "架构白板概览标题",
-    objects: [enclosing, nested, diagram],
+    objects: [enclosing, nested, diagram, nextDiagram, designDoc, releaseTodo],
   });
   const saved = await studio.readBoard(board);
+  const initial = studio.edition === "initial";
+  const titles = [];
   await openBoard(page, board);
 
-  for (const percent of [5, 10, 25, 50]) {
+  for (const percent of [5, 18, 25, 50]) {
     await setPercent(page, studio, percent);
     await expect
       .poll(async () => {
@@ -470,31 +532,43 @@ test("[EDIT-ZOOM-04] 大白板概览标题避让相邻图解，低倍率可识�
         return (
           title &&
           neighbor &&
-          Math.round(title.screenFont) === 12 &&
+          Math.round(title.screenFont) === (initial ? 12 : 14) &&
           title.box.x + title.box.width <= neighbor.x
         );
       })
       .toBe(true);
     const view = await readZoomDetails(page, studio);
     const object = item(view, diagram.id);
-    if (percent < 50) {
-      expect(object.htmlCaption).toBeNull();
-      expect(object.hoverTitle).toContain(diagram.label);
-    } else {
-      expect(object.htmlCaption?.text).toBe(diagram.label);
-    }
+    const rendered = {
+      section: item(view, nested.id),
+      object,
+      following: item(view, nextDiagram.id),
+      document: item(view, designDoc.id),
+      todo: item(view, releaseTodo.id),
+    };
+    titles.push(architectureCaptionFonts(rendered, percent));
+    await screenshot(page, testInfo, `architecture-overview-${percent}`);
+    checkArchitectureCaptions(
+      rendered,
+      { diagram, nextDiagram, designDoc, releaseTodo },
+      percent,
+      initial,
+    );
     const pick = center(object.object);
     await page.mouse.move(pick.x, pick.y);
     await page.mouse.click(pick.x, pick.y);
     await expect.poll(async () => Boolean((await readCanvas(page, studio)).selection)).toBe(true);
     const toolbar = page.getByRole("toolbar", { name: "选区格式", exact: true });
-    await expect(toolbar.getByText(diagram.label, { exact: true })).toBeInViewport({ ratio: 1 });
+    const selectedTitle = toolbar.getByText(diagram.label, { exact: true });
+    await expect(selectedTitle).toBeInViewport({ ratio: 1 });
+    await expect(selectedTitle).toHaveCSS("font-size", initial ? "12px" : "13px");
     await screenshot(page, testInfo, `architecture-caption-${percent}`);
     const { bounds } = await readCanvas(page, studio);
     await page.mouse.click(bounds.x + 16, bounds.y + bounds.height - 50);
     await expect.poll(async () => (await readCanvas(page, studio)).selection).toBeNull();
   }
 
+  await observe(testInfo, "architecture-caption-fonts", titles);
   expect(await studio.readBoard(board)).toEqual(saved);
 });
 

@@ -2,7 +2,7 @@ import { memo, useCallback, useMemo, useRef, useSyncExternalStore } from 'react'
 import type { CSSProperties, ReactNode } from 'react';
 
 import { builtInFrame, CanvasObjectContent } from '../adapters/index.js';
-import { showsIdleHtmlCaption } from '../adapters/caption-metrics.js';
+import { hasEmbedCaption, type EmbedCaptionPlacement } from '../adapters/caption-metrics.js';
 import type { ResolvedConnection } from '../connectors/geometry.js';
 import type {
   CanvasObjectCapabilities,
@@ -38,6 +38,7 @@ interface CanvasObjectsProps {
   drafts?: readonly CanvasDraftView[];
   zoom?: number;
   sectionCaptionWidths?: ReadonlyMap<string, number>;
+  embedCaptionPlacements?: ReadonlyMap<string, EmbedCaptionPlacement>;
   activeZoom: CanvasObjectStore<number>;
   activeZoomIds: ReadonlySet<string>;
   activeEmbedId?: string;
@@ -83,6 +84,7 @@ interface CanvasRenderedObjectProps {
   selected?: boolean;
   singleSelected?: boolean;
   sectionCaptionWidth?: number;
+  embedCaption?: EmbedCaptionPlacement;
   keepPassiveContent?: boolean;
   embedActive?: boolean;
   canEdit?: boolean;
@@ -90,6 +92,7 @@ interface CanvasRenderedObjectProps {
   locked?: boolean;
   editRequest?: number;
   formatRequest?: CanvasObjectViewProps['formatRequest'];
+  viewing?: boolean;
   focusedReading?: boolean;
   expanded?: boolean;
   readHtmlSource?: CanvasObjectsProps['readHtmlSource'];
@@ -198,12 +201,8 @@ const ownedFrameKinds = new Set<CanvasObjectDraft['kind']>([
   'chart',
 ]);
 
-function usesOwnedFrame(
-  kind: CanvasObjectDraft['kind'],
-  view: CanvasObjectExtension['View'],
-  payload: CanvasObjectPayload | undefined,
-) {
-  return Boolean(view && payload) && ownedFrameKinds.has(kind);
+function usesOwnedFrame(kind: CanvasObjectDraft['kind'], view: CanvasObjectExtension['View']) {
+  return Boolean(view) && ownedFrameKinds.has(kind);
 }
 
 function managesAnnotationEditing(extension: CanvasObjectExtension | undefined, enabled: boolean) {
@@ -213,12 +212,11 @@ function managesAnnotationEditing(extension: CanvasObjectExtension | undefined, 
 function hasEditCaption(
   kind: CanvasObjectDraft['kind'],
   extension: CanvasObjectExtension | undefined,
-  payload: CanvasObjectPayload | undefined,
   selected: boolean,
 ) {
   const caption = extension?.capabilities.content === 'embedded' || (kind === 'video' && selected);
 
-  return caption && usesOwnedFrame(kind, extension?.View, payload);
+  return caption && usesOwnedFrame(kind, extension?.View);
 }
 
 function editAccess(
@@ -251,16 +249,14 @@ function passiveBody(
 
 function hoverTitle(
   object: CanvasObjectDraft,
-  width: number,
-  zoom: number,
   id: string | undefined,
   focusedReading: boolean | undefined,
 ) {
   const available = id !== undefined && !focusedReading;
+  const { kind, label } = object;
+  const hasTitle = hasEmbedCaption(kind) || kind === 'document' || kind === 'todo';
 
-  return available && object.kind === 'html' && !showsIdleHtmlCaption(width, zoom)
-    ? object.label
-    : undefined;
+  return available && hasTitle ? label : undefined;
 }
 
 const CanvasObjectView = memo(
@@ -277,6 +273,7 @@ const CanvasObjectView = memo(
     selected = false,
     singleSelected,
     sectionCaptionWidth,
+    embedCaption,
     keepPassiveContent,
     embedActive = false,
     canEdit = false,
@@ -284,6 +281,7 @@ const CanvasObjectView = memo(
     locked,
     editRequest,
     formatRequest,
+    viewing,
     focusedReading,
     expanded,
     readHtmlSource,
@@ -306,7 +304,7 @@ const CanvasObjectView = memo(
   }: CanvasRenderedObjectProps) => {
     const draft = id === undefined;
     const transparent = object.kind === 'section' && object.transparent;
-    const mode = extension?.capabilities.content ?? 'passive';
+    const mode = extension ? extension.capabilities.content : 'passive';
     const View = extension?.View;
     const root = useRef<HTMLDivElement>(null);
     const { embedded, revealing } = useContentTracking(root, {
@@ -333,7 +331,7 @@ const CanvasObjectView = memo(
       nativeActive,
     );
     const readOnly = !canEditContent || !onObjectIntent;
-    const ownsFrame = usesOwnedFrame(object.kind, View, payload);
+    const ownsFrame = !draft && usesOwnedFrame(object.kind, View);
     const focusedAttribute = focusedReading ? '' : undefined;
     const body = View ? (
       <CanvasRegisteredBody
@@ -350,6 +348,7 @@ const CanvasObjectView = memo(
         locked={locked}
         editRequest={editRequest}
         formatRequest={readOnly ? undefined : formatRequest}
+        viewing={viewing}
         focusedReading={focusedReading}
         expanded={expanded}
         readHtmlSource={readHtmlSource}
@@ -386,7 +385,7 @@ const CanvasObjectView = memo(
         hidden={hidden}
         inert={hidden}
         aria-hidden={draft || undefined}
-        title={hoverTitle(object, geometry.width, zoom, id, focusedReading)}
+        title={hoverTitle(object, id, focusedReading)}
         style={objectStyle(object, geometry, zoom, focusedReading)}
       >
         <CanvasObjectContent
@@ -402,6 +401,7 @@ const CanvasObjectView = memo(
           locked={locked === true}
           selected={selected}
           sectionCaptionWidth={sectionCaptionWidth}
+          embedCaption={embedCaption}
           mode={mode}
           Frame={frame?.Frame}
         />
@@ -434,7 +434,7 @@ const SubscribedCanvasObject = memo(
     const payload = useObjectSnapshot(payloads, id);
     const exactZoom = useObjectSnapshot(activeZoom, id);
     const { object, extension, selected } = props;
-    const caption = hasEditCaption(object.kind, extension, payload, selected === true);
+    const caption = hasEditCaption(object.kind, extension, selected === true);
 
     return (
       <CanvasObjectView
@@ -495,6 +495,7 @@ function objectPresentation(
 
   return {
     hidden,
+    viewing: Boolean(viewing && !hidden),
     embedActive: !hidden && (viewing || id === activeEmbedId || annotateEmbeds),
     zoom: hidden ? (backgroundZoom ?? zoom) : zoom,
   };
@@ -512,6 +513,7 @@ export const CanvasObjects = memo(
     drafts,
     zoom = 1,
     sectionCaptionWidths,
+    embedCaptionPlacements,
     activeZoom,
     activeZoomIds,
     activeEmbedId,
@@ -597,6 +599,7 @@ export const CanvasObjects = memo(
           selected={selected}
           singleSelected={singleSelected}
           sectionCaptionWidth={sectionCaptionWidths?.get(id)}
+          embedCaption={viewing ? undefined : embedCaptionPlacements?.get(id)}
           keepPassiveContent={extension?.isPassiveContentVisible ? activeLabel : undefined}
           focusedReading={focused}
           expanded={expanded}

@@ -83,6 +83,17 @@
   min-block-size: 0;
 }
 
+.studio-document-unavailable {
+  --studio-ui-text: currentColor;
+  display: grid;
+  flex: 1 1 auto;
+  min-block-size: 0;
+  place-content: center;
+  overflow: hidden;
+  padding: min(5%, 0.75rem);
+  text-align: center;
+}
+
 .studio-document-body > .studio-ui-scroll-region {
   flex: 1 1 auto;
   min-inline-size: 0;
@@ -138,7 +149,10 @@
   flex: 1;
   min-inline-size: 0;
   padding: calc(4px * var(--document-ui-scale, 1));
-  font-size: calc(14px * var(--document-ui-scale, 1));
+  font-size: max(
+    calc(14px * var(--document-ui-scale, 1)),
+    calc(12px / var(--document-canvas-scale, 1))
+  );
   font-weight: 600;
   line-height: 1.5;
 }
@@ -223,7 +237,6 @@
 
 .studio-document-surface[data-document-layout='thumbnail'] .studio-document-title {
   padding: 0;
-  font-size: calc(10px / var(--document-canvas-scale, 1));
   line-height: 1.2;
 }
 

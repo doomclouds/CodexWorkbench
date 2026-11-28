@@ -52,9 +52,14 @@
   block-size: 100%;
   box-sizing: border-box;
   padding: 0.5rem;
+  border-radius: 4px;
   place-items: center;
   overflow-wrap: anywhere;
   text-align: center;
+}
+
+:is(.luming-media-placeholder, .luming-media-object[data-media-loading]) {
+  background-color: var(--studio-ui-canvas-paper-secondary, light-dark(#ececec, #393e53));
 }
 
 dialog:has(.luming-image-crop, .luming-link-dialog) {

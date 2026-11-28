@@ -312,7 +312,7 @@
   max-inline-size: min(170px, 40vw);
   padding-inline: 7px;
   overflow: hidden;
-  font-size: 12px;
+  font-size: 13px;
   white-space: nowrap;
   text-overflow: ellipsis;
 }

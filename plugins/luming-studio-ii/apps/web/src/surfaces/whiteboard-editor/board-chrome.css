@@ -80,6 +80,23 @@
   white-space: nowrap;
 }
 
+@media (width > 690px) {
+  .whiteboard-chrome__status {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    inline-size: 56px;
+    font-size: 11px;
+  }
+
+  .whiteboard-chrome__status[data-status='saved'] .whiteboard-chrome__status-label {
+    position: static;
+    inline-size: auto;
+    block-size: auto;
+    clip-path: none;
+  }
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .whiteboard-chrome__status[aria-busy='true'] > svg {
     animation: whiteboard-chrome-status-spin 0.9s linear infinite;

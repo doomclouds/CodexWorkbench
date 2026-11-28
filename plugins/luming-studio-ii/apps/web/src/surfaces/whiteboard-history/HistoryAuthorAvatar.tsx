@@ -5,11 +5,15 @@ import type { WhiteboardHistorySurfaceProps } from './contracts.js';
 export const HistoryAuthorColor =
   createContext<WhiteboardHistorySurfaceProps['colorForAuthor']>(undefined);
 
-export function HistoryAgentAvatar({
+export function HistoryAuthorAvatar({
   actorId,
+  name,
+  agent,
   compact = false,
 }: {
   readonly actorId: string | undefined;
+  readonly name: string;
+  readonly agent: boolean;
   readonly compact?: boolean;
 }) {
   const colorFor = useContext(HistoryAuthorColor);
@@ -19,8 +23,13 @@ export function HistoryAgentAvatar({
     : undefined;
 
   return (
-    <span className="whiteboard-history__avatar" data-agent="true" style={style} aria-hidden="true">
-      <Bot size={compact ? 13 : 17} />
+    <span
+      className="whiteboard-history__avatar"
+      data-agent={agent || undefined}
+      style={style}
+      aria-hidden="true"
+    >
+      {agent ? <Bot size={compact ? 13 : 17} /> : (Array.from(name)[0] ?? '协')}
     </span>
   );
 }

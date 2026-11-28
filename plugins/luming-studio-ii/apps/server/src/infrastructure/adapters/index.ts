@@ -355,7 +355,7 @@ function saveReceipt(connection: SqliteConnection, actorId: string, stored: Stor
     .run(boardId, actorId, commandId, stored.signature, receiptJson);
 }
 
-function createReader(connection: SqliteConnection): BoardEditReader {
+function createReader(connection: SqliteConnection, ownerDisplayName?: string): BoardEditReader {
   return {
     getAccess: (boardId, actorId) => {
       const access = readBoardAccess(connection, boardId, actorId);
@@ -386,8 +386,10 @@ function createReader(connection: SqliteConnection): BoardEditReader {
       readReceipt(connection, boardId, actorId, commandId),
     getEditReceipt: (boardId, actorId, commandId) =>
       readEditReceipt(connection, boardId, actorId, commandId),
-    listVersions: (boardId, before, limit) => readBoardVersions(connection, boardId, before, limit),
-    getVersion: (boardId, revision) => readBoardVersion(connection, boardId, revision),
+    listVersions: (boardId, before, limit) =>
+      readBoardVersions(connection, boardId, before, limit, ownerDisplayName),
+    getVersion: (boardId, revision) =>
+      readBoardVersion(connection, boardId, revision, ownerDisplayName),
     listVersionObjects: (boardId, revision, objectIds) =>
       readVersionObjects(connection, boardId, revision, objectIds),
     getVersionPayloads: (boardId, revision, objectIds) =>
@@ -501,6 +503,7 @@ function writeBoardChanges<T>(
 export function createWhiteboardRepository(
   database: SqliteDatabase,
   onChanged?: () => void,
+  ownerDisplayName?: string,
 ): BoardEditRepository {
   database.write((connection) => {
     connection.exec(whiteboardSchema);
@@ -509,7 +512,7 @@ export function createWhiteboardRepository(
   });
 
   return {
-    read: (work) => database.read((connection) => work(createReader(connection))),
+    read: (work) => database.read((connection) => work(createReader(connection, ownerDisplayName))),
     write: (work) => writeBoardChanges(database, onChanged, work),
   };
 }

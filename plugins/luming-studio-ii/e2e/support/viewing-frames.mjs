@@ -1,3 +1,5 @@
+import { embedFrame } from "./embed.mjs";
+
 export async function observeViewingFrames(page, studio, ids) {
   const legacy = studio.edition === "initial";
   const root = legacy ? ".studio-canvas-viewport[aria-label='白板画布']" : "[data-canvas-root]";
@@ -111,6 +113,27 @@ export async function observeViewingLayers(page, ids) {
 
     return () => ({ opens, current: sample() });
   }, ids);
+
+  return () => probe.evaluate((read) => read());
+}
+
+export async function observeEmbedViewport(page, title) {
+  const probe = await embedFrame(page, title)
+    .locator("body")
+    .evaluateHandle((body) => {
+      const view = body.ownerDocument.defaultView;
+      const sizes = new Map();
+      function capture() {
+        const width = view.innerWidth;
+        const height = view.innerHeight;
+        sizes.set(width + "x" + height, { width, height });
+      }
+      capture();
+      new ResizeObserver(capture).observe(body);
+      view.addEventListener("resize", capture);
+
+      return () => [...sizes.values()];
+    });
 
   return () => probe.evaluate((read) => read());
 }

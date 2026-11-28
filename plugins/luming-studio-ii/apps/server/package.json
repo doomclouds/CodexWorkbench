@@ -1,6 +1,6 @@
 {
   "name": "@codexworkbench/luming-studio-ii-server",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "description": "Luming Studio II backend",
   "license": "MIT",

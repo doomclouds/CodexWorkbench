@@ -119,7 +119,11 @@ function readPortableRows(
     );
 }
 
-export function readBackupActors(connection: SqliteConnection, boardId: string) {
+export function readBackupActors(
+  connection: SqliteConnection,
+  boardId: string,
+  ownerDisplayName?: string,
+) {
   const actors = new Map<string, BoardBackupActor>();
   const local = connection.prepare(`
     SELECT m.actor_id, m.can_edit, l.owner_actor_id
@@ -132,7 +136,9 @@ export function readBackupActors(connection: SqliteConnection, boardId: string) 
     if (typeof id === 'string') {
       const memberRole = can_edit === 1 ? 'editor' : 'viewer';
       const role = id === owner_actor_id ? 'owner' : memberRole;
-      actors.set(id, { id, name: id === 'local' ? '我' : id, kind: 'human', role });
+      const fallbackName = id === 'local' ? '我' : id;
+      const name = (role === 'owner' && ownerDisplayName) || fallbackName;
+      actors.set(id, { id, name, kind: 'human', role });
     }
   }
 

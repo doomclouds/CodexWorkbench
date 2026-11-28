@@ -409,8 +409,8 @@ function changedHistoryMock() {
   service.listVersions.mockResolvedValue({
     currentRevision: latestRevision,
     versions: [
-      { ...version(latestRevision), savedAtMillis, actorId: '协作者甲' },
-      { ...version(sourceRevision), savedAtMillis, actorId: '协作者乙' },
+      { ...version(latestRevision), savedAtMillis, actorId: 'owner', actorName: '协作者甲' },
+      { ...version(sourceRevision), savedAtMillis, actorId: 'guest', actorName: '协作者乙' },
       { ...version(0n), kind: 'baseline' },
     ],
   });
@@ -534,6 +534,61 @@ test('uses the saved Agent name and avatar in the version and its inspected chan
     'rgb(220, 60, 61)',
   );
   expect(difference?.textContent).not.toContain(agent.actorId);
+});
+
+test('keeps the full human names and collaboration colors across a history refresh', async () => {
+  const service = changedHistoryMock();
+  const owner = { ...version(latestRevision), actorId: 'local', actorName: '白板房主' };
+  const guest = {
+    ...version(sourceRevision),
+    actorId: 'guest-12345678-1234-4234-8234-123456789abc',
+    actorName: '协作测试团队长名单验证同事'.repeat(3),
+    savedAtMillis: Date.parse('2026-11-28T08:16:00Z'),
+  };
+  const unnamed = { ...version(0n), actorId: 'guest-unknown' };
+  service.listVersions.mockResolvedValue({
+    currentRevision: latestRevision,
+    versions: [owner, guest, unnamed],
+  });
+  const collaborationColor = (actorId: string) =>
+    actorId === guest.actorId ? '#019c7f' : '#785ee8';
+  const surface = await mount(service, { colorForAuthor: collaborationColor });
+
+  const ownerRow = button('展开版本 3');
+  expect(ownerRow.querySelector('strong')?.textContent).toBe(owner.actorName);
+  expect(ownerRow.textContent).not.toContain(owner.actorId);
+  const guestRow = button('展开版本 1');
+  expect(guestRow.querySelector('strong')?.textContent).toBe(guest.actorName);
+  expect(guestRow.querySelector('strong')?.title).toBe(guest.actorName);
+  expect(guestRow.querySelector('time')?.dateTime).toBe('2026-11-28T08:16:00.000Z');
+  const savedAvatar = guestRow.querySelector<HTMLElement>('.whiteboard-history__avatar');
+  expect(savedAvatar?.style.backgroundColor).toBe('rgb(1, 156, 127)');
+  expect(savedAvatar?.textContent).toBe('协');
+  expect(savedAvatar?.hasAttribute('data-agent')).toBe(false);
+  const unknownRow = button('展开版本 0');
+  expect(unknownRow.querySelector('strong')?.textContent).toBe('协作者');
+  expect(unknownRow.textContent).not.toContain(unnamed.actorId);
+
+  service.listVersions.mockResolvedValue({
+    currentRevision: 4n,
+    versions: [{ ...guest, revision: 4n }, owner, guest, unnamed],
+  });
+  await act(async () => surface.render({ revision: 4n }));
+  const newRow = button('展开版本 4');
+  expect(newRow.querySelector('strong')?.textContent).toBe(guest.actorName);
+  expect(newRow.textContent).not.toContain(guest.actorId);
+  expect(
+    newRow.querySelector<HTMLElement>('.whiteboard-history__avatar')?.style.backgroundColor,
+  ).toBe(savedAvatar?.style.backgroundColor);
+
+  await selectButton('展开版本 1');
+  await selectButton('看改动');
+  const difference = fixture.host.querySelector('.whiteboard-history__difference-meta');
+  expect(difference?.querySelector('span[title]')?.getAttribute('title')).toBe(guest.actorName);
+  expect(difference?.querySelector('time')?.dateTime).toBe('2026-11-28T08:16:00.000Z');
+  expect(
+    difference?.querySelector<HTMLElement>('.whiteboard-history__avatar')?.style.backgroundColor,
+  ).toBe(savedAvatar?.style.backgroundColor);
 });
 
 test('confirms an inspected change as the single object restore scope', async () => {

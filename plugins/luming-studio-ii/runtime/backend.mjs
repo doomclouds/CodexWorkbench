@@ -41975,7 +41975,7 @@ function readPortableRows(connection, boardId, table) {
     )
   );
 }
-function readBackupActors(connection, boardId) {
+function readBackupActors(connection, boardId, ownerDisplayName) {
   const actors = /* @__PURE__ */ new Map();
   const local = connection.prepare(`
     SELECT m.actor_id, m.can_edit, l.owner_actor_id
@@ -41987,7 +41987,9 @@ function readBackupActors(connection, boardId) {
     if (typeof id === "string") {
       const memberRole = can_edit === 1 ? "editor" : "viewer";
       const role = id === owner_actor_id ? "owner" : memberRole;
-      actors.set(id, { id, name: id === "local" ? "\u6211" : id, kind: "human", role });
+      const fallbackName = id === "local" ? "\u6211" : id;
+      const name = role === "owner" && ownerDisplayName || fallbackName;
+      actors.set(id, { id, name, kind: "human", role });
     }
   }
   function readNamedActors(table, kindSql) {
@@ -42535,13 +42537,14 @@ function withHistoryAuthor(version3, actors) {
   }
   const profile = actors.get(actorId2);
   const agent = profile ? profile.kind === "agent" : generatedAgentId.test(actorId2);
-  return agent ? {
-    ...version3,
-    actorKind: "agent",
-    actorName: profile?.name.trim() || historyAgentName(actorId2)
-  } : version3;
+  const name = profile?.name.trim();
+  if (agent) {
+    return { ...version3, actorKind: "agent", actorName: name || historyAgentName(actorId2) };
+  }
+  const ownerPlaceholder = actorId2 === "local" && name === "\u6211";
+  return name && name !== actorId2 && !ownerPlaceholder ? { ...version3, actorName: name } : version3;
 }
-function readBoardVersions(connection, boardId, before, limit = defaultPageSize3) {
+function readBoardVersions(connection, boardId, before, limit = defaultPageSize3, ownerDisplayName) {
   const cutoff = before === void 0 ? "" : "AND revision < ?3";
   const query = connection.prepare(`
     SELECT ${readVersionColumns} FROM board_versions
@@ -42552,24 +42555,23 @@ function readBoardVersions(connection, boardId, before, limit = defaultPageSize3
   if (!rows2.length) {
     return [];
   }
-  const authors = readBackupActors(connection, boardId);
+  const authors = readBackupActors(connection, boardId, ownerDisplayName);
   return rows2.map(
     (row) => withHistoryAuthor(withCreationVersion(connection, boardId, row), authors)
   );
 }
-function readBoardVersion(connection, boardId, revision) {
+function readBoardVersion(connection, boardId, revision, ownerDisplayName) {
   const query = connection.prepare(`
     SELECT ${readVersionColumns} FROM board_versions WHERE board_id = ? AND revision = ?
   `);
   query.setReadBigInts(true);
   const row = query.get(boardId, revision);
-  if (row) {
-    return withCreationVersion(connection, boardId, row);
-  }
-  if (revision === 0n) {
+  let version3 = row ? withCreationVersion(connection, boardId, row) : void 0;
+  if (!version3 && revision === 0n) {
     const initial = connection.prepare("SELECT 1 FROM boards WHERE board_id = ? AND revision = 0").get(boardId);
-    return initial && readCreationVersion(connection, boardId);
+    version3 = initial && readCreationVersion(connection, boardId);
   }
+  return version3 && withHistoryAuthor(version3, readBackupActors(connection, boardId, ownerDisplayName));
 }
 function payloadHistoryJoin(source) {
   return `
@@ -43902,7 +43904,7 @@ function saveReceipt2(connection, actorId2, stored) {
     VALUES (?, ?, ?, ?, ?)
   `).run(boardId, actorId2, commandId, stored.signature, receiptJson);
 }
-function createReader2(connection) {
+function createReader2(connection, ownerDisplayName) {
   return {
     getAccess: (boardId, actorId2) => {
       const access = readBoardAccess(connection, boardId, actorId2);
@@ -43921,8 +43923,8 @@ function createReader2(connection) {
     getExportAsset: (boardId, assetId, maximumBytes) => readExportAsset(connection, boardId, assetId, maximumBytes),
     getReceipt: (boardId, actorId2, commandId) => readReceipt4(connection, boardId, actorId2, commandId),
     getEditReceipt: (boardId, actorId2, commandId) => readEditReceipt(connection, boardId, actorId2, commandId),
-    listVersions: (boardId, before, limit) => readBoardVersions(connection, boardId, before, limit),
-    getVersion: (boardId, revision) => readBoardVersion(connection, boardId, revision),
+    listVersions: (boardId, before, limit) => readBoardVersions(connection, boardId, before, limit, ownerDisplayName),
+    getVersion: (boardId, revision) => readBoardVersion(connection, boardId, revision, ownerDisplayName),
     listVersionObjects: (boardId, revision, objectIds) => readVersionObjects(connection, boardId, revision, objectIds),
     getVersionPayloads: (boardId, revision, objectIds) => readVersionPayloads(connection, boardId, revision, objectIds)
   };
@@ -44010,14 +44012,14 @@ function writeBoardChanges(database, onChanged, work) {
   }
   return result;
 }
-function createWhiteboardRepository(database, onChanged) {
+function createWhiteboardRepository(database, onChanged, ownerDisplayName) {
   database.write((connection) => {
     connection.exec(whiteboardSchema);
     connection.exec(boardEditSchema);
     initializeBoardHistory(connection);
   });
   return {
-    read: (work) => database.read((connection) => work(createReader2(connection))),
+    read: (work) => database.read((connection) => work(createReader2(connection, ownerDisplayName))),
     write: (work) => writeBoardChanges(database, onChanged, work)
   };
 }
@@ -44604,7 +44606,11 @@ function createWhiteboardServer(options) {
     onError: options.onError
   };
   try {
-    const repository = createWhiteboardRepository(database, catalogChanges.publish);
+    const repository = createWhiteboardRepository(
+      database,
+      catalogChanges.publish,
+      ownerDisplayName
+    );
     const application = createWhiteboardApplication(repository, Date.now, {
       boardChanges,
       renderPng: renderSvgPng,

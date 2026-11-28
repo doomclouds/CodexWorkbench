@@ -70,7 +70,11 @@ const cases = [
     samples: [...embeds, ...paths],
   },
 ];
-const embeddedKinds = new Set(["html", "diagram", "chart"]);
+const embedGripLabels = new Map([
+  ["html", "移动 HTML 图解"],
+  ["diagram", "移动 图解"],
+  ["chart", "移动 图表"],
+]);
 const gripLabels = new Map([
   ["document", "移动文档"],
   ["todo", "移动任务清单"],
@@ -218,11 +222,12 @@ async function selectVideo(page, studio, id) {
 
 async function moveStart(page, studio, object) {
   const view = pick((await readCanvas(page, studio)).objects, object.id);
-  if (embeddedKinds.has(object.kind)) {
+  const embedGrip = embedGripLabels.get(object.kind);
+  if (embedGrip) {
     if (studio.edition === "ii") {
       const { x, y } = point(view.box);
       await page.mouse.click(x, y);
-      return gripCenter(page, object.kind === "html" ? "移动 HTML 图解" : "移动 嵌入对象");
+      return gripCenter(page, embedGrip);
     }
 
     return point(view.titleBox ?? view.box, 0.45, view.titleBox ? 0.5 : 0.05);

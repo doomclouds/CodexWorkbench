@@ -453,7 +453,7 @@ test("[COLLAB-PRESENCE-06] 分享面板保持打开时更新成员在线和最�
     const guest = await room.addEditor(editorName, smallerViewport);
     const member = page.getByText(editorName, { exact: true });
     const online = page.getByText("在线", { exact: true });
-    const offline = page.getByText(/^(?:离线|最近访问)/u);
+    const offline = page.getByText("离线 · 刚刚来过", { exact: true });
     await expect(member).toBeVisible();
     await expect(online).toBeVisible();
     await screenshot(page, testInfo, "open-share-member-online");

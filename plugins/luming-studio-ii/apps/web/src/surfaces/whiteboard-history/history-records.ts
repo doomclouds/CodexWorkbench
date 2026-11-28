@@ -27,7 +27,7 @@ export function historyAuthorName({ actorId, actorKind, actorName }: BoardHistor
     return 'Agent';
   }
 
-  return actorId === 'local' ? '本机' : actorId;
+  return actorId === 'local' ? '本机' : undefined;
 }
 
 export function isBoardCreation({ kind, revision }: BoardHistoryVersion): boolean {

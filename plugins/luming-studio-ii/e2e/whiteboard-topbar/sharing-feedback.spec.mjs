@@ -390,6 +390,81 @@ test("[TOPBAR-NOTE-02] 列表筛选作者和我发起，回复、解决及删除
   }
 });
 
+test("[TOPBAR-NOTE-09] 访客请求附加后，房主当前备注列表收到待处理记录", async ({
+  page,
+  browser,
+  studio,
+}, testInfo) => {
+  const initial = studio.edition === "initial";
+  const text = "请把当前架构评审的备注附加到对话";
+  const probe = await workbenchLinkProbe({ page, browser, studio });
+  try {
+    const board = await openBoard(page, studio, "待附加请求现场复核");
+    await openShare(page);
+    const guest = await joinViaRole(page, probe, board, "commenter");
+    await closeShare(page);
+    await openNoteList(page);
+    const pending = button(noteList(page), "待附加");
+    if (initial) {
+      await expect(pending).toHaveCount(0);
+    } else {
+      await pending.click();
+      await expect(pending).toHaveAttribute("aria-pressed", "true");
+      await expect(threadText(page, "暂无待附加备注")).toBeVisible();
+      await expect(noteList(page).getByText(/来宾在备注菜单选择/u)).toBeVisible();
+    }
+    await screenshot(page, testInfo, "topbar-note-before-attachment-request");
+
+    await test.step("评论访客提交附加请求", async () => {
+      await postBoardNote(guest, studio, text, true);
+      await expect(notePin(page, text)).toBeVisible();
+      if (!initial) {
+        await expect(threadText(page, text)).toHaveCount(0);
+      }
+      await openNoteList(guest);
+      await threadText(guest, text).click();
+      await button(noteList(guest), "备注操作").click();
+      const request = menuItem(guest, initial ? "附加到对话" : "请求房主附加到 Codex");
+      await expect(request).toBeVisible();
+      await request.click();
+      await expect(
+        guest.getByText(
+          initial ? "请求已提交，等待房主附加到对话。" : "已请求房主在 Codex 中附加。",
+        ),
+      ).toBeVisible();
+    });
+    await expect(threadText(page, text)).toBeVisible();
+    if (initial) {
+      await expect(page.getByRole("status", { name: "1 条备注待附加", exact: true })).toBeVisible();
+    } else {
+      await expect(pending).toHaveAttribute("aria-pressed", "true");
+    }
+    await screenshot(page, testInfo, "topbar-note-owner-pending-live");
+
+    await threadText(page, text).click();
+    await button(noteList(page), "解决").click();
+    await expect(threadText(page, "已解决")).toBeVisible();
+    const resolved = noteList(page).getByRole("checkbox", {
+      name: "显示已解决",
+      exact: true,
+    });
+    await expect(resolved).not.toBeChecked();
+    await expect(threadText(page, text)).toBeVisible();
+    await resolved.check();
+    await expect(threadText(page, text)).toBeVisible();
+    await resolved.uncheck();
+    await expect(threadText(page, text)).toBeVisible();
+    await screenshot(page, testInfo, "topbar-note-owner-pending-resolved");
+    await observe(testInfo, "topbar-note-pending-attachment", {
+      appearedWithoutRefresh: true,
+      pendingFilter: !initial,
+      visibleWithResolvedHidden: true,
+    });
+  } finally {
+    await probe.close();
+  }
+});
+
 async function selectNoteZoom(page, percentage) {
   const zoom = button(page, "缩放菜单");
   await zoom.click();

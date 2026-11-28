@@ -25,6 +25,18 @@ export function isTodoOverview(width: number, height: number) {
   return width < overviewWidth || height < overviewHeight;
 }
 
+export function todoHeadingLayout(
+  width: number,
+  height: number,
+): TodoObjectAppearance['headingLayout'] {
+  if (width < 64 || height < 28) {
+    return 'outline';
+  }
+  if (width < minimumPreviewWidth || height < 56) {
+    return 'title';
+  }
+}
+
 export function visibleTodoOverviewRows(width: number, height: number, zoom: number) {
   if (width * zoom < minimumPreviewWidth || zoom < minimumPreviewZoom) {
     return 0;
@@ -124,21 +136,71 @@ function paperScheme(paper?: string) {
   return luminance < darknessThreshold ? 'dark' : 'light';
 }
 
-function todoStyle(appearance: TodoObjectAppearance | undefined, overview: boolean) {
+function todoStyle(
+  appearance: TodoObjectAppearance | undefined,
+  overview: boolean,
+  expanded = false,
+  inProgress = false,
+) {
   const paper = appearance?.paper;
   const scheme = paperScheme(paper);
   const proposedScale = appearance?.uiScale;
-  const scaled =
-    proposedScale && proposedScale > 0 && Number.isFinite(proposedScale)
-      ? Math.min(proposedScale, maxOverviewScale)
-      : 1;
-  const style: CSSProperties & { '--todo-paper'?: string; '--todo-ui-scale': number } = {
+  const uiScale =
+    proposedScale && proposedScale > 0 && Number.isFinite(proposedScale) ? proposedScale : 1;
+  const scaled = Math.min(uiScale, maxOverviewScale);
+  const style: CSSProperties & {
+    '--todo-paper'?: string;
+    '--todo-title-size'?: string;
+    '--todo-ui-scale': number;
+  } = {
     colorScheme: scheme,
     '--todo-paper': paper,
+    '--todo-title-size':
+      proposedScale === undefined || expanded
+        ? undefined
+        : `${Math.max(17 * scaled, 12 * uiScale)}px`,
     '--todo-ui-scale': overview ? scaled : 1,
   };
 
-  return { style, scheme };
+  const headingLayout = expanded || inProgress ? undefined : appearance?.headingLayout;
+
+  return { style, scheme, headingLayout };
+}
+
+export function TodoContentUnavailable({
+  title,
+  appearance,
+  overview,
+  expanded,
+  focusedReading,
+}: Pick<TodoObjectProps, 'appearance' | 'overview' | 'expanded' | 'focusedReading'> & {
+  readonly title: string;
+}) {
+  const compact = Boolean(overview && !expanded);
+  const { style, scheme, headingLayout } = todoStyle(appearance, compact, expanded);
+  const label = title.trim() || defaultTodoTitle;
+
+  return (
+    <div
+      className="studio-object-todo"
+      data-todo-layout={compact ? 'overview' : 'full'}
+      data-todo-heading-layout={headingLayout}
+      data-todo-scheme={scheme}
+      data-todo-focused-reading={focusedReading || undefined}
+      data-todo-content-unavailable=""
+      style={style}
+    >
+      <header className="studio-object-todo__heading">
+        <TodoHeadingIcons movable={false} locked />
+        <div className="studio-object-todo__title">
+          <h3 title={label}>{label}</h3>
+        </div>
+      </header>
+      <div className="studio-object-todo__unavailable">
+        <StatusText message="任务清单正文尚未加载" announcement="polite" />
+      </div>
+    </div>
+  );
 }
 
 function titleContent(
@@ -274,7 +336,7 @@ function TodoSession(props: TodoObjectProps) {
   const title = session.projection.title.trim() || defaultTodoTitle;
   const { items } = session.projection;
   const complete = items.filter(({ checked }) => checked).length;
-  const { style, scheme } = todoStyle(appearance, compact);
+  const { style, scheme, headingLayout } = todoStyle(appearance, compact, expanded, inProgress);
   const outside = renderOutsideRows?.(compact ? [] : items.map(({ id }) => id));
 
   function handlePaste(event: ClipboardEvent<HTMLElement>) {
@@ -290,6 +352,7 @@ function TodoSession(props: TodoObjectProps) {
       className="studio-object-todo"
       data-todo-id={value.id}
       data-todo-layout={compact ? 'overview' : 'full'}
+      data-todo-heading-layout={headingLayout}
       data-todo-focused-reading={focusedReading || undefined}
       data-todo-expanded={expanded || undefined}
       data-todo-annotating={annotating || undefined}

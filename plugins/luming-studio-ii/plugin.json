@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "luming-studio-ii",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "面向共享白板、架构图解与 Agent 协作的 Luming Studio II。",
   "author": {
     "name": "doomclouds"

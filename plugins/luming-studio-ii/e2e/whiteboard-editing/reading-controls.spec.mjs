@@ -4,6 +4,7 @@ import {
   expect,
   observe,
   observeEmbedPayloadReads,
+  observeEmbedViewport,
   observeViewingFrames,
   observeViewingLayers,
   readCanvas,
@@ -366,6 +367,74 @@ test("[EDIT-VIEW-07] 从 5% 图解缩略图连续观看时只应用一次目标�
     "viewing-low-layers",
     (await layers?.()) ?? { restoredZoom: before.zoom },
   );
+});
+
+test("[EDIT-VIEW-08] HTML 全屏内缩放控件和滚轮保持正文视口稳定", async ({
+  page,
+  studio,
+}, testInfo) => {
+  const object = {
+    id: "viewing-zoom-html",
+    label: "全屏缩放 HTML",
+    kind: "html",
+    x: 80,
+    y: 90,
+    width: 1440,
+    height: 1120,
+    html: `<style>html,body{margin:0;width:100%;height:100%;background:#1e70d1}h1{color:#fff;padding:12px;margin:0}</style>
+<h1>绘制视口</h1><button id="verify" type="button">验证交互</button>
+<script>const verify=document.getElementById("verify");verify.addEventListener("click",()=>{verify.textContent="已响应";});addEventListener("resize",()=>{document.body.style.background=innerWidth===1438?"#1e70d1":"#c12263";});</script>`,
+  };
+  const board = await studio.seedBasicBoard({ title: "全屏 HTML 缩放", objects: [object] });
+  await openBoard(page, board);
+  const { bounds } = await readCanvas(page, studio);
+  await openViewing(page, studio, object.id);
+  const frame = embedFrame(page, object.label);
+  await expect(frame.getByRole("heading", { name: "绘制视口" })).toBeVisible();
+  const mounted = await observeViewingFrames(page, studio, [object.id]);
+  const viewport = await observeEmbedViewport(page, object.label);
+  const zoom = zoomInput(page);
+  const initialSize = await viewport();
+
+  for (const percent of [85, 49, 51, 48, 52, 80]) {
+    await zoom.fill(String(percent));
+    await zoom.press("Enter");
+    await expect(zoom).toHaveValue(String(percent));
+    await viewport();
+  }
+  await button(viewing(page), "全屏放大").click();
+  await expect(zoom).toHaveValue("96");
+  await button(viewing(page), "全屏缩小").click();
+  await expect(zoom).toHaveValue("80");
+  await screenshot(page, testInfo, "viewing-html-controls-zoom");
+
+  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+  await page.keyboard.down("Control");
+  try {
+    for (let index = 0; index < 6; index++) {
+      await page.mouse.wheel(0, 70);
+    }
+    await expect(zoom).not.toHaveValue("80");
+    const zoomedOut = await zoom.inputValue();
+    for (let index = 0; index < 6; index++) {
+      await page.mouse.wheel(0, -70);
+    }
+    await expect(zoom).not.toHaveValue(zoomedOut);
+  } finally {
+    await page.keyboard.up("Control");
+  }
+
+  const html = (await mounted()).frames[0];
+  expect(html).toMatchObject({ sameNode: true, detached: false, loads: 0 });
+  const sizes = await viewport();
+  if (studio.edition === "ii") {
+    expect(sizes).toEqual(initialSize);
+  }
+  await button(viewing(page), "适应全屏内容").click();
+  await frame.getByRole("button", { name: "验证交互" }).press("Enter");
+  await expect(frame.getByRole("button", { name: "已响应" })).toBeVisible();
+  await screenshot(page, testInfo, "viewing-html-wheel-zoom");
+  await observe(testInfo, "viewing-html-zoom-viewport", { html, sizes });
 });
 
 test("[EDIT-VIEW-03] 临时荧光笔可取消、淡出、清除，白板零持久", async ({
