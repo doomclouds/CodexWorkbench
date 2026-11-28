@@ -1,13 +1,4 @@
-import {
-  lazy,
-  Suspense,
-  useCallback,
-  useEffect,
-  useEffectEvent,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from 'react';
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent, MouseEvent, PointerEvent, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Dialog, ScrollRegion, StatusText } from '../../../base/index.js';
@@ -24,7 +15,6 @@ import { useDocumentView } from './useDocumentView.js';
 import { useDocumentViewport } from './useDocumentViewport.js';
 import './document-object.css';
 
-const DocumentEditor = lazy(() => import('./DocumentEditor.js'));
 const nativeControl = 'button,input,textarea,select,a[href],[contenteditable]';
 const vendorMenu =
   '.bn-suggestion-menu,[role="menu"],[role="listbox"],.bn-container [role="dialog"]';
@@ -219,6 +209,8 @@ export function DocumentObject({
     setView,
     mode: phase,
     standalone,
+    editor: DocumentEditor,
+    editorState,
   } = useDocumentView({
     focused: focusedReading,
     readOnly,
@@ -235,6 +227,7 @@ export function DocumentObject({
     draft.confirmed.version,
     nativeBlockRequest,
     focusedReading,
+    view.mode === 'edit',
   );
   const {
     scroll,
@@ -275,8 +268,8 @@ export function DocumentObject({
   }, []);
 
   function openEditor(focusBlockId?: string) {
-    if (!writesPaused) {
-      setView({ mode: 'edit', focusBlockId });
+    if (!writesPaused && !editorState) {
+      setView({ mode: 'edit', focusBlockId: focusBlockId ?? viewport.firstVisibleBlock() });
     }
   }
 
@@ -368,8 +361,8 @@ export function DocumentObject({
     }
 
     const localDialog = comparing || exportOpen;
-    const editingOwnsEscape =
-      editing && !annotationActive && !vendorControlsOpen(event.currentTarget);
+    const ownsEditingEscape = editing && !vendorControlsOpen(event.currentTarget);
+    const editingOwnsEscape = (ownsEditingEscape || editorState === 'loading') && !annotationActive;
 
     if (!localDialog && !editingOwnsEscape) {
       return;
@@ -465,6 +458,7 @@ export function DocumentObject({
     return (
       <DocumentToolbar
         mode={phase}
+        editorState={editorState}
         iconOnly={layout !== undefined || focusedReading}
         expandControl={expandControl}
         readOnly={readOnly}
@@ -496,21 +490,17 @@ export function DocumentObject({
         onPointerUp={captureSelection}
         onKeyUp={captureSelection}
       >
-        {editing ? (
-          <Suspense
-            fallback={<StatusText message="正在打开文档编辑器" busy announcement="polite" />}
-          >
-            <DocumentEditor
-              value={draft.draft.document}
-              editable={!writesPaused || composing}
-              theme={shell.colorScheme}
-              focusBlockId={view.focusBlockId}
-              resolveImage={resolveImage}
-              uploadImage={uploadImage}
-              onChange={(document) => draft.change({ document })}
-              onCompositionChange={setComposing}
-            />
-          </Suspense>
+        {DocumentEditor ? (
+          <DocumentEditor
+            value={draft.draft.document}
+            editable={!writesPaused || composing}
+            theme={shell.colorScheme}
+            focusBlockId={view.focusBlockId}
+            resolveImage={resolveImage}
+            uploadImage={uploadImage}
+            onChange={(document) => draft.change({ document })}
+            onCompositionChange={setComposing}
+          />
         ) : (
           <DocumentReadView
             value={draft.draft.document}

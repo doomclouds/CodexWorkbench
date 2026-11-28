@@ -274,14 +274,14 @@ test.each(['toolbar', 'keyboard'] as const)(
         await press(reader, 'F2');
       }
 
-      const editing = required(
-        app.host,
-        '[data-document-focused-reading][data-document-view="edit"]',
-      );
-      expect(app.host.querySelector('dialog[open]')).toBeNull();
+      const editorView = '[data-document-focused-reading][data-document-view="edit"]';
       await expect
-        .poll(() => editing.querySelector('[data-document-editor]'), { timeout: 10_000 })
+        .poll(() => app.host.querySelector(editorView + ' [data-document-editor]'), {
+          timeout: 10_000,
+        })
         .not.toBeNull();
+      const editing = required(app.host, editorView);
+      expect(app.host.querySelector('dialog[open]')).toBeNull();
       const title = required<HTMLInputElement>(editing, 'input:not([type="search"])');
       replaceTitle(title, '确认正文版本');
       if (entry === 'keyboard') {

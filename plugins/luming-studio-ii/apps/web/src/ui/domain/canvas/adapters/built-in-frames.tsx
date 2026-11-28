@@ -26,6 +26,7 @@ interface SectionOverviewStyle extends CSSProperties {
   '--studio-ui-section-overview-line'?: string;
   '--studio-ui-section-overview-gap'?: string;
   '--studio-ui-section-overview-width'?: string;
+  '--studio-ui-section-editor-unit'?: string;
 }
 
 export function CanvasShapeFrame({
@@ -81,14 +82,17 @@ export function CanvasSectionFrame({
   const overview = usesSectionOverview(zoom);
   const available = sectionCaptionWidth ?? width;
   const captionFits = available * zoom >= sectionOverview.minimumWidth && height * zoom >= 12;
-  const overviewStyle: SectionOverviewStyle | undefined = overview
-    ? {
-        '--studio-ui-section-overview-font': `${sectionOverview.fontSize / zoom}px`,
-        '--studio-ui-section-overview-line': `${sectionOverview.height / zoom}px`,
-        '--studio-ui-section-overview-gap': `${sectionOverview.gap / zoom}px`,
-        '--studio-ui-section-overview-width': `${available}px`,
-      }
-    : undefined;
+  const overviewStyle: SectionOverviewStyle = {
+    '--studio-ui-section-editor-unit': `${1 / zoom}px`,
+    ...(overview
+      ? {
+          '--studio-ui-section-overview-font': `${sectionOverview.fontSize / zoom}px`,
+          '--studio-ui-section-overview-line': `${sectionOverview.height / zoom}px`,
+          '--studio-ui-section-overview-gap': `${sectionOverview.gap / zoom}px`,
+          '--studio-ui-section-overview-width': `${available}px`,
+        }
+      : undefined),
+  };
 
   return (
     <>

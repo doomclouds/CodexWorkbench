@@ -235,9 +235,7 @@ function TodoCanvasBody({
         locked={locked}
         appearance={appearance}
         overview={overview}
-        overviewRows={
-          overview ? visibleTodoOverviewRows(geometry.width, geometry.height, zoom) : undefined
-        }
+        overviewRows={overview ? visibleTodoOverviewRows(width, height) : undefined}
         onEdit={handleEdit}
         onEditingChange={setEditing}
         onRequestExpand={open}

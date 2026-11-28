@@ -191,7 +191,14 @@ const whiteboardScopedFixtures = [
   ],
   [
     "whiteboard-editing/document",
-    ["chooseDocumentImage", "readDocumentDownload", "failNextDocumentSave", "workbenchLinkProbe"],
+    [
+      "chooseDocumentImage",
+      "readDocumentDownload",
+      "failNextDocumentSave",
+      "holdDocumentEditorChunk",
+      "readDocumentPaper",
+      "workbenchLinkProbe",
+    ],
   ],
   ["whiteboard-editing/todo", ["controlNextTodoSave", "workbenchLinkProbe"]],
   ["whiteboard-editing/rich-gestures", ["embedFrame", "workbenchLinkProbe"]],

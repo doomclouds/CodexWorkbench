@@ -111,6 +111,7 @@ export function useDocumentViewport(
   version: number,
   nativeBlockRequest?: DocumentObjectProps['nativeBlockRequest'],
   focused = false,
+  openingEditor = false,
 ) {
   const body = useRef<HTMLDivElement>(null);
   const scroll = useRef<ScrollRegionHandle>(null);
@@ -144,10 +145,11 @@ export function useDocumentViewport(
       return;
     }
 
+    const continuesInline = previousMode.current === 'inline' && openingEditor;
     previousMode.current = mode;
-    const saved = position.current[expanded ? 'expanded' : 'inline'];
-    scroll.current?.scrollTo(saved);
-  }, [expanded, mode]);
+    const target = expanded && !continuesInline ? 'expanded' : 'inline';
+    scroll.current?.scrollTo(position.current[target]);
+  }, [expanded, mode, openingEditor]);
 
   useLayoutEffect(() => {
     if (currentId && body.current) {
@@ -212,6 +214,23 @@ export function useDocumentViewport(
     setSelectionVersion(selection.current?.version);
   }
 
+  function firstVisibleBlock() {
+    const paper = body.current;
+    const region = paper?.parentElement;
+    if (!paper || !region) {
+      return undefined;
+    }
+
+    const { top, bottom } = region.getBoundingClientRect();
+    const blocks = paper.querySelectorAll<HTMLElement>('[data-document-read-block]');
+    const first = Array.from(blocks).find((block) => {
+      const bounds = block.getBoundingClientRect();
+      return bounds.bottom > top && bounds.top < bottom;
+    });
+
+    return first?.dataset.documentReadBlock;
+  }
+
   function readSelection() {
     return selection.current?.version === version ? selection.current : undefined;
   }
@@ -274,6 +293,7 @@ export function useDocumentViewport(
     advance,
     reveal,
     captureSelection,
+    firstVisibleBlock,
     handleSelectAll,
   };
 }

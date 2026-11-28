@@ -17,7 +17,6 @@ const overviewWidth = 228;
 const overviewHeight = 110;
 const maxOverviewRows = 4;
 const minimumPreviewWidth = 104;
-const minimumPreviewZoom = 0.5;
 const overviewChromeHeight = 46;
 const overviewRowHeight = 18;
 
@@ -37,14 +36,14 @@ export function todoHeadingLayout(
   }
 }
 
-export function visibleTodoOverviewRows(width: number, height: number, zoom: number) {
-  if (width * zoom < minimumPreviewWidth || zoom < minimumPreviewZoom) {
+export function visibleTodoOverviewRows(width: number, height: number) {
+  if (width < minimumPreviewWidth) {
     return 0;
   }
 
   return Math.min(
     maxOverviewRows,
-    Math.max(0, Math.floor((height * zoom - overviewChromeHeight) / overviewRowHeight)),
+    Math.max(0, Math.floor((height - overviewChromeHeight) / overviewRowHeight)),
   );
 }
 
@@ -148,17 +147,18 @@ function todoStyle(
   const uiScale =
     proposedScale && proposedScale > 0 && Number.isFinite(proposedScale) ? proposedScale : 1;
   const scaled = Math.min(uiScale, maxOverviewScale);
+  const screenUnit = proposedScale !== undefined && !expanded ? uiScale : undefined;
   const style: CSSProperties & {
     '--todo-paper'?: string;
+    '--todo-screen-unit'?: string;
     '--todo-title-size'?: string;
     '--todo-ui-scale': number;
   } = {
     colorScheme: scheme,
     '--todo-paper': paper,
+    '--todo-screen-unit': screenUnit === undefined ? undefined : `${screenUnit}px`,
     '--todo-title-size':
-      proposedScale === undefined || expanded
-        ? undefined
-        : `${Math.max(17 * scaled, 12 * uiScale)}px`,
+      screenUnit === undefined ? undefined : `${Math.max(17 * scaled, 12 * screenUnit)}px`,
     '--todo-ui-scale': overview ? scaled : 1,
   };
 

@@ -319,8 +319,8 @@ export function TodoRows(props: TodoRowsProps) {
             <TodoControlIcon icon="grip" />
           </button>
         )}
-        <span className="studio-object-todo__checked">
-          {showsEditControls ? (
+        {showsEditControls ? (
+          <label className="studio-object-todo__checked">
             <input
               type="checkbox"
               aria-label={'完成任务：' + label}
@@ -332,12 +332,14 @@ export function TodoRows(props: TodoRowsProps) {
                 ])
               }
             />
-          ) : (
+          </label>
+        ) : (
+          <span className="studio-object-todo__checked">
             <span aria-label={checked ? '已完成' : '未完成'} data-checked={checked}>
               {checked ? '✓' : null}
             </span>
-          )}
-        </span>
+          </span>
+        )}
         <div className="studio-object-todo__task" data-completed={checked}>
           {taskText(item, props)}
         </div>

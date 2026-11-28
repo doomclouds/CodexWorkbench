@@ -156,6 +156,7 @@ async function setPercent(page, studio, percent) {
     new Map([
       [5, 25],
       [10, 25],
+      [35, 25],
       [18, 25],
       [60, 50],
     ]).get(percent) ?? percent;
@@ -167,6 +168,9 @@ async function setPercent(page, studio, percent) {
   }
   if (percent === 10) {
     wheel = await zoomByWheel(page, studio, 120, 5);
+  }
+  if (percent === 35) {
+    wheel = await zoomByWheel(page, studio, -112, 2);
   }
   if (percent === 18) {
     wheel = await zoomByWheel(page, studio, 110, 2);
@@ -570,6 +574,111 @@ test("[EDIT-ZOOM-04] 架构白板中图解、文档、待办和分区标题在�
 
   await observe(testInfo, "architecture-caption-fonts", titles);
   expect(await studio.readBoard(board)).toEqual(saved);
+});
+
+test("[EDIT-ZOOM-05] 低倍下分区标题输入可见且可确认保存", async ({ page, studio }, testInfo) => {
+  const wide = {
+    ...section,
+    id: "renamed-section",
+    label: "规划与交付阶段的完整分区名称",
+    x: 200,
+    y: 380,
+    width: 660,
+    height: 440,
+    transparent: false,
+    fill: "#deebff",
+  };
+  const member = {
+    ...shape,
+    id: "section-member",
+    label: "子对象",
+    parentId: wide.id,
+    x: 300,
+    y: 465,
+    fontSize: 32,
+  };
+  const occluder = {
+    ...embed,
+    id: "neighboring-diagram",
+    label: "相邻图解",
+    x: 342,
+    y: 260,
+    width: 420,
+    height: 118,
+  };
+  const small = {
+    ...wide,
+    id: "small-section",
+    label: "小分区",
+    x: 1120,
+    y: 450,
+    width: 360,
+    height: 280,
+    transparent: true,
+  };
+  const board = await studio.seedBasicBoard({
+    title: "分区标题编辑缩放",
+    objects: [wide, member, occluder, small],
+  });
+  await page.setViewportSize({ width: 1440, height: 820 });
+  await openBoard(page, board);
+
+  for (const [percent, target, confirmation, scheme] of [
+    [35, wide, "Enter", "dark"],
+    [5, small, "Escape", "light"],
+    [100, wide, "Escape", "light"],
+  ]) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await setPercent(page, studio, percent);
+    await expect
+      .poll(async () => {
+        const data = item(await readZoomDetails(page, studio), target.id);
+        if (percent === 5) {
+          return data?.section === null;
+        }
+
+        const title = data?.section;
+        return Boolean(title && (percent !== 35 || title.box.width < data.object.width));
+      })
+      .toBe(true);
+    const box = await objectBox(page, studio, target.id);
+    await page.mouse.click(box.x + 1, box.y + box.height / 2);
+    await expect.poll(async () => Boolean((await readCanvas(page, studio)).selection)).toBe(true);
+    await page.keyboard.press("F2");
+
+    const editor = page.getByRole("textbox", { name: "编辑文字", exact: true });
+    await expect(editor).toBeFocused();
+    await editor.fill("");
+    await expect(editor).toBeFocused();
+    const blank = item(await readZoomDetails(page, studio), target.id)?.sectionEditor;
+    expect(blank).toBeTruthy();
+    await screenshot(page, testInfo, `section-editor-empty-${percent}`);
+    const name = `分区编辑已确认 ${percent}`;
+    await editor.fill(name);
+    await expect(editor).toBeFocused();
+    await screenshot(page, testInfo, `section-editor-text-${percent}`);
+    await observe(testInfo, `section-editor-${percent}`, blank);
+    if (studio.edition === "ii") {
+      expect(blank.screenFont).toBeGreaterThanOrEqual(13.9);
+      expect(blank.box.width).toBeGreaterThanOrEqual(143.9);
+      expect(blank.hit).toBe(true);
+      expect(blank.background).not.toBe("rgba(0, 0, 0, 0)");
+      expect(blank.background).not.toBe(blank.foreground);
+    }
+
+    if (target === wide) {
+      await page.getByText(member.label, { exact: true }).click({ trial: true });
+    }
+    await expect(editor).toBeFocused();
+    await editor.press(confirmation);
+    await expect(editor).toBeHidden();
+    await expect
+      .poll(async () => item((await studio.readBoard(board)).objects, target.id)?.label)
+      .toBe(name);
+    await page.reload();
+    await expect(zoomButton(page)).toBeVisible();
+    expect(item((await studio.readBoard(board)).objects, target.id)?.label).toBe(name);
+  }
 });
 
 async function moveObject(page, point, delta) {

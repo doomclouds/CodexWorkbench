@@ -27,7 +27,9 @@ export {
 } from "./embed.mjs";
 export { chooseDocumentImage, readDocumentDownload } from "./document-download.mjs";
 export { failNextDocumentSave } from "./document-failure.mjs";
+export { holdDocumentEditorChunk, readDocumentPaper } from "./document-editor.mjs";
 export { controlNextTodoSave } from "./todo-save.mjs";
+export { readTodoPresentation } from "./todo-presentation.mjs";
 export { holdNextInlineTextRefresh, holdNextInlineTextWrite } from "./inline-text-refresh.mjs";
 
 export {

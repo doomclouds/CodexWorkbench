@@ -131,6 +131,7 @@ function objectStyle(
 ) {
   const fill = object.fill?.toLowerCase();
   const pinnedNote = object.kind === 'note' && fill === '#f9e56f';
+  const flatSection = object.kind === 'section' && rotation === 0;
   const widthAtZoom =
     object.kind === 'section' && zoom < 0.5
       ? Math.max(object.strokeWidth ?? 1, 0.7 / zoom)
@@ -140,7 +141,7 @@ function objectStyle(
     top: y,
     width,
     height,
-    transform: `rotate(${rotation}deg)`,
+    transform: flatSection ? undefined : `rotate(${rotation}deg)`,
     color: pinnedNote ? 'light-dark(#0b0b0b, #efefef)' : undefined,
     '--studio-ui-canvas-object-fill': pinnedNote ? 'light-dark(#f9e56f, #f5d515)' : object.fill,
     '--studio-ui-canvas-object-stroke': object.stroke,

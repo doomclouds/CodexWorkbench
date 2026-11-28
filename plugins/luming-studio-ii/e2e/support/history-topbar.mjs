@@ -92,19 +92,23 @@ export async function failNextOlderVersions(page, studio, board) {
   });
 }
 
-export async function readHistoryAuthorPresentation(participant, record) {
-  const avatarColor = await participant
-    .locator(".room-presence-avatar")
-    .evaluate((node) => getComputedStyle(node).backgroundColor);
+export async function readHistoryAuthorPresentation(record, participant) {
+  const avatarColor = participant
+    ? await participant
+        .locator(".room-presence-avatar")
+        .evaluate((node) => getComputedStyle(node).backgroundColor)
+    : null;
 
   return record.evaluate((entry, color) => {
     const author = entry.querySelector(".whiteboard-history__record-top strong");
     const time = entry.querySelector("time");
-    const avatar = entry.querySelector(".whiteboard-history__avatar");
+    const avatar = entry.querySelector(".whiteboard-history__avatar,.studio-editor-avatar");
+    const avatarBox = avatar?.getBoundingClientRect();
     const authorBox = author?.getBoundingClientRect();
     const timeBox = time?.getBoundingClientRect();
 
     return {
+      avatarSize: avatarBox && [avatarBox.width, avatarBox.height],
       sameColor: !!avatar && getComputedStyle(avatar).backgroundColor === color,
       shortened: !!author && author.scrollWidth > author.clientWidth,
       timeReadable:

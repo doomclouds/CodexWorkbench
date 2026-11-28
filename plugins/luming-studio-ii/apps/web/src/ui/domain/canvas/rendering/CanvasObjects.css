@@ -109,6 +109,12 @@
   content: '';
 }
 
+.studio-ui-canvas-object--section:has(
+  > .studio-ui-canvas-section-title .studio-ui-inline-text-editor
+) {
+  z-index: auto;
+}
+
 .studio-ui-canvas-object:not(:has(> .studio-ui-canvas-native-content:not([inert]))) {
   touch-action: none;
 }

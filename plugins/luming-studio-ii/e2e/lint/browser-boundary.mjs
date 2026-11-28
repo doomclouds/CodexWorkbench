@@ -82,9 +82,19 @@ const scopedFixtureImports = new Map(
     ],
     [
       "whiteboard-editing/document",
-      ["chooseDocumentImage", "readDocumentDownload", "failNextDocumentSave", "workbenchLinkProbe"],
+      [
+        "chooseDocumentImage",
+        "readDocumentDownload",
+        "failNextDocumentSave",
+        "holdDocumentEditorChunk",
+        "readDocumentPaper",
+        "workbenchLinkProbe",
+      ],
     ],
-    ["whiteboard-editing/todo", ["controlNextTodoSave", "workbenchLinkProbe"]],
+    [
+      "whiteboard-editing/todo",
+      ["controlNextTodoSave", "readTodoPresentation", "workbenchLinkProbe"],
+    ],
     ["whiteboard-editing/object-loading", ["holdObjectPayloads", "readObjectLoading"]],
     ["whiteboard-editing/rich-gestures", ["embedFrame", "workbenchLinkProbe"]],
     ["whiteboard-editing/organization", ["enableCanvasClipboard"]],

@@ -1,6 +1,6 @@
 {
   "name": "@codexworkbench/luming-studio-ii-whiteboard-shared",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "private": true,
   "description": "Platform-independent whiteboard behavior shared by Luming Studio II Web and server",
   "license": "MIT",

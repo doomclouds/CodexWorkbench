@@ -11,6 +11,7 @@ type ExportAction = NonNullable<DocumentObjectProps['onExport']>;
 
 interface EditorToolbarProps {
   readonly mode: DocumentActivity['mode'];
+  readonly editorState?: 'loading' | 'failed';
   readonly iconOnly?: boolean;
   readonly expandControl?: DocumentObjectProps['expandControl'];
   readonly readOnly: boolean;
@@ -229,6 +230,7 @@ function DocumentExport({
 
 function DocumentModeAction({
   mode,
+  editorState,
   iconOnly,
   readOnly,
   annotationActive,
@@ -237,9 +239,27 @@ function DocumentModeAction({
   onOpen,
 }: Pick<
   EditorToolbarProps,
-  'mode' | 'iconOnly' | 'readOnly' | 'annotationActive' | 'onEdit' | 'onRead' | 'onOpen'
+  | 'mode'
+  | 'editorState'
+  | 'iconOnly'
+  | 'readOnly'
+  | 'annotationActive'
+  | 'onEdit'
+  | 'onRead'
+  | 'onOpen'
 >) {
   const variant = iconOnly ? 'ghost' : undefined;
+  if (editorState === 'loading') {
+    return (
+      <Button
+        label="取消打开文档编辑器"
+        icon={iconOnly ? '×' : undefined}
+        iconOnly={iconOnly}
+        variant={variant}
+        onActivate={onRead}
+      />
+    );
+  }
   if (mode === 'edit') {
     return (
       <Button
@@ -270,9 +290,27 @@ function DocumentModeAction({
       icon={iconOnly ? <DocumentEditIcon /> : undefined}
       iconOnly={iconOnly}
       variant={variant}
-      disabled={annotationActive}
+      disabled={annotationActive || editorState === 'failed'}
       onActivate={onEdit}
     />
+  );
+}
+
+function DocumentEditorStatus({ state }: { readonly state: EditorToolbarProps['editorState'] }) {
+  if (!state) {
+    return null;
+  }
+
+  const loading = state === 'loading';
+  return (
+    <span className="studio-document-editor-status">
+      <StatusText
+        message={loading ? '正在打开文档编辑器' : '编辑器打开失败，可继续阅读'}
+        tone={loading ? 'neutral' : 'error'}
+        busy={loading}
+        announcement={loading ? 'polite' : 'assertive'}
+      />
+    </span>
   );
 }
 
@@ -302,6 +340,7 @@ function DocumentExpandAction({
 
 export function DocumentToolbar({
   mode,
+  editorState,
   iconOnly = false,
   expandControl,
   readOnly,
@@ -326,9 +365,11 @@ export function DocumentToolbar({
   return (
     <>
       <Toolbar label="文档操作">
-        {iconOnly && <DocumentCanvasSaveStatus draft={draft} />}
+        {iconOnly && !editorState && <DocumentCanvasSaveStatus draft={draft} />}
+        <DocumentEditorStatus state={editorState} />
         <DocumentModeAction
           mode={mode}
+          editorState={editorState}
           iconOnly={iconOnly}
           readOnly={readOnly}
           annotationActive={annotationActive}

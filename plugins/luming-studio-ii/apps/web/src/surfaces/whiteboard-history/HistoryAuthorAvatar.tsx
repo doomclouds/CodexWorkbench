@@ -29,7 +29,7 @@ export function HistoryAuthorAvatar({
       style={style}
       aria-hidden="true"
     >
-      {agent ? <Bot size={compact ? 13 : 17} /> : (Array.from(name)[0] ?? '协')}
+      {agent ? <Bot size={compact ? 13 : 15} /> : (Array.from(name)[0] ?? '协')}
     </span>
   );
 }

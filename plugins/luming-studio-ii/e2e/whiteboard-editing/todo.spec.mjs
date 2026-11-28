@@ -3,6 +3,7 @@ import {
   expect,
   observe,
   readCanvas,
+  readTodoPresentation,
   screenshot,
   test,
   workbenchLinkProbe,
@@ -47,6 +48,19 @@ async function zoomTo60(page) {
   await zoom.click();
   await button(menu, "放大").click();
   await expect(zoom).toHaveText("60%");
+  await page.keyboard.press("Escape");
+  await expect(menu).toBeHidden();
+}
+
+async function zoomTo35(page) {
+  const zoom = button(page, "缩放菜单");
+  const menu = page.getByRole("menu", { name: "缩放与视图", exact: true });
+  await zoom.click();
+  await menu.getByRole("menuitem", { name: "50%", exact: true }).click();
+  await zoom.click();
+  await button(menu, "缩小").click();
+  await button(menu, "缩小").click();
+  await expect(zoom).toHaveText("35%");
   await page.keyboard.press("Escape");
   await expect(menu).toBeHidden();
 }
@@ -352,4 +366,84 @@ test("[EDIT-TODO-06] 丢失已提交的任务回执后确认原勾选，没有�
   expect(await studio.readBoard(board)).toEqual(committed);
   await observe(testInfo, "todo-lost-receipt", { manual, extraRevisions: 1 });
   await screenshot(page, testInfo, "todo-confirmed-after-lost-receipt");
+});
+
+test("[EDIT-TODO-07] 35% 缩放下待办标题、任务和操作清晰可用", async ({
+  page,
+  studio,
+}, testInfo) => {
+  const board = await studio.seedBasicBoard({
+    title: "待办低倍阅读样板",
+    objects: [
+      {
+        id: taskId,
+        kind: "todo",
+        label: taskTitle,
+        x: 130,
+        y: 105,
+        width: 1080,
+        height: 740,
+        items: items.slice(0, 3),
+      },
+    ],
+  });
+  await page.goto(board.url);
+  const card = todo(page, taskTitle);
+  await expect(taskText(card, "复核配图")).toBeVisible();
+  await zoomTo35(page);
+  await card.click({ position: { x: 160, y: 170 } });
+  const check = card.getByRole("checkbox", { name: "完成任务：检查范围", exact: true });
+  await expect(check).toBeChecked();
+  await expect(button(card, "添加任务")).toBeVisible();
+
+  const layout = await readTodoPresentation(card, studio);
+  expect(layout.zoom).toBeCloseTo(0.35, 2);
+  expect(layout.task.screenFont).toBeGreaterThan(0);
+  if (studio.edition === "ii") {
+    expect(layout.title.screenFont).toBeGreaterThanOrEqual(13.9);
+    expect(layout.task.screenFont).toBeGreaterThanOrEqual(11.9);
+    expect(layout.count.screenFont).toBeGreaterThanOrEqual(10.9);
+    expect(layout.add.screenFont).toBeGreaterThanOrEqual(11.9);
+    expect(layout.row.height).toBeGreaterThanOrEqual(26.9);
+    expect(layout.checkbox.width).toBeGreaterThanOrEqual(15.9);
+    expect(layout.checkboxHit.width).toBeGreaterThanOrEqual(23.9);
+    expect(layout.checkboxHit.height).toBeGreaterThanOrEqual(23.9);
+  }
+  await observe(testInfo, "todo-layout-at-35", layout);
+  await screenshot(page, testInfo, "todo-reading-at-35");
+
+  const { x, y, height } = layout.checkboxHit;
+  await page.mouse.click(x + 2, y + height / 2);
+  await expect(check).not.toBeChecked();
+  await expect.poll(async () => (await savedTodo(studio, board))?.items[0].checked).toBe(false);
+
+  await button(card, "编辑清单标题：" + taskTitle).click();
+  const titleEditor = textbox(card, "任务清单标题");
+  await expect(titleEditor).toBeFocused();
+  const titleInput = (await readTodoPresentation(card, studio)).title;
+  expect(titleInput.screenFont).toBeCloseTo(layout.title.screenFont);
+  await screenshot(page, testInfo, "todo-title-input-at-35");
+  const renamed = "会签任务清单";
+  await enterText(card, "任务清单标题", renamed);
+  await expect.poll(async () => (await savedTodo(studio, board))?.label).toBe(renamed);
+
+  const selected = todo(page, renamed);
+  await button(selected, "编辑任务：检查范围").click();
+  const taskEditor = textbox(selected, "任务文字");
+  await expect(taskEditor).toBeFocused();
+  const taskInput = (await readTodoPresentation(selected, studio)).task;
+  expect(taskInput.screenFont).toBeCloseTo(layout.task.screenFont);
+  await taskEditor.fill("核对低倍显示");
+  await screenshot(page, testInfo, "todo-task-input-at-35");
+  await taskEditor.press("Enter");
+  await expect.poll(() => savedTexts(studio, board)).toContain("核对低倍显示");
+
+  await button(selected, "添加任务").click();
+  const addEditor = textbox(selected, "新增任务");
+  await expect(addEditor).toBeFocused();
+  const addInput = (await readTodoPresentation(selected, studio)).add;
+  expect(addInput.screenFont).toBeCloseTo(layout.add.screenFont);
+  await enterText(selected, "新增任务", "保存新任务");
+  await expect.poll(() => savedTexts(studio, board)).toContain("保存新任务");
+  await observe(testInfo, "todo-inputs-at-35", { titleInput, taskInput, addInput });
 });

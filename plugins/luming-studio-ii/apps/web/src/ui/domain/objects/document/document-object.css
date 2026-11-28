@@ -324,6 +324,13 @@
   align-items: center;
 }
 
+.studio-document-editor-status {
+  overflow: hidden;
+  max-inline-size: min(36vw, 12rem);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .studio-document-reader-tools {
   gap: 7px;
   color: inherit;
@@ -526,7 +533,8 @@ input.studio-document-title {
     padding: 7px;
   }
 
-  .studio-document-focused-heading .studio-document-canvas-save {
+  .studio-document-focused-heading
+    :is(.studio-document-canvas-save, .studio-document-editor-status) {
     overflow: hidden;
     max-inline-size: 50px;
   }

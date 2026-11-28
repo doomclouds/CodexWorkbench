@@ -2,8 +2,10 @@ import {
   chooseDocumentImage,
   expect,
   failNextDocumentSave,
+  holdDocumentEditorChunk,
   observe,
   readDocumentDownload,
+  readDocumentPaper,
   screenshot,
   test,
   workbenchLinkProbe,
@@ -78,6 +80,105 @@ async function enterReading(page) {
 async function waitForVersion(studio, board, previous) {
   await expect.poll(async () => (await studio.readBoard(board)).revision).toBeGreaterThan(previous);
 }
+
+const coldEditorTitle = "冷加载文档";
+const coldEditorParagraphs = Array.from({ length: 34 }, (_, index) =>
+  paragraph("cold-" + index, "编辑状态验收段落 " + String(index + 1).padStart(2, "0")),
+);
+
+async function openColdEditorReader(page, studio) {
+  const board = await loadDocument(page, studio, coldEditorTitle, coldEditorParagraphs);
+  await button(page, "展开文档").click({ timeout: 7000 });
+  await expect(button(page, "返回画板")).toBeVisible();
+  const content = reader(page, studio, coldEditorTitle);
+  await content.press("End");
+  await expect
+    .poll(async () => (await readDocumentPaper(page, studio, coldEditorTitle)).distanceFromEnd)
+    .toBeLessThanOrEqual(1);
+
+  return { board, content };
+}
+
+test("[EDIT-DOC-11] 冷加载保留阅读位置，取消后重新编辑聚焦正文", async ({
+  page,
+  studio,
+}, testInfo) => {
+  const hold = studio.edition === "ii" ? await holdDocumentEditorChunk(page, studio) : undefined;
+  try {
+    const { content } = await openColdEditorReader(page, studio);
+    const before = await readDocumentPaper(page, studio, coldEditorTitle);
+    await screenshot(page, testInfo, "reader-before-editor");
+    await button(page, "编辑文档").click();
+
+    if (hold) {
+      await hold.started;
+      await expect(page.getByText("正在打开文档编辑器", { exact: true })).toBeVisible();
+      await expect(content).toContainText("编辑状态验收段落");
+      await expect(composer(page)).toHaveCount(0);
+      expect(await readDocumentPaper(page, studio, coldEditorTitle)).toEqual(before);
+      await screenshot(page, testInfo, "editor-module-pending");
+
+      await button(page, "取消打开文档编辑器").click();
+      await expect(page.getByText("正在打开文档编辑器", { exact: true })).toBeHidden();
+      expect(await readDocumentPaper(page, studio, coldEditorTitle)).toEqual(before);
+      hold.release();
+      await expect(composer(page)).toHaveCount(0);
+      await button(page, "编辑文档").click();
+    }
+
+    await expect(composer(page)).toBeFocused();
+    await expect(composer(page)).toContainText("编辑状态验收段落");
+    const after = await readDocumentPaper(page, studio, coldEditorTitle);
+    expect(after).toMatchObject({ width: before.width, height: before.height });
+    if (studio.edition === "ii") {
+      expect(before.visibleBlock).toBeTruthy();
+      expect(after.caretBlock).toBe(before.visibleBlock);
+      expect(after.scrollTop).toBeGreaterThan(0);
+    }
+    await screenshot(page, testInfo, "editor-module-ready");
+    await observe(testInfo, "cold-editor-paper", { before, after });
+    await enterReading(page);
+    await button(page, "返回画板").click();
+    await expect(content).toContainText("编辑状态验收段落");
+  } finally {
+    hold?.release();
+  }
+});
+
+test("[EDIT-DOC-12] 编辑器加载失败后仍可阅读并返回画板", async ({ page, studio }, testInfo) => {
+  await page.setViewportSize({ width: 400, height: 720 });
+  const hold = studio.edition === "ii" ? await holdDocumentEditorChunk(page, studio) : undefined;
+  try {
+    const { board, content } = await openColdEditorReader(page, studio);
+    const revision = (await studio.readBoard(board)).revision;
+    const before = await readDocumentPaper(page, studio, coldEditorTitle);
+    await button(page, "编辑文档").click();
+    if (hold) {
+      await hold.started;
+      await expect(page.getByText("正在打开文档编辑器", { exact: true })).toBeVisible();
+      await expect(content).toContainText("编辑状态验收段落 34");
+      expect(before.horizontalOverflow).toBe(0);
+      expect(await readDocumentPaper(page, studio, coldEditorTitle)).toEqual(before);
+      await screenshot(page, testInfo, "editor-module-pending-narrow");
+      hold.release(true);
+      await expect(page.getByText("编辑器打开失败，可继续阅读", { exact: true })).toBeVisible();
+      await expect(button(page, "编辑文档")).toBeDisabled();
+      await expect(composer(page)).toHaveCount(0);
+      await expect(content).toContainText("编辑状态验收段落");
+      expect(await readDocumentPaper(page, studio, coldEditorTitle)).toEqual(before);
+    } else {
+      await expect(composer(page)).toBeFocused();
+      await enterReading(page);
+    }
+
+    await screenshot(page, testInfo, "reader-after-editor-open");
+    await button(page, "返回画板").click();
+    await expect(content).toContainText("编辑状态验收段落");
+    expect((await studio.readBoard(board)).revision).toBe(revision);
+  } finally {
+    hold?.release();
+  }
+});
 
 test("[EDIT-DOC-01] 从欢迎区放置文档并写回标题和正文", async ({ page, studio }, testInfo) => {
   const [board] = await studio.seedBoards([{ title: "创建文档的测试板" }]);

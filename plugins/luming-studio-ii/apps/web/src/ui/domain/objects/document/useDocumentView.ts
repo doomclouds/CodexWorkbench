@@ -1,5 +1,6 @@
 import { useEffectEvent, useLayoutEffect, useState } from 'react';
 import type { DocumentActivity } from './contracts.js';
+import { useDocumentEditor } from './useDocumentEditor.js';
 
 interface DocumentView {
   readonly mode: DocumentActivity['mode'];
@@ -31,6 +32,10 @@ export function useDocumentView(options: DocumentViewOptions) {
   const [wasFocused, setWasFocused] = useState(focused);
   const [consumedEditRequest, setConsumedEditRequest] = useState<number>();
   const mode = documentMode(view.mode, options);
+  const loadingRequest = mode === 'edit' && !annotationActive ? view : undefined;
+  const module = useDocumentEditor(loadingRequest);
+  const editor = mode === 'edit' ? module.editor : undefined;
+  const displayMode = mode === 'edit' && !editor ? 'read' : mode;
   const hosted = Boolean(onOpen);
   const seekBoardFocus = hosted && mode !== 'inline' && !focused;
   const requestBoardFocus = useEffectEvent(() => onOpen?.());
@@ -56,5 +61,5 @@ export function useDocumentView(options: DocumentViewOptions) {
 
   const standalone = mode !== 'inline' && !focused && !hosted;
 
-  return { view, setView, mode, standalone };
+  return { view, setView, mode: displayMode, standalone, editor, editorState: module.state };
 }

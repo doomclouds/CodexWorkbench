@@ -57,10 +57,15 @@ test("[TOPBAR-HIST-05] 访客编辑记录显示用户名和协作头像颜色", 
     await expect(version).toBeVisible();
     await screenshot(page, testInfo, "named-guest-version");
     await expect(version.getByText(name, { exact: true })).toBeVisible();
+    const participant = initial ? undefined : button(page, "此刻在这里");
+    const expectedAppearance = initial
+      ? { avatarSize: [36, 36] }
+      : { avatarSize: [28, 28], sameColor: true, shortened: true, timeReadable: true };
+    await expect
+      .poll(() => readHistoryAuthorPresentation(version, participant))
+      .toMatchObject(expectedAppearance);
+
     if (!initial) {
-      await expect
-        .poll(() => readHistoryAuthorPresentation(button(page, "此刻在这里"), version))
-        .toEqual({ sameColor: true, shortened: true, timeReadable: true });
       await version.click();
       await button(page, "看改动").click();
       const history = page.getByRole("dialog", { name: "版本历史面板", exact: true });

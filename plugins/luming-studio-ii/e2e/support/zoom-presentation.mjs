@@ -42,6 +42,29 @@ export function readZoomDetails(page, studio) {
       };
     }
 
+    function sectionEditor(element) {
+      const title = element.querySelector(".studio-section-title,[data-canvas-section-title]");
+      const field = title?.querySelector("[contenteditable='true']");
+      const box = bounds(field);
+      if (!box?.width || !box.height) {
+        return null;
+      }
+
+      const styles = getComputedStyle(field);
+      const point = root.ownerDocument.elementFromPoint(
+        box.x + box.width / 2,
+        box.y + box.height / 2,
+      );
+
+      return {
+        box,
+        screenFont: Number.parseFloat(styles.fontSize) * zoom,
+        foreground: styles.color,
+        background: styles.backgroundColor,
+        hit: point != null && field.contains(point),
+      };
+    }
+
     return [...root.querySelectorAll(selector)].map((element) => {
       const image = element.querySelector("img");
       const html = element.querySelector("iframe");
@@ -52,6 +75,7 @@ export function readZoomDetails(page, studio) {
         object: bounds(element),
         label: caption(element, ".studio-element-text,.studio-ui-canvas-object-label"),
         section: caption(element, ".studio-section-title,[data-canvas-section-title]"),
+        sectionEditor: sectionEditor(element),
         htmlCaption: caption(
           element,
           legacy
