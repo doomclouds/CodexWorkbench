@@ -9,7 +9,6 @@ import type {
 } from '../../modules/whiteboard/application/index.js';
 import { toBoardEditReceipt } from './board-edit-receipt.js';
 import { HttpRequestError, requireId } from './request.js';
-import type { ObserveEdit } from './room-changes.js';
 import { unaryRoute, type RouteEntry } from './unary-route.js';
 
 const attach = BoardEditService.method.attachBoardVideo;
@@ -37,7 +36,6 @@ function readOperation({
 export function createVideoEditRoute(
   application: BoardEditorApplication,
   digest: (value: Uint8Array) => string,
-  observe?: ObserveEdit,
 ): RouteEntry {
   return unaryRoute(attach, (actor, request) => {
     const { boardId, commandId, content } = request;
@@ -48,7 +46,6 @@ export function createVideoEditRoute(
       operation: readOperation(request),
       signature: 'video:' + digest(metadata) + ':' + digest(content),
     });
-    observe?.(receipt);
 
     return { receipt: toBoardEditReceipt(receipt) };
   });

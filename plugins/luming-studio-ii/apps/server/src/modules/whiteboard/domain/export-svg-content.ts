@@ -2,8 +2,8 @@ import {
   parseRichText,
   type RichTextLine,
   type RichTextSegment,
-} from '@codexworkbench/luming-studio-ii-contracts/whiteboard/rich-text';
-import { stickerSvgContent } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/stickers';
+} from '@codexworkbench/luming-studio-ii-whiteboard-shared/rich-text';
+import { stickerSvgContent } from '@codexworkbench/luming-studio-ii-whiteboard-shared/stickers';
 import type { BoardExportAsset } from './export-types.js';
 import type { BoardObject, JsonObject, JsonValue, PayloadRecord } from './model.js';
 import { svgColor, svgStrokeWidth } from './export-svg-shapes.js';

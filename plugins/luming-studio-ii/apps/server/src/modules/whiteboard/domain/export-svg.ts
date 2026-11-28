@@ -1,7 +1,7 @@
 import {
   connectionPathData,
   connectorArrowPoints,
-} from '@codexworkbench/luming-studio-ii-contracts/whiteboard/connector-route';
+} from '@codexworkbench/luming-studio-ii-whiteboard-shared/connector-route';
 import { exportConnector, finitePoint, geometryCorners } from './export-geometry.js';
 import {
   boardTableCss,

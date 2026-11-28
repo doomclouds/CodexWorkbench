@@ -69,7 +69,6 @@ import { createMcpPanelViewRoutes } from './mcp-panel-view.js';
 import { HttpRequestError, mediaType, readBody } from './request.js';
 import { protobufContentType, sendProtobuf, sendStatus } from './response.js';
 import { agentActivityPath, agentActivityRequestLimit } from './room-agent-activity.js';
-import { observeRoomChange } from './room-changes.js';
 import { createRoomEventStreamRoute, roomEventStreamPath } from './room-event-stream.js';
 import { roomEventWaitPath, serveRoomEventWait } from './room-event-wait.js';
 import { createRoomRoutes, roomEventPath, serveRoomEvents } from './room-routes.js';
@@ -86,7 +85,6 @@ import {
 export type { GuestHttpOptions } from './guest-sharing.js';
 export { createGuestWeb } from './guest-web.js';
 export { createModelSuggestionSubmitter } from './model-suggestion.js';
-export { toPayloadResult } from './payload.js';
 export { boardSuggestionSubmitPath } from './suggestion-routes.js';
 
 const REQUEST_METHOD = 'POST';
@@ -328,26 +326,25 @@ export function createWhiteboardRequestHandler(
 ): RequestListener {
   const { application, catalogApplication, archiveApplication, features, sharing, onError } =
     options;
-  const observe = observeRoomChange(features?.rooms, onError);
   const studioRoutes = features
     ? [
-        ...createBoardEditRoutes(features.editor, features.digest, observe),
-        createVideoEditRoute(features.editor, features.digest, observe),
+        ...createBoardEditRoutes(features.editor, features.digest),
+        createVideoEditRoute(features.editor, features.digest),
         createDocumentImageRoute(features.editor, features.digest),
-        ...createBoardHistoryRoutes(features.history, features.digest, observe),
+        ...createBoardHistoryRoutes(features.history, features.digest),
         ...createFeedbackRoutes(features.feedback),
         ...(features.agentBoardWrite
-          ? createAgentBoardWriteRoutes(features.agentBoardWrite, features.digest, observe)
+          ? createAgentBoardWriteRoutes(features.agentBoardWrite, features.digest)
           : []),
         ...(features.rooms ? createRoomRoutes(features.rooms) : []),
         ...(features.suggestions
-          ? createBoardSuggestionRoutes(features.suggestions, features.digest, observe)
+          ? createBoardSuggestionRoutes(features.suggestions, features.digest)
           : []),
       ]
     : [];
   const routes: Routes = {
     unary: new Map([
-      ...createWhiteboardRoutes(application, observe),
+      ...createWhiteboardRoutes(application),
       ...createMcpPanelViewRoutes(application, Date.now),
       ...studioRoutes,
       ...createCatalogRoutes(catalogApplication),

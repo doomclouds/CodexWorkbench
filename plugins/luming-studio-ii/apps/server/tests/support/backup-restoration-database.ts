@@ -86,12 +86,12 @@ export function legacyStudioIIBackup() {
   );
 }
 
-export function invalidNativeBackup() {
-  const boardId = 'invalid-native-backup';
-  const artifact = { id: boardId, type: 'whiteboard', title: 'Invalid', revision: 0 };
+export function nativeTextBackup(data: Readonly<Record<string, unknown>>) {
+  const boardId = 'native-text-backup';
+  const artifact = { id: boardId, type: 'whiteboard', title: 'Text backup', revision: 0 };
   const elements = [
     {
-      id: 'invalid-text',
+      id: 'archived-text',
       type: 'text',
       x: 0,
       y: 0,
@@ -102,7 +102,7 @@ export function invalidNativeBackup() {
         geometryVersion: '0',
         payloadVersion: '0',
         bodyKind: 'text',
-        data: { text: 123 },
+        data,
       },
     },
   ];

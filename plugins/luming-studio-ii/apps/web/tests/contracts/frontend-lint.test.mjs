@@ -13,7 +13,7 @@ const platform = 'src/platform/transport/index.ts';
 const integration = 'tests/integration/whiteboard-editor.test.tsx';
 const support = 'tests/support/app-mock.tsx';
 const protocol = '@codexworkbench/luming-studio-ii-contracts/whiteboard/service';
-const connectorRoute = '@codexworkbench/luming-studio-ii-contracts/whiteboard/connector-route';
+const connectorRoute = '@codexworkbench/luming-studio-ii-whiteboard-shared/connector-route';
 const connectorGeometry = 'src/ui/domain/canvas/connectors/geometry.ts';
 const connectorPath = 'src/ui/domain/canvas/connectors/path.ts';
 const workbench = 'src/surfaces/workbench/Workbench.tsx';
@@ -30,6 +30,7 @@ const routes = 'src/app/routes.ts';
 const appShell = 'src/app/shell/AppShell.tsx';
 const operationNotice = 'src/app/shell/operation-notice/OperationNoticeSlot.tsx';
 const recycleBin = 'src/surfaces/recycle-bin/RecycleBinSurface.tsx';
+const newSurface = 'src/surfaces/new-surface/NewSurface.tsx';
 const viewer = 'src/surfaces/whiteboard-viewing/WhiteboardViewingSurface.tsx';
 const exportPanel = 'src/surfaces/whiteboard-export/WhiteboardExportSurface.tsx';
 const history = 'src/surfaces/whiteboard-history/WhiteboardHistorySurface.tsx';
@@ -47,6 +48,7 @@ const sharingData = 'src/data/sharing/client.ts';
 const roomProtocol = '@codexworkbench/luming-studio-ii-contracts/rooms/service';
 const roomsData = 'src/data/rooms/client.ts';
 const roomMessage = 'src/data/rooms/room-message.ts';
+const roomContracts = 'src/data/rooms/contracts.ts';
 const roomStreamData = 'src/data/rooms/stream.ts';
 const roomStreamBrowser = 'src/platform/browser/room-stream.ts';
 const connect = '@connectrpc/connect';
@@ -98,8 +100,8 @@ const accepted = [
     'tests/integration/board-suggestions.test.tsx',
     `import { BoardSuggestionsService } from '${suggestionsProtocol}';`,
   ],
-  [roomMessage, "import { readObjects, type WhiteboardObject } from '../whiteboard/index.js';"],
-  [roomMessage, "import type { WhiteboardObject } from '../whiteboard/index.js';"],
+  [roomMessage, "import { readObjects } from '../whiteboard/index.js';"],
+  [roomContracts, "import type { WhiteboardObject } from '../whiteboard/index.js';"],
   [mcpAdapter, `import { App } from '${mcpSdk}';`],
   [mcpAdapter, `import { OpenAIExtensions } from '${hostSdk}';`],
   [mcpAdapter, 'const host = window.openai;'],
@@ -107,6 +109,14 @@ const accepted = [
   [mcpMain, "import { StudioApp } from './StudioApp.js';"],
   [mcpMain, "import { connectMcpApp } from '../platform/mcp/index.js';"],
   [mcpMain, "import { downloadBoardFile } from '../platform/browser/index.js';"],
+  [mcpAdapter, "import type { StudioLocation } from '../navigation/index.js';"],
+  [browserEntry, "import type { StudioLocation } from '../navigation/index.js';"],
+  [
+    'src/app/StudioApp.tsx',
+    "import type { StudioLocation } from '../platform/navigation/index.js';",
+  ],
+  [mcpAdapter, "import { createMcpTransport } from './transport.js';"],
+  [browserEntry, "import { prepareBoardImage } from './board-image.js';"],
   [mcpMain, "import { createBoardRoomService } from '../data/rooms/index.js';"],
   [mcpMain, "import { createBoardSharingService } from '../data/sharing/index.js';"],
   [page, "import { RoomPresenceSurface } from '../../surfaces/room-presence/index.js';"],
@@ -172,6 +182,10 @@ const accepted = [
   [feedback, "import type { FeedbackClient } from '../../data/feedback/index.js';"],
   [feedback, "import type { CanvasPoint } from '../../ui/domain/canvas/index.js';"],
   [feedbackPinCluster, "import type { FeedbackThread } from '../../data/feedback/index.js';"],
+  [feedback, 'const { bytes, stream, text } = draft;'],
+  [feedback, 'const label = text();'],
+  [feedback, 'const result = await prepareFile(file);'],
+  [feedback, "const render = (Response: (input: string) => string) => Response('note');"],
   [feedbackPinCluster, "import { FeedbackPopup } from './FeedbackPopup.js';"],
   [media, "import type { AttachBoardImage } from '../../data/whiteboard/index.js';"],
   [media, "import type { AttachBoardVideoCommand } from '../../data/whiteboard/index.js';"],
@@ -184,6 +198,7 @@ const accepted = [
   [feedbackData, `import { FeedbackService } from '${feedbackProtocol}';`],
   ['src/app/main.tsx', "import { createFeedbackService } from '../data/feedback/index.js';"],
   ['src/platform/browser/index.ts', 'const bytes = await file.arrayBuffer();'],
+  [browserEntry, 'const text = await new Response(file).text();'],
   ['src/platform/browser/index.ts', 'const preview = URL.createObjectURL(image);'],
   [
     'tests/integration/whiteboard-history.test.tsx',
@@ -230,7 +245,9 @@ const accepted = [
   [operationNotice, "import { OperationNotice } from '../../../ui/base/index.js';"],
   [recycleBin, "import { Dialog, Checkbox } from '../../ui/base/index.js';"],
   [recycleBin, "import type { CatalogManagementService } from '../../data/catalog/index.js';"],
+  [recycleBin, "type Management = import('../../data/catalog/index.js').CatalogManagementService;"],
   [recycleBin, "import { Trash2 } from 'lucide-react';"],
+  [newSurface, "import { Button } from '../../ui/base/index.js';"],
   ['src/app/main.tsx', "import { createTransport } from '../platform/transport/index.js';"],
   [page, "import { WhiteboardEditor } from '../../surfaces/whiteboard-editor/index.js';"],
   [page, "import type { WhiteboardClient } from '../../data/whiteboard/index.js';"],
@@ -264,6 +281,51 @@ const accepted = [
 ];
 
 const rejected = [
+  [
+    'a runtime dependency on the shared navigation contract with an inline type import',
+    'src/app/StudioApp.tsx',
+    "import { type StudioLocation } from '../platform/navigation/index.js';",
+  ],
+  [
+    'a runtime re-export of the shared navigation contract with an inline type',
+    browserEntry,
+    "export { type StudioLocation } from '../navigation/index.js';",
+  ],
+  [
+    'a page loads data through an inline type import',
+    page,
+    "import { type WhiteboardService } from '../../data/whiteboard/index.js';",
+  ],
+  [
+    'a Surface loads its data port through an inline type import',
+    recycleBin,
+    "import { type BoardCatalogService } from '../../data/catalog/index.js';",
+  ],
+  [
+    'a Surface loads data through an inline type with no authorized value import',
+    editorMount,
+    "import { type WhiteboardService } from '../../data/whiteboard/index.js';",
+  ],
+  [
+    'room contracts load whiteboard data through an inline type import',
+    roomContracts,
+    "import { type WhiteboardObject } from '../whiteboard/index.js';",
+  ],
+  [
+    'a runtime dependency on the shared navigation contract from the app',
+    'src/app/StudioApp.tsx',
+    "import { StudioLocation } from '../platform/navigation/index.js';",
+  ],
+  [
+    'a runtime dependency on the shared navigation contract from a platform adapter',
+    browserEntry,
+    "import { StudioLocation } from '../navigation/index.js';",
+  ],
+  [
+    'another platform module depending on the shared navigation contract',
+    platform,
+    "import type { StudioLocation } from '../navigation/index.js';",
+  ],
   [
     'the workbench preference UI cannot call the generated protocol',
     workbench,
@@ -451,6 +513,11 @@ const rejected = [
     "import type { EditObjectContentCommand } from '../whiteboard/index.js';",
   ],
   [
+    'room contracts import the whiteboard decoder at runtime',
+    roomContracts,
+    "import { readObjects } from '../whiteboard/index.js';",
+  ],
+  [
     'the room message decoder imports the whiteboard decoder privately',
     roomMessage,
     "import { readObjects } from '../whiteboard/protocol/scene.js';",
@@ -499,6 +566,16 @@ const rejected = [
     'the browser adapter imports the host SDK',
     browserEntry,
     `import { OpenAIExtensions } from '${hostSdk}';`,
+  ],
+  [
+    'the browser adapter imports the public MCP adapter',
+    browserEntry,
+    "import { connectMcpApp } from '../mcp/index.js';",
+  ],
+  [
+    'the MCP adapter imports the public browser adapter',
+    mcpAdapter,
+    "import { downloadBoardFile } from '../browser/index.js';",
   ],
   [
     'the browser adapter accesses the remote host directly',
@@ -959,6 +1036,54 @@ const rejected = [
     'no-restricted-syntax',
   ],
   [
+    'media captures the selected file byte reader',
+    media,
+    'const read = file.arrayBuffer;',
+    'no-restricted-syntax',
+  ],
+  [
+    'feedback reads selected file bytes directly',
+    feedback,
+    'const bytes = await file.arrayBuffer();',
+    'no-restricted-syntax',
+  ],
+  [
+    'feedback reads selected file text directly',
+    feedback,
+    'const text = await file.text();',
+    'no-restricted-syntax',
+  ],
+  [
+    'a new Surface reads selected Blob bytes through a literal key',
+    newSurface,
+    "const bytes = await blob['bytes']();",
+    'no-restricted-syntax',
+  ],
+  [
+    'a new Surface opens a selected file stream',
+    newSurface,
+    'const source = file?.stream();',
+    'no-restricted-syntax',
+  ],
+  [
+    'feedback reads selected file text through a native Response',
+    feedback,
+    'const text = await new Response(file).text();',
+    'no-restricted-globals',
+  ],
+  [
+    'feedback accesses the native Response body as a stream',
+    feedback,
+    'const body = new Response(file).body;',
+    'no-restricted-globals',
+  ],
+  [
+    'a new Surface aliases selected file byte reads',
+    newSurface,
+    "const { ['arrayBuffer']: read } = file;",
+    'no-restricted-syntax',
+  ],
+  [
     'the canvas uses a browser file reader',
     'src/ui/domain/canvas/Canvas.tsx',
     'const reader = new FileReader();',
@@ -1010,6 +1135,31 @@ const rejected = [
     'Recycle Bin imports private parts of the catalogue transport',
     recycleBin,
     "import { purgeBoards } from '../../data/catalog/lifecycle-protocol.js';",
+  ],
+  [
+    'Recycle Bin constructs its own catalogue service',
+    recycleBin,
+    "import { createCatalogManagementService } from '../../data/catalog/index.js';",
+  ],
+  [
+    'Recycle Bin imports an unrelated data contract',
+    recycleBin,
+    "import type { BoardFeedbackService } from '../../data/feedback/index.js';",
+  ],
+  [
+    'a new Surface imports an undeclared data factory',
+    newSurface,
+    "import { createBoardFeedbackService } from '../../data/feedback/index.js';",
+  ],
+  [
+    'a new Surface dynamically loads undeclared data',
+    newSurface,
+    "const client = import('../../data/feedback/index.js');",
+  ],
+  [
+    'a new Surface republishes an undeclared data type',
+    newSurface,
+    "export type { BoardFeedbackService } from '../../data/feedback/index.js';",
   ],
   [
     'Recycle Bin reaches the Workbench Surface',

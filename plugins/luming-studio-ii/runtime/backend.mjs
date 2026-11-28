@@ -1708,7 +1708,7 @@ function createArchiveImportApplication(port, dependencies) {
   };
 }
 
-// ../../packages/contracts/whiteboard/stickers.ts
+// ../../packages/whiteboard-shared/src/stickers.ts
 var yellow = "#f5c75e";
 var orange = "#e99662";
 var red = "#e87970";
@@ -4730,12 +4730,39 @@ function createRoomsApplication(repository, clock, instanceId, activityOptions) 
   };
 }
 
+// src/modules/whiteboard/application/board-content-changes.ts
+function publishBoardContentChange(receipt, publication) {
+  const { boardId, outcome } = receipt;
+  if (!publication || outcome.kind !== "applied") {
+    return receipt;
+  }
+  const { boardRevision, objects } = outcome;
+  const orderChanged = "order" in outcome && Boolean(outcome.order);
+  const expired = "detailsExpired" in outcome && outcome.detailsExpired;
+  const colorsChanged = "customColors" in outcome && outcome.customColors !== void 0;
+  const refresh = orderChanged || expired || colorsChanged || objects.length > 64;
+  try {
+    publication.publish(
+      refresh ? { kind: "refresh", boardId, boardRevision } : {
+        kind: "delta",
+        boardId,
+        boardRevision,
+        changedObjects: objects,
+        removedObjectIds: "removedObjectIds" in outcome ? outcome.removedObjectIds : []
+      }
+    );
+  } catch (error) {
+    publication.onError(error);
+  }
+  return receipt;
+}
+
 // src/modules/whiteboard/domain/export-types.ts
 var maxExportFileBytes = 32 * 1024 * 1024;
 var maxBoardBackupBytes = 128 * 1024 * 1024;
 var maxBoardBackupAssetBytes = 20 * 1024 * 1024;
 
-// ../../packages/contracts/whiteboard/connector-route.ts
+// ../../packages/whiteboard-shared/src/connector-route.ts
 var normals = {
   top: { x: 0, y: -1 },
   right: { x: 1, y: 0 },
@@ -5248,7 +5275,7 @@ function selectExportRectangle(objects, byId3, { x, y, width, height }) {
   return selected.length ? selected : { kind: "rejected", reason: "invalidSelection" };
 }
 
-// ../../packages/contracts/whiteboard/rich-text.ts
+// ../../packages/whiteboard-shared/src/rich-text.ts
 function safeHttpLink(href) {
   try {
     const url = new URL(href ?? "");
@@ -9992,10 +10019,11 @@ function createBoardBackup(repository, encode, formatTime, ownerName) {
 function rejected3(identity, reason) {
   return { ...identity, outcome: { kind: "rejected", reason } };
 }
-function runBoardEdit(repository, actor, identity, request, plan) {
-  return repository.write(
+function runBoardEdit(repository, actor, identity, request, plan, boardChanges) {
+  const receipt = repository.write(
     (writer2) => runBoardEditInTransaction(writer2, actor, identity, request, plan)
   );
+  return publishBoardContentChange(receipt, boardChanges);
 }
 function runBoardEditInTransaction(writer2, actor, identity, request, plan) {
   const { boardId, commandId } = identity;
@@ -11610,7 +11638,7 @@ function planWrites(reader2, board, command, workspaces) {
   }
   return agentWorkspacesDisjoint(staged.reader, boardId, target2, workspaces) ? staged.changes() : forbidden;
 }
-function createBoardAgentWriteApplication(repository, { now, resolveWorkspaces }) {
+function createBoardAgentWriteApplication(repository, { now, resolveWorkspaces, boardChanges }) {
   return {
     getReceipt(ownerId, { boardId, commandId, agentId, signature }) {
       return checkBoardEditBeforePreparation(
@@ -11629,7 +11657,8 @@ function createBoardAgentWriteApplication(repository, { now, resolveWorkspaces }
         { id: agentId },
         { boardId, commandId },
         { kind, signature, savedAtMillis: now(), ownerActorId },
-        (reader2, board) => planWrites(reader2, board, command, resolveWorkspaces(boardId, ownerActorId))
+        (reader2, board) => planWrites(reader2, board, command, resolveWorkspaces(boardId, ownerActorId)),
+        boardChanges
       );
     }
   };
@@ -12241,16 +12270,24 @@ function createBoardSuggestionApplication(repository, {
   digest: digest2,
   readFeedbackSource,
   onChanged,
+  boardChanges,
   resolveAgentWorkspaces
 }) {
+  function notifySuggestionChange(boardId) {
+    try {
+      onChanged?.(boardId);
+    } catch (error) {
+      boardChanges?.onError(error);
+    }
+  }
   function choose(actor, request, decodeEdit2, agent) {
     const { receipt, changed } = repository.write(
       (writer2) => acceptPending(writer2, actor, request, decodeEdit2, now(), digest2, agent)
     );
     if (changed) {
-      onChanged?.(request.boardId);
+      notifySuggestionChange(request.boardId);
     }
-    return receipt;
+    return publishBoardContentChange(receipt, boardChanges);
   }
   return {
     createSource(actor, request) {
@@ -12310,7 +12347,7 @@ function createBoardSuggestionApplication(repository, {
         return publicSuggestion(proposal);
       });
       if (changed) {
-        onChanged?.(request.boardId);
+        notifySuggestionChange(request.boardId);
       }
       return result;
     },
@@ -12368,7 +12405,7 @@ function createBoardSuggestionApplication(repository, {
         return publicSuggestion(rejected7);
       });
       if (changed) {
-        onChanged?.(request.boardId);
+        notifySuggestionChange(request.boardId);
       }
       return result;
     }
@@ -13415,7 +13452,7 @@ function planBoardReverse(reader2, board, actor, command) {
 }
 
 // src/modules/whiteboard/application/board-editor.ts
-function createBoardEditorApplication(repository, now, validateUploadedSvg) {
+function createBoardEditorApplication(repository, now, validateUploadedSvg, boardChanges) {
   const editImage = createImageEdit(repository, now, validateUploadedSvg);
   return {
     editGeometry(actor, { operation, signature, boardId, commandId }) {
@@ -13424,7 +13461,8 @@ function createBoardEditorApplication(repository, now, validateUploadedSvg) {
         actor,
         { boardId, commandId },
         { kind: "geometry", signature, savedAtMillis: now() },
-        (writer2, board) => operation.kind === "paste" ? pasteBoardObjects(writer2, board, actor, operation, signature) : planGeometryEdit(writer2, board, operation)
+        (writer2, board) => operation.kind === "paste" ? pasteBoardObjects(writer2, board, actor, operation, signature) : planGeometryEdit(writer2, board, operation),
+        boardChanges
       );
     },
     editContent(actor, { operation, signature, boardId, commandId }) {
@@ -13433,17 +13471,22 @@ function createBoardEditorApplication(repository, now, validateUploadedSvg) {
         actor,
         { boardId, commandId },
         { kind: "content", signature, savedAtMillis: now() },
-        (writer2, board) => planContentEdit(writer2, board, operation)
+        (writer2, board) => planContentEdit(writer2, board, operation),
+        boardChanges
       );
     },
-    attachImage: (actor, command) => editImage(actor, command, planImageEdit),
+    async attachImage(actor, command) {
+      const receipt = await editImage(actor, command, planImageEdit);
+      return publishBoardContentChange(receipt, boardChanges);
+    },
     attachVideo(actor, { operation, signature, boardId, commandId }) {
       return runBoardEdit(
         repository,
         actor,
         { boardId, commandId },
         { kind: "content", signature, savedAtMillis: now() },
-        (writer2, board) => planVideoEdit(writer2, board, operation)
+        (writer2, board) => planVideoEdit(writer2, board, operation),
+        boardChanges
       );
     },
     async uploadDocumentImage(actor, command) {
@@ -13459,7 +13502,8 @@ function createBoardEditorApplication(repository, now, validateUploadedSvg) {
         actor,
         { boardId, commandId },
         { kind: "geometry", signature, savedAtMillis: now() },
-        (writer2, board) => planBoardReverse(writer2, board, actor, operation)
+        (writer2, board) => planBoardReverse(writer2, board, actor, operation),
+        boardChanges
       );
     },
     getEditReceipt: (actor, identity) => readBoardEditReceipt(repository, actor, identity)
@@ -13546,7 +13590,7 @@ function restorePlan(reader2, board, { expectedCurrentRevision, revision, scope:
   }
   return planBoardRestore(reader2, board, revision, scope2);
 }
-function createBoardHistoryApplication(repository, now, renderPng) {
+function createBoardHistoryApplication(repository, now, renderPng, boardChanges) {
   return {
     listVersions(actor, boardId, before, limit = defaultPageSize2) {
       return repository.read((reader2) => {
@@ -13593,7 +13637,8 @@ function createBoardHistoryApplication(repository, now, renderPng) {
         actor,
         { boardId, commandId },
         commit,
-        (writer2, board) => restorePlan(writer2, board, command)
+        (writer2, board) => restorePlan(writer2, board, command),
+        boardChanges
       );
     },
     exportVersion(actor, command) {
@@ -13620,7 +13665,7 @@ function createBoardHistoryApplication(repository, now, renderPng) {
 }
 
 // src/modules/whiteboard/application/index.ts
-function createWhiteboardApplication(repository, now, files = {}) {
+function createWhiteboardApplication(repository, now, { boardChanges, renderPng, exportArchive } = {}) {
   function exportBoard(actor, command) {
     return executeBoardExport(repository, actor, command, requireAccess3, (reader2) => {
       const board = reader2.getBoard(command.boardId);
@@ -13658,7 +13703,8 @@ function createWhiteboardApplication(repository, now, files = {}) {
       });
     },
     moveObjects(actor, command) {
-      return repository.write((writer2) => executeMove(writer2, actor, command, now));
+      const receipt = repository.write((writer2) => executeMove(writer2, actor, command, now));
+      return publishBoardContentChange(receipt, boardChanges);
     },
     getCommandReceipt(actor, boardId, commandId) {
       return repository.read((reader2) => {
@@ -13670,11 +13716,11 @@ function createWhiteboardApplication(repository, now, files = {}) {
     async exportBoardFile(actor, command) {
       const { format } = command;
       if (format === "zip") {
-        return files.exportArchive?.(actor, command) ?? { kind: "rejected", reason: "unsupported" };
+        return exportArchive?.(actor, command) ?? { kind: "rejected", reason: "unsupported" };
       }
       if (format === "png") {
         const source = exportBoard(actor, { ...command, format });
-        return renderExportPng(source, files.renderPng, () => {
+        return renderExportPng(source, renderPng, () => {
           repository.read((reader2) => requireAccess3(reader2, actor, command.boardId));
         });
       }
@@ -19768,6 +19814,18 @@ var BoardSuggestionService = /* @__PURE__ */ serviceDesc(file_luming_studio_v1_b
 var file_luming_studio_v1_board_agent_write_service = /* @__PURE__ */ fileDesc("CjBsdW1pbmcvc3R1ZGlvL3YxL2JvYXJkX2FnZW50X3dyaXRlX3NlcnZpY2UucHJvdG8SEGx1bWluZy5zdHVkaW8udjEiuQEKGkFwcGx5QWdlbnRCb2FyZEVkaXRSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJEg8KB3Rhc2tfaWQYAyABKAkSEgoKZ2VuZXJhdGlvbhgEIAEoCRISCgpjb21tYW5kX2lkGAUgASgJEj4KCm9wZXJhdGlvbnMYBiADKAsyKi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU3VnZ2VzdGlvbkVkaXRJbnB1dCJrChtBcHBseUFnZW50Qm9hcmRFZGl0UmVzcG9uc2USMwoHcmVjZWlwdBgBIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuQm9hcmRFZGl0UmVjZWlwdBIXCg9kZXRhaWxzX29taXR0ZWQYAiABKAgiYQofR2V0QWdlbnRCb2FyZEVkaXRSZWNlaXB0UmVxdWVzdBI+CghvcmlnaW5hbBgBIAEoCzIsLmx1bWluZy5zdHVkaW8udjEuQXBwbHlBZ2VudEJvYXJkRWRpdFJlcXVlc3QicAogR2V0QWdlbnRCb2FyZEVkaXRSZWNlaXB0UmVzcG9uc2USMwoHcmVjZWlwdBgBIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuQm9hcmRFZGl0UmVjZWlwdBIXCg9kZXRhaWxzX29taXR0ZWQYAiABKAgykAIKFkJvYXJkQWdlbnRXcml0ZVNlcnZpY2UScgoTQXBwbHlBZ2VudEJvYXJkRWRpdBIsLmx1bWluZy5zdHVkaW8udjEuQXBwbHlBZ2VudEJvYXJkRWRpdFJlcXVlc3QaLS5sdW1pbmcuc3R1ZGlvLnYxLkFwcGx5QWdlbnRCb2FyZEVkaXRSZXNwb25zZRKBAQoYR2V0QWdlbnRCb2FyZEVkaXRSZWNlaXB0EjEubHVtaW5nLnN0dWRpby52MS5HZXRBZ2VudEJvYXJkRWRpdFJlY2VpcHRSZXF1ZXN0GjIubHVtaW5nLnN0dWRpby52MS5HZXRBZ2VudEJvYXJkRWRpdFJlY2VpcHRSZXNwb25zZWIGcHJvdG8z", [file_luming_studio_v1_board_suggestion_service, file_luming_studio_v1_whiteboard_edits]);
 var BoardAgentWriteService = /* @__PURE__ */ serviceDesc(file_luming_studio_v1_board_agent_write_service, 0);
 
+// src/infrastructure/adapters/payload-codec/index.ts
+function parseStoredObjectPayload({ bodyKind, data, payloadVersion }) {
+  const payload = fromJson(ObjectPayloadSchema, {
+    [bodyKind]: data,
+    payloadVersion: payloadVersion.toString()
+  });
+  if (payload.body.case !== bodyKind) {
+    throw new Error("Stored object payload does not match its Protobuf body");
+  }
+  return payload;
+}
+
 // src/entrypoints/http/payload.ts
 function toPayloadResult(result) {
   if (result.kind === "unavailable") {
@@ -19777,21 +19835,13 @@ function toPayloadResult(result) {
       result: { case: "unavailable", value: { reason } }
     });
   }
-  const { objectId, bodyKind, data, payloadVersion } = result.payload;
-  const payload = fromJson(ObjectPayloadSchema, {
-    [bodyKind]: data,
-    payloadVersion: payloadVersion.toString()
-  });
-  if (payload.body.case !== bodyKind) {
-    throw new Error("Stored object payload does not match its Protobuf body");
-  }
   return create(ObjectPayloadResultSchema, {
-    objectId,
-    result: { case: "payload", value: payload }
+    objectId: result.payload.objectId,
+    result: { case: "payload", value: parseStoredObjectPayload(result.payload) }
   });
 }
 
-// src/entrypoints/http/scene.ts
+// src/infrastructure/adapters/scene-codec/index.ts
 var CONNECTOR_PORTS = {
   top: ConnectorPort.TOP,
   bottom: ConnectorPort.BOTTOM,
@@ -19857,15 +19907,21 @@ function toObjectMetadata(object3) {
     geometryDetail: toGeometryDetail(object3.detail)
   });
 }
-function toBoardScene(scene) {
-  return create(BoardSceneSchema, {
-    boardId: scene.board.boardId,
-    title: scene.board.title,
-    boardRevision: scene.board.revision,
-    access: scene.access,
-    objects: scene.objects.map(toObjectMetadata),
-    customColors: scene.customColors && { colors: [...scene.customColors] }
-  });
+function toRoomContentChange(change) {
+  const { boardId, boardRevision } = change;
+  if (change.kind === "refresh") {
+    return { boardId, boardRevision, refreshScene: true };
+  }
+  const { changedObjects, removedObjectIds } = change;
+  return {
+    boardId,
+    boardRevision,
+    changedObjectIds: changedObjects.map(({ objectId }) => objectId),
+    removedObjectIds,
+    changedObjects: changedObjects.map(
+      (object3) => toBinary(ObjectMetadataSchema, toObjectMetadata(object3))
+    )
+  };
 }
 
 // src/entrypoints/http/board-edit-receipt.ts
@@ -20560,7 +20616,7 @@ function modelReceipt(receipt) {
     detailsOmitted: omittedGeometry || omittedContent
   };
 }
-function createAgentBoardWriteRoutes(application, digest2, observe) {
+function createAgentBoardWriteRoutes(application, digest2) {
   function command(actor, request) {
     if (actor.kind !== "agent" || actor.guestScope) {
       throw new WhiteboardAccessError();
@@ -20587,7 +20643,6 @@ function createAgentBoardWriteRoutes(application, digest2, observe) {
         ...command(actor, request),
         operations: request.operations.map(readOperation)
       });
-      observe?.(receipt);
       return response(receipt);
     }),
     unaryRoute(getAgentBoardEditReceipt, (actor, { original }) => {
@@ -21023,11 +21078,7 @@ var {
 } = BoardEditService.method;
 var boardImageRoutePath = "/" + BoardEditService.typeName + "/" + attachBoardImage.name;
 var boardImageRequestLimit = 20 * 1024 * 1024 + 32 * 1024;
-function createBoardEditRoutes(application, digest2, observe) {
-  function changed(edit) {
-    observe?.(edit);
-    return toBoardEditReceipt(edit);
-  }
+function createBoardEditRoutes(application, digest2) {
   return [
     unaryRoute(editBoardGeometry, (actor, request) => {
       const operation = readGeometryOperation(request);
@@ -21035,7 +21086,7 @@ function createBoardEditRoutes(application, digest2, observe) {
         actor.authorizeRead?.(operation.sourceBoardId);
       }
       return {
-        receipt: changed(
+        receipt: toBoardEditReceipt(
           application.editGeometry(actor, {
             boardId: requireId(request.boardId),
             commandId: requireId(request.commandId),
@@ -21046,7 +21097,7 @@ function createBoardEditRoutes(application, digest2, observe) {
       };
     }),
     unaryRoute(editObjectContent, (actor, request) => ({
-      receipt: changed(
+      receipt: toBoardEditReceipt(
         application.editContent(actor, {
           boardId: requireId(request.boardId),
           commandId: requireId(request.commandId),
@@ -21056,7 +21107,7 @@ function createBoardEditRoutes(application, digest2, observe) {
       )
     })),
     asyncUnaryRoute(attachBoardImage, async (actor, request) => ({
-      receipt: changed(
+      receipt: toBoardEditReceipt(
         await application.attachImage(actor, {
           boardId: requireId(request.boardId),
           commandId: requireId(request.commandId),
@@ -21069,7 +21120,7 @@ function createBoardEditRoutes(application, digest2, observe) {
       const { source } = request;
       const kind = source.case === "moveCommandId" ? "move" : "edit";
       return {
-        receipt: changed(
+        receipt: toBoardEditReceipt(
           application.reverseEdit(actor, {
             boardId: requireId(request.boardId),
             commandId: requireId(request.commandId),
@@ -21530,6 +21581,18 @@ function createExportRoute(application) {
   });
 }
 
+// src/entrypoints/http/scene.ts
+function toBoardScene(scene) {
+  return create(BoardSceneSchema, {
+    boardId: scene.board.boardId,
+    title: scene.board.title,
+    boardRevision: scene.board.revision,
+    access: scene.access,
+    objects: scene.objects.map(toObjectMetadata),
+    customColors: scene.customColors && { colors: [...scene.customColors] }
+  });
+}
+
 // src/entrypoints/http/history-routes.ts
 var versionKind = {
   baseline: BoardVersionKind.BASELINE,
@@ -21580,7 +21643,7 @@ function toVersionExport(result) {
   }
   return { result: { case: "unavailable", value: true } };
 }
-function createBoardHistoryRoutes(application, digest2, observe) {
+function createBoardHistoryRoutes(application, digest2) {
   const {
     listBoardVersions,
     getBoardVersionScene,
@@ -21626,7 +21689,6 @@ function createBoardHistoryRoutes(application, digest2, observe) {
       const command = toRestoreCommand(request);
       const signature = "restore:" + digest2(toBinary(restoreBoardVersion.input, request));
       const receipt = application.restoreVersion(actor, command, signature);
-      observe?.(receipt);
       return { receipt: toBoardEditReceipt(receipt) };
     }),
     asyncUnaryRoute(exportBoardVersion, async (actor, request) => {
@@ -22789,42 +22851,6 @@ function createMcpPanelViewRoutes(application, now) {
       return { state: result.state, updatedAtMillis: BigInt(result.updatedAt) };
     })
   ];
-}
-
-// src/entrypoints/http/room-changes.ts
-function observeRoomChange(rooms, reportError) {
-  function publish(outcome) {
-    if (!rooms || outcome.outcome.kind !== "applied") {
-      return;
-    }
-    const receipt = outcome.outcome;
-    try {
-      const orderChanged = "order" in receipt && Boolean(receipt.order);
-      const expired = "detailsExpired" in receipt && receipt.detailsExpired;
-      const colorsChanged = "customColors" in receipt && receipt.customColors !== void 0;
-      const refreshScene = orderChanged || expired || colorsChanged || receipt.objects.length > 64;
-      if (refreshScene) {
-        rooms.publishContentChange({
-          boardId: outcome.boardId,
-          boardRevision: receipt.boardRevision,
-          refreshScene: true
-        });
-        return;
-      }
-      rooms.publishContentChange({
-        boardId: outcome.boardId,
-        boardRevision: receipt.boardRevision,
-        changedObjectIds: receipt.objects.map(({ objectId }) => objectId),
-        removedObjectIds: "removedObjectIds" in receipt ? receipt.removedObjectIds : [],
-        changedObjects: receipt.objects.map(
-          (object3) => toBinary(ObjectMetadataSchema, toObjectMetadata(object3))
-        )
-      });
-    } catch (error) {
-      reportError(error);
-    }
-  }
-  return rooms ? publish : void 0;
 }
 
 // ../../../../node_modules/.pnpm/@connectrpc+connect@2.3.0_@bufbuild+protobuf@2.17.0/node_modules/@connectrpc/connect/dist/esm/code.js
@@ -26085,7 +26111,7 @@ function toCommandReceipt(receipt) {
 }
 
 // src/entrypoints/http/routes.ts
-function createWhiteboardRoutes(application, observe) {
+function createWhiteboardRoutes(application) {
   const { getBoardScene, getObjectPayloads, moveObjects, getCommandReceipt } = WhiteboardService.method;
   return [
     createExportRoute(application),
@@ -26106,7 +26132,6 @@ function createWhiteboardRoutes(application, observe) {
     }),
     unaryRoute(moveObjects, (actor, request) => {
       const receipt = application.moveObjects(actor, toMoveCommand(request));
-      observe?.(receipt);
       return { receipt: toCommandReceipt(receipt) };
     }),
     unaryRoute(getCommandReceipt, (actor, request) => {
@@ -26262,7 +26287,7 @@ function listLimit(limit) {
   }
   return limit || 30;
 }
-function createBoardSuggestionRoutes(application, digest2, observe) {
+function createBoardSuggestionRoutes(application, digest2) {
   return [
     unaryRoute(createBoardReviewSource, (actor, request) => ({
       source: toSource(
@@ -26330,7 +26355,6 @@ function createBoardSuggestionRoutes(application, digest2, observe) {
         },
         decodeEdit
       );
-      observe?.(receipt);
       return { receipt: toBoardEditReceipt(receipt) };
     }),
     unaryRoute(chooseAgentBoardSuggestion, (actor, request) => {
@@ -26365,7 +26389,6 @@ function createBoardSuggestionRoutes(application, digest2, observe) {
         },
         decodeEdit
       );
-      observe?.(receipt);
       return { receipt: toAgentChoiceReceipt(receipt) };
     }),
     unaryRoute(rejectBoardSuggestion, (actor, request) => ({
@@ -26400,7 +26423,7 @@ function readOperation5({
   const { x, y, width, height, rotation } = geometry;
   return { objectId, displayName, content, mediaType: mediaType2, geometry: { x, y, width, height, rotation } };
 }
-function createVideoEditRoute(application, digest2, observe) {
+function createVideoEditRoute(application, digest2) {
   return unaryRoute(attach, (actor, request) => {
     const { boardId, commandId, content } = request;
     const metadata = toBinary(attach.input, { ...request, content: emptyContent });
@@ -26410,7 +26433,6 @@ function createVideoEditRoute(application, digest2, observe) {
       operation: readOperation5(request),
       signature: "video:" + digest2(metadata) + ":" + digest2(content)
     });
-    observe?.(receipt);
     return { receipt: toBoardEditReceipt(receipt) };
   });
 }
@@ -26684,20 +26706,19 @@ async function handleGuestRequest(request, response, routes, options, guest) {
 }
 function createWhiteboardRequestHandler(options, guest) {
   const { application, catalogApplication, archiveApplication, features, sharing, onError } = options;
-  const observe = observeRoomChange(features?.rooms, onError);
   const studioRoutes = features ? [
-    ...createBoardEditRoutes(features.editor, features.digest, observe),
-    createVideoEditRoute(features.editor, features.digest, observe),
+    ...createBoardEditRoutes(features.editor, features.digest),
+    createVideoEditRoute(features.editor, features.digest),
     createDocumentImageRoute(features.editor, features.digest),
-    ...createBoardHistoryRoutes(features.history, features.digest, observe),
+    ...createBoardHistoryRoutes(features.history, features.digest),
     ...createFeedbackRoutes(features.feedback),
-    ...features.agentBoardWrite ? createAgentBoardWriteRoutes(features.agentBoardWrite, features.digest, observe) : [],
+    ...features.agentBoardWrite ? createAgentBoardWriteRoutes(features.agentBoardWrite, features.digest) : [],
     ...features.rooms ? createRoomRoutes(features.rooms) : [],
-    ...features.suggestions ? createBoardSuggestionRoutes(features.suggestions, features.digest, observe) : []
+    ...features.suggestions ? createBoardSuggestionRoutes(features.suggestions, features.digest) : []
   ] : [];
   const routes = {
     unary: new Map([
-      ...createWhiteboardRoutes(application, observe),
+      ...createWhiteboardRoutes(application),
       ...createMcpPanelViewRoutes(application, Date.now),
       ...studioRoutes,
       ...createCatalogRoutes(catalogApplication),
@@ -42998,7 +43019,7 @@ var listTargets = `
   ${payloadVersionJoin}
   ${sceneOrder}
 `;
-function decodeImportedPayload(object3) {
+function validateImportedObject(object3) {
   const { payload } = object3;
   decodeSceneObject({
     object_id: object3.objectId,
@@ -43017,12 +43038,13 @@ function decodeImportedPayload(object3) {
     appearance_json: object3.appearanceJson ?? null,
     detail_json: object3.detailJson ?? null
   });
-  return payload && {
-    objectId: object3.objectId,
-    bodyKind: payload.kind,
-    payloadVersion: payload.version,
-    data: decodePayload(payload.json)
-  };
+  if (payload) {
+    parseStoredObjectPayload({
+      bodyKind: payload.kind,
+      payloadVersion: payload.version,
+      data: decodePayload(payload.json)
+    });
+  }
 }
 function readObjects(connection, statement, ...params) {
   const query = connection.prepare(statement);
@@ -43854,9 +43876,14 @@ function createWhiteboardServer(options) {
   let httpOptions;
   let rooms;
   let sharing;
+  const boardChanges = {
+    publish: (change) => rooms.publishContentChange(toRoomContentChange(change)),
+    onError: options.onError
+  };
   try {
     const repository = createWhiteboardRepository(database);
     const application = createWhiteboardApplication(repository, Date.now, {
+      boardChanges,
       renderPng: renderSvgPng,
       exportArchive: createBoardBackup(
         repository,
@@ -43865,12 +43892,7 @@ function createWhiteboardServer(options) {
         ownerDisplayName
       )
     });
-    const archives = createArchiveImportRepository(database, (object3) => {
-      const payload = decodeImportedPayload(object3);
-      if (payload) {
-        toPayloadResult({ kind: "payload", payload });
-      }
-    });
+    const archives = createArchiveImportRepository(database, validateImportedObject);
     const catalog = createCatalogRepository(database, recordBoardLifecycleVersion);
     const catalogApplication = createCatalogApplication(catalog, {
       newBoardId: randomUUID,
@@ -43896,6 +43918,7 @@ function createWhiteboardServer(options) {
         newId: randomUUID,
         digest,
         onChanged: (boardId) => rooms.publishDiscussionChange(boardId, "suggestionsChanged"),
+        boardChanges,
         resolveAgentWorkspaces: (boardId, ownerId) => rooms.agentWriteWorkspaces(boardId, ownerId),
         readFeedbackSource(actor, boardId, feedbackThreadId) {
           try {
@@ -43943,12 +43966,13 @@ function createWhiteboardServer(options) {
       catalogApplication,
       archiveApplication,
       features: {
-        editor: createBoardEditorApplication(repository, Date.now, validateSvgUpload),
-        history: createBoardHistoryApplication(repository, Date.now, renderSvgPng),
+        editor: createBoardEditorApplication(repository, Date.now, validateSvgUpload, boardChanges),
+        history: createBoardHistoryApplication(repository, Date.now, renderSvgPng, boardChanges),
         feedback,
         rooms,
         agentBoardWrite: createBoardAgentWriteApplication(repository, {
           now: Date.now,
+          boardChanges,
           resolveWorkspaces: (boardId, ownerId) => rooms.agentWriteWorkspaces(boardId, ownerId)
         }),
         suggestions,

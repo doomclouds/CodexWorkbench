@@ -3,7 +3,7 @@ import {
   connectorArrowPoints as resolvedArrowPoints,
   roundedConnectorSegments,
   type ConnectorSegment,
-} from '@codexworkbench/luming-studio-ii-contracts/whiteboard/connector-route';
+} from '@codexworkbench/luming-studio-ii-whiteboard-shared/connector-route';
 import type { CanvasPoint } from '../contracts.js';
 
 export const connectionLineWidth = 2;

@@ -45,6 +45,7 @@ import {
   prepareSuggestionDecision,
   type SuggestionReviewDraft,
 } from './board-suggestion-review.js';
+import { publishBoardContentChange, type BoardChangePublication } from './board-content-changes.js';
 import { runBoardEditInTransaction } from './run-board-edit.js';
 
 export { BoardSuggestionError } from './board-suggestion-plans.js';
@@ -60,6 +61,7 @@ interface BoardSuggestionDependencies {
   readonly newId: () => string;
   readonly digest: (input: string) => string;
   readonly onChanged?: (boardId: string) => void;
+  readonly boardChanges?: BoardChangePublication;
   readonly resolveAgentWorkspaces?: (
     boardId: string,
     ownerId: string,
@@ -429,9 +431,18 @@ export function createBoardSuggestionApplication(
     digest,
     readFeedbackSource,
     onChanged,
+    boardChanges,
     resolveAgentWorkspaces,
   }: BoardSuggestionDependencies,
 ): BoardSuggestionApplication {
+  function notifySuggestionChange(boardId: string) {
+    try {
+      onChanged?.(boardId);
+    } catch (error) {
+      boardChanges?.onError(error);
+    }
+  }
+
   function choose(
     actor: BoardReviewActor,
     request: AcceptBoardSuggestion,
@@ -443,10 +454,10 @@ export function createBoardSuggestionApplication(
     );
 
     if (changed) {
-      onChanged?.(request.boardId);
+      notifySuggestionChange(request.boardId);
     }
 
-    return receipt;
+    return publishBoardContentChange(receipt, boardChanges);
   }
 
   return {
@@ -515,7 +526,7 @@ export function createBoardSuggestionApplication(
       });
 
       if (changed) {
-        onChanged?.(request.boardId);
+        notifySuggestionChange(request.boardId);
       }
 
       return result;
@@ -582,7 +593,7 @@ export function createBoardSuggestionApplication(
       });
 
       if (changed) {
-        onChanged?.(request.boardId);
+        notifySuggestionChange(request.boardId);
       }
 
       return result;

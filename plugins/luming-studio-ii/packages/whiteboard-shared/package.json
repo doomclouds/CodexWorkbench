@@ -1,0 +1,25 @@
+{
+  "name": "@codexworkbench/luming-studio-ii-whiteboard-shared",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Platform-independent whiteboard behavior shared by Luming Studio II Web and server",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    "./connector-route": "./src/connector-route.ts",
+    "./rich-text": "./src/rich-text.ts",
+    "./stickers": "./src/stickers.ts"
+  },
+  "scripts": {
+    "lint": "eslint --max-warnings 0 src",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test tests/*.test.mjs",
+    "check": "pnpm lint && pnpm typecheck && pnpm test"
+  },
+  "devDependencies": {
+    "@babel/core": "8.0.7",
+    "@babel/eslint-parser": "8.1.2",
+    "eslint": "10.15.0",
+    "typescript": "7.0.2"
+  }
+}

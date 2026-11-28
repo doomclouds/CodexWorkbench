@@ -15,14 +15,15 @@ import { BoardEditService } from '@codexworkbench/luming-studio-ii-contracts/whi
 import { BoardHistoryService } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/history';
 import {
   BoardExportFormat,
+  ObjectPayloadUnavailableReason,
   WhiteboardService,
 } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/service';
 import { expect, test } from 'vitest';
 import { pngImage } from '../fixtures/board-image-bytes.js';
 import { rejectArchiveReceiptInserts } from '../support/archive-database.js';
 import {
-  invalidNativeBackup,
   legacyStudioIIBackup,
+  nativeTextBackup,
   readRestoredReviewSource,
   restoredArchiveCounts,
 } from '../support/backup-restoration-database.js';
@@ -36,7 +37,7 @@ import { editorId, outsiderId, teammateId } from '../support/whiteboard-database
 import { useWhiteboardTestServer } from './whiteboard-test-server.js';
 
 const server = useWhiteboardTestServer();
-const { exportBoard, getBoardScene } = WhiteboardService.method;
+const { exportBoard, getBoardScene, getObjectPayloads } = WhiteboardService.method;
 const { editBoardGeometry, editObjectContent, attachBoardImage } = BoardEditService.method;
 const { listBoardVersions, getBoardVersionScene, getBoardVersionPayloads, restoreBoardVersion } =
   BoardHistoryService.method;
@@ -387,13 +388,46 @@ test('carries the current shared ink palette through both copying and archive re
   }
 });
 
-test('records an incompatible receipt before an invalid native payload can publish a board', async () => {
-  const content = await invalidNativeBackup();
+test('restores a native text payload and returns its version and content through the public read route', async () => {
+  const content = await nativeTextBackup({ text: 'Stored text' });
+  assert.ok(content);
+  const boardId = await upload(content, 'restore-native-text');
+  const { results } = await callWhiteboard(server.address, outsiderId, getObjectPayloads, {
+    boardId,
+    objectIds: ['archived-text', 'missing-text'],
+  });
+
+  expect(results).toMatchObject([
+    {
+      objectId: 'archived-text',
+      result: {
+        case: 'payload',
+        value: { payloadVersion: 0n, body: { case: 'text', value: { text: 'Stored text' } } },
+      },
+    },
+    {
+      objectId: 'missing-text',
+      result: {
+        case: 'unavailable',
+        value: { reason: ObjectPayloadUnavailableReason.NOT_FOUND },
+      },
+    },
+  ]);
+});
+
+test.each([
+  ['invalid field value', { text: 123 }],
+  ['unknown field', { text: 'Stored text', unknown: true }],
+])('records an incompatible receipt for a native payload with an %s', async (field, data) => {
+  const content = await nativeTextBackup(data);
   assert.ok(content);
   const before = restoredArchiveCounts(server.databasePath);
   assert.ok(before);
 
-  const response = await postArchive(content, 'reject-invalid-native-archive');
+  const response = await postArchive(
+    content,
+    'reject-native-archive-' + field.replaceAll(' ', '-'),
+  );
   assert.equal(response.status, 200);
   const reply = fromBinary(
     ImportBoardArchiveResponseSchema,

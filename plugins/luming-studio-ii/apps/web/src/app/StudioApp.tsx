@@ -16,7 +16,7 @@ import type {
   RequestBoardDownload,
   WhiteboardService,
 } from '../data/whiteboard/index.js';
-import type { StudioLocation } from '../platform/browser/index.js';
+import type { StudioLocation } from '../platform/navigation/index.js';
 import './app.css';
 import { createCatalogThumbnailRenderer } from './catalog-thumbnails.js';
 import { createWorkbenchBoardLinkCopy } from './copy-workbench-board-link.js';

@@ -1,7 +1,28 @@
 import { useEffectEvent, useLayoutEffect, useState } from 'react';
-import type { LinkCanvasViewProps } from './canvas-extension.js';
 import { LinkDialog, type LinkDraft } from './LinkDialog.js';
 import { LinkObject } from './LinkObject.js';
+import type { MediaSize } from './contracts.js';
+
+type LinkCommitOutcome = { readonly ok: true } | { readonly ok: false; readonly message: string };
+
+interface LinkViewProps {
+  readonly object: { readonly label: string };
+  readonly geometry: MediaSize;
+  readonly zoom: number;
+  readonly expanded?: boolean;
+  readonly focusedReading?: boolean;
+  readonly payload?: { readonly version: number; readonly value: unknown };
+  readonly interactive: boolean;
+  readonly editRequest?: number;
+  readonly readOnly: boolean;
+  readonly request: (operation: {
+    readonly name: 'link.commit';
+    readonly expectedVersion: number;
+    readonly value: LinkDraft;
+  }) => Promise<LinkCommitOutcome>;
+  readonly onRetentionChange?: (retained: boolean) => void;
+  readonly onEditingChange?: (editing: boolean) => void;
+}
 
 interface OpenLink {
   readonly request: number;
@@ -12,7 +33,7 @@ interface OpenLink {
 const minimumTextSize = { width: 32, height: 12, font: 8 };
 const defaultLinkFont = 17;
 
-function visibleText({ geometry, zoom, expanded, focusedReading }: LinkCanvasViewProps) {
+function visibleText({ geometry, zoom, expanded, focusedReading }: LinkViewProps) {
   const dimensionsFit =
     geometry.width * zoom >= minimumTextSize.width &&
     geometry.height * zoom >= minimumTextSize.height;
@@ -30,7 +51,7 @@ function linkAddress(value: unknown): string | undefined {
   }
 }
 
-export function LinkView(props: LinkCanvasViewProps) {
+export function LinkView(props: LinkViewProps) {
   const { object, payload, interactive, editRequest, readOnly, request, onRetentionChange } = props;
   const href = linkAddress(payload?.value);
   const [handled, setHandled] = useState<number>();

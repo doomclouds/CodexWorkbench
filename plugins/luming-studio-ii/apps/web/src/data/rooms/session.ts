@@ -1,4 +1,5 @@
 import type {
+  BoardRoomContentChange,
   BoardRoomEvent,
   BoardRoomObserver,
   BoardRoomParticipant,
@@ -12,7 +13,6 @@ import type {
 import type { BoardRoomAgentWorkspaceTarget } from './agent-workspaces.js';
 import { createPresencePublisher } from './presence-publisher.js';
 import { createRoomClock } from './room-clock.js';
-import type { BoardRoomContentChange } from './room-message.js';
 
 interface RoomStream {
   readonly controller: AbortController;

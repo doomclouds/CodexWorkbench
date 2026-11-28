@@ -21,8 +21,12 @@ const sharingAdapter = 'src/infrastructure/adapters/sharing/';
 const roomsAdapter = 'src/infrastructure/adapters/rooms/';
 const authorizationAdapter = 'src/infrastructure/adapters/authorization/';
 const archivesPlatform = 'src/infrastructure/platform/archives/';
+const payloadCodec = 'src/infrastructure/adapters/payload-codec/';
+const sceneCodec = 'src/infrastructure/adapters/scene-codec/';
+const sceneProtocol = '@codexworkbench/luming-studio-ii-contracts/whiteboard/scene';
+const payloadProtocol = '@codexworkbench/luming-studio-ii-contracts/whiteboard/payload';
 const protocol = '@codexworkbench/luming-studio-ii-contracts/whiteboard/service';
-const connectorRoute = '@codexworkbench/luming-studio-ii-contracts/whiteboard/connector-route';
+const connectorRoute = '@codexworkbench/luming-studio-ii-whiteboard-shared/connector-route';
 const connectorGeometry = whiteboard + 'domain/export-geometry.ts';
 const connectorVector = whiteboard + 'domain/export-svg.ts';
 const catalogProtocol = '@codexworkbench/luming-studio-ii-contracts/catalog/service';
@@ -45,6 +49,7 @@ const fixtureFiles = [
   'src/bootstrap/index.ts',
   'src/entrypoints/http/index.ts',
   'src/entrypoints/http/guest-sharing.ts',
+  'src/entrypoints/http/payload.ts',
   'src/entrypoints/http/unary-route.ts',
   'src/entrypoints/mcp/index.ts',
   'src/entrypoints/mcp/private.ts',
@@ -91,6 +96,10 @@ const fixtureFiles = [
   roomsAdapter + 'private.ts',
   authorizationAdapter + 'index.ts',
   authorizationAdapter + 'private.ts',
+  payloadCodec + 'index.ts',
+  payloadCodec + 'private.ts',
+  sceneCodec + 'index.ts',
+  sceneCodec + 'private.ts',
   'src/infrastructure/adapters/index.ts',
   'src/infrastructure/adapters/board-edit-storage.ts',
   'src/infrastructure/adapters/board-custom-colors.ts',
@@ -139,6 +148,36 @@ async function inspect(filePath, code) {
 }
 
 const permitted = [
+  [
+    sceneCodec + 'index.ts',
+    `import { create, toBinary } from '@bufbuild/protobuf';\nimport { ObjectMetadataSchema } from '${sceneProtocol}';\nimport type { RoomContentChange } from '../../../modules/rooms/application/index.js';\nimport type { BoardContentChange } from '../../../modules/whiteboard/application/index.js';`,
+  ],
+  [
+    'src/bootstrap/index.ts',
+    "import { toRoomContentChange } from '../infrastructure/adapters/scene-codec/index.js';",
+  ],
+  [
+    'src/entrypoints/http/scene.ts',
+    "import { toObjectMetadata } from '../../infrastructure/adapters/scene-codec/index.js';",
+  ],
+  [
+    payloadCodec + 'index.ts',
+    `import { fromJson } from '@bufbuild/protobuf';\nimport { ObjectPayloadSchema } from '${payloadProtocol}';`,
+  ],
+  [
+    'src/entrypoints/http/payload.ts',
+    "import { parseStoredObjectPayload } from '../../infrastructure/adapters/payload-codec/index.js';",
+  ],
+  [
+    'src/infrastructure/adapters/index.ts',
+    "import { parseStoredObjectPayload } from './payload-codec/index.js';",
+  ],
+  [
+    'src/entrypoints/http/index.ts',
+    "import { createServer, type IncomingMessage } from 'node:http';",
+  ],
+  ['src/entrypoints/http/index.ts', "import type { IncomingMessage } from 'node:http';"],
+  ['src/entrypoints/http/index.ts', "import type { Socket } from 'node:net';"],
   [connectorGeometry, `import { routeConnector } from '${connectorRoute}';`],
   [
     connectorVector,
@@ -201,7 +240,7 @@ const permitted = [
   ['src/entrypoints/mcp/artifact-context-content.ts', "import { parse } from 'parse5';"],
   [
     'src/entrypoints/mcp/artifact-read-search.ts',
-    "import { parse } from 'parse5';\nimport { parseRichText } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/rich-text';",
+    "import { parse } from 'parse5';\nimport { parseRichText } from '@codexworkbench/luming-studio-ii-whiteboard-shared/rich-text';",
   ],
   [
     'tests/integration/mcp-artifact-read.test.ts',
@@ -216,15 +255,15 @@ const permitted = [
   [catalogAdapter + 'thumbnail-html.ts', "import { parse } from 'parse5';"],
   [
     whiteboard + 'domain/export-html-content.ts',
-    "import { parseRichText } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/rich-text';",
+    "import { parseRichText } from '@codexworkbench/luming-studio-ii-whiteboard-shared/rich-text';",
   ],
   [
     catalog + 'domain/thumbnail-sticker.ts',
-    "import { stickerDefinition } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/stickers';",
+    "import { stickerDefinition } from '@codexworkbench/luming-studio-ii-whiteboard-shared/stickers';",
   ],
   [
     whiteboard + 'domain/export-svg-content.ts',
-    "import { stickerSvgContent } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/stickers';",
+    "import { stickerSvgContent } from '@codexworkbench/luming-studio-ii-whiteboard-shared/stickers';",
   ],
   [
     'src/entrypoints/mcp/index.ts',
@@ -349,7 +388,7 @@ const permitted = [
     whiteboard + 'application/index.ts',
     "import { move } from '../domain/index.js';\nimport type { Ports } from '../ports/index.js';",
   ],
-  [whiteboard + 'ports/index.ts', "import { type Scene } from '../domain/index.js';"],
+  [whiteboard + 'ports/index.ts', "import type { Scene } from '../domain/index.js';"],
   [whiteboard + 'domain/index.ts', "export { move } from './private.js';"],
   [
     'src/infrastructure/adapters/index.ts',
@@ -486,6 +525,114 @@ for (const [file, code] of permitted) {
 }
 
 const rejected = [
+  [
+    'a port loads the domain through an inline type import',
+    whiteboard + 'ports/index.ts',
+    "import { type Scene } from '../domain/index.js';",
+  ],
+  [
+    'a port re-exports a type with a runtime dependency on the domain',
+    whiteboard + 'ports/index.ts',
+    "export { type Scene } from '../domain/index.js';",
+  ],
+  [
+    'the scene codec loads the application through an inline type import',
+    sceneCodec + 'index.ts',
+    "import { type BoardContentChange } from '../../../modules/whiteboard/application/index.js';",
+  ],
+  [
+    'an HTTP entrypoint loads node:net through an inline type import',
+    'src/entrypoints/http/index.ts',
+    "import { type Socket } from 'node:net';",
+  ],
+  [
+    'an HTTP entrypoint loads node:http through an inline type with no createServer import',
+    'src/entrypoints/http/index.ts',
+    "import { type IncomingMessage } from 'node:http';",
+  ],
+  [
+    'the scene codec uses a whiteboard application at runtime',
+    sceneCodec + 'index.ts',
+    "import { createWhiteboardApplication } from '../../../modules/whiteboard/application/index.js';",
+  ],
+  [
+    'the scene codec looks into a Rooms application implementation',
+    sceneCodec + 'index.ts',
+    "import type { RoomContentChange } from '../../../modules/rooms/application/private.js';",
+  ],
+  [
+    'the scene codec imports the HTTP service schema',
+    sceneCodec + 'index.ts',
+    `import { WhiteboardService } from '${protocol}';`,
+  ],
+  [
+    'the scene codec performs outbound network I/O',
+    sceneCodec + 'index.ts',
+    "await fetch('https://example.com/');",
+    'no-restricted-globals',
+  ],
+  [
+    'the scene codec accesses the database platform',
+    sceneCodec + 'index.ts',
+    "import { openSqliteDatabase } from '../../platform/index.js';",
+  ],
+  [
+    'an unrelated HTTP route imports the scene codec',
+    'src/entrypoints/http/routes.ts',
+    "import { toObjectMetadata } from '../../infrastructure/adapters/scene-codec/index.js';",
+  ],
+  [
+    'the HTTP scene mapper reaches a private scene codec file',
+    'src/entrypoints/http/scene.ts',
+    "import { encodeScene } from '../../infrastructure/adapters/scene-codec/private.js';",
+  ],
+  [
+    'the stored payload codec imports the HTTP response schema',
+    payloadCodec + 'index.ts',
+    `import { ObjectPayloadResultSchema } from '${protocol}';`,
+  ],
+  [
+    'the stored payload codec performs network I/O',
+    payloadCodec + 'index.ts',
+    "await fetch('https://example.com/');",
+    'no-restricted-globals',
+  ],
+  [
+    'the stored payload codec bypasses conversion and accesses the database platform',
+    payloadCodec + 'index.ts',
+    "import { openSqliteDatabase } from '../../platform/index.js';",
+  ],
+  [
+    'an HTTP route imports the stored payload codec directly',
+    'src/entrypoints/http/routes.ts',
+    "import { parseStoredObjectPayload } from '../../infrastructure/adapters/payload-codec/index.js';",
+  ],
+  [
+    'the HTTP payload mapper reaches a private codec file',
+    'src/entrypoints/http/payload.ts',
+    "import { check } from '../../infrastructure/adapters/payload-codec/private.js';",
+  ],
+  [
+    'the HTTP public entry publishes its internal payload response mapper',
+    'src/entrypoints/http/index.ts',
+    "export { toPayloadResult } from './payload.js';",
+    boundaryRule,
+    'reexport',
+  ],
+  [
+    'the HTTP public entry publishes its locally imported payload response mapper',
+    'src/entrypoints/http/index.ts',
+    "import { toPayloadResult as convert } from './payload.js';\n\nexport { convert };",
+    boundaryRule,
+    'reexport',
+  ],
+  [
+    'the HTTP public entry exposes its payload response mapper through a namespace',
+    'src/entrypoints/http/index.ts',
+    "export * as payload from './payload.js';",
+    boundaryRule,
+    'reexport',
+  ],
   [
     'the workbench preferences adapter cannot use the wire contract directly',
     catalogAdapter + 'workbench-preferences.ts',
@@ -644,12 +791,12 @@ const rejected = [
   [
     'the catalogue application cannot import sticker artwork',
     catalog + 'application/catalog-thumbnail.ts',
-    "import { stickerDefinition } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/stickers';",
+    "import { stickerDefinition } from '@codexworkbench/luming-studio-ii-whiteboard-shared/stickers';",
   ],
   [
     'the catalogue application cannot import the whiteboard rich text format',
     catalog + 'application/catalog-thumbnail.ts',
-    "import { parseRichText } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/rich-text';",
+    "import { parseRichText } from '@codexworkbench/luming-studio-ii-whiteboard-shared/rich-text';",
   ],
   [
     'MCP entrypoint calls the whiteboard application instead of injected operations',
@@ -701,6 +848,33 @@ const rejected = [
     'src/entrypoints/mcp/thread-operations.ts',
     'const result = fetch(url);',
     'no-restricted-globals',
+  ],
+  [
+    'HTTP entrypoint issues outbound HTTP requests',
+    'src/entrypoints/http/index.ts',
+    'const result = fetch(url);',
+    'no-restricted-globals',
+  ],
+  [
+    'HTTP entrypoint opens outbound connections through the global object',
+    'src/entrypoints/http/index.ts',
+    'const socket = new globalThis.WebSocket(url);',
+    'no-restricted-globals',
+  ],
+  [
+    'HTTP entrypoint imports the outbound Node HTTP client',
+    'src/entrypoints/http/index.ts',
+    "import { request } from 'node:http';",
+  ],
+  [
+    'HTTP entrypoint loads the complete HTTP module dynamically',
+    'src/entrypoints/http/index.ts',
+    "const transport = await import('http');",
+  ],
+  [
+    'HTTP entrypoint opens outbound TCP connections',
+    'src/entrypoints/http/index.ts',
+    "import { connect } from 'node:net';",
   ],
   [
     'MCP entrypoint reads host configuration directly',

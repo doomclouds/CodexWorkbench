@@ -1,4 +1,7 @@
+import type { StudioLocation } from '../navigation/index.js';
 import { maximumImageBytes } from './board-image.js';
+
+export type { StudioLocation } from '../navigation/index.js';
 
 const boardParameter = 'board';
 const invitationParameter = 'invite';
@@ -30,11 +33,6 @@ export { createRoomStreamTransport } from './room-stream.js';
 
 type LibraryLayout = 'grid' | 'list';
 type StudioTheme = 'light' | 'dark';
-
-export type StudioLocation =
-  | { readonly kind: 'workbench' }
-  | { readonly kind: 'whiteboard'; readonly boardId: string }
-  | { readonly kind: 'recycle-bin' };
 
 export function readStudioGuestEntry() {
   const url = new URL(window.location.href);

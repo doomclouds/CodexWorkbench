@@ -1,5 +1,9 @@
 import { isBuiltin } from 'node:module';
 import { extname } from 'node:path';
+import {
+  importsRuntimeBinding,
+  isErasedModuleReference,
+} from '../../../../../tooling/studio-lint/module-reference.mjs';
 import { localResolver, projectPath, serverRoot } from './project-paths.mjs';
 
 const whiteboard = 'src/modules/whiteboard/';
@@ -15,6 +19,22 @@ const sharingAdapters = 'src/infrastructure/adapters/sharing/';
 const roomsAdapters = 'src/infrastructure/adapters/rooms/';
 const authorizationAdapters = 'src/infrastructure/adapters/authorization/';
 const archivesPlatform = 'src/infrastructure/platform/archives/';
+const payloadCodec = 'src/infrastructure/adapters/payload-codec/';
+const sceneCodec = 'src/infrastructure/adapters/scene-codec/';
+const httpPayload = 'src/entrypoints/http/payload';
+const codecConsumers = new Map([
+  ['payload-codec', new Set([httpPayload, 'src/infrastructure/adapters/index'])],
+  [
+    'scene-codec',
+    new Set([
+      'src/bootstrap/index',
+      'src/entrypoints/http/board-edit-receipt',
+      'src/entrypoints/http/receipt',
+      'src/entrypoints/http/scene',
+      'src/entrypoints/http/suggestion-routes',
+    ]),
+  ],
+]);
 const layers = new Map([
   ['src/bootstrap/', 'bootstrap'],
   ['src/entrypoints/http/', 'http'],
@@ -44,6 +64,8 @@ const layers = new Map([
   [sharingAdapters, 'sharing-adapters'],
   [roomsAdapters, 'rooms-adapters'],
   [authorizationAdapters, 'authorization-adapters'],
+  [payloadCodec, 'payload-codec'],
+  [sceneCodec, 'scene-codec'],
   ['src/infrastructure/adapters/', 'adapters'],
   [archivesPlatform, 'archives-platform'],
   ['src/infrastructure/platform/', 'platform'],
@@ -82,6 +104,8 @@ const entries = new Map([
   ['sharing-adapters', sharingAdapters + 'index'],
   ['rooms-adapters', roomsAdapters + 'index'],
   ['authorization-adapters', authorizationAdapters + 'index'],
+  ['payload-codec', payloadCodec + 'index'],
+  ['scene-codec', sceneCodec + 'index'],
   ['archives-platform', archivesPlatform + 'index'],
   ['adapters', 'src/infrastructure/adapters/index'],
   ['platform', 'src/infrastructure/platform/index'],
@@ -192,7 +216,8 @@ const portLayers = new Set([
   'rooms-ports',
 ]);
 const protocolPrefix = '@codexworkbench/luming-studio-ii-contracts/whiteboard/';
-const connectorRoute = protocolPrefix + 'connector-route';
+const sharedPrefix = '@codexworkbench/luming-studio-ii-whiteboard-shared/';
+const connectorRoute = sharedPrefix + 'connector-route';
 const connectorRouteSources = new Set([
   whiteboard + 'domain/export-geometry',
   whiteboard + 'domain/export-svg',
@@ -329,7 +354,7 @@ const privateLibraries = new Map([
     ]),
   ],
   [
-    protocolPrefix + 'rich-text',
+    sharedPrefix + 'rich-text',
     new Set([
       whiteboard + 'domain/export-html-content',
       whiteboard + 'domain/export-svg-content',
@@ -337,7 +362,7 @@ const privateLibraries = new Map([
     ]),
   ],
   [
-    protocolPrefix + 'stickers',
+    sharedPrefix + 'stickers',
     new Set([catalog + 'domain/thumbnail-sticker', whiteboard + 'domain/export-svg-content']),
   ],
   ['eslint', new Set(['tests/contracts/server-lint.test'])],
@@ -352,8 +377,19 @@ function allowsLocal(sourceLayer, targetPath, typeOnly, from) {
   if (!targetLayer) {
     return false;
   }
+
+  const consumers = codecConsumers.get(targetLayer);
+  if (consumers && sourceLayer !== targetLayer) {
+    return targetPath === entries.get(targetLayer) && consumers.has(from);
+  }
   if (sourceLayer === targetLayer) {
     return true;
+  }
+  if (sourceLayer === 'scene-codec') {
+    return (
+      typeOnly &&
+      (targetPath === entries.get('application') || targetPath === entries.get('rooms-application'))
+    );
   }
   if (mcpIntegrationTests.has(from) && targetPath === entries.get('mcp')) {
     return true;
@@ -368,7 +404,33 @@ function allowsLocal(sourceLayer, targetPath, typeOnly, from) {
   return testLayers.has(targetLayer) || entries.get(targetLayer) === targetPath;
 }
 
-function allowsLibrary(layer, specifier, from) {
+function allowsBuiltin(layer, name, from, node) {
+  if (layer === 'http' && (name === 'net' || name === 'http')) {
+    return (
+      isErasedModuleReference(node) ||
+      (name === 'http' &&
+        importsRuntimeBinding(node) &&
+        node.specifiers.every(
+          (entry) =>
+            entry.importKind === 'type' ||
+            (entry.type === 'ImportSpecifier' && entry.imported.name === 'createServer'),
+        ))
+    );
+  }
+  if (from === mcpRuntime && mcpRuntimeBuiltins.has(name)) {
+    return true;
+  }
+
+  return builtins.get(layer)?.has(name) || (testLayers.has(layer) && testBuiltins.has(name));
+}
+
+function allowsLibrary(layer, specifier, from, node) {
+  if (layer === 'payload-codec') {
+    return specifier === '@bufbuild/protobuf' || specifier === protocolPrefix + 'payload';
+  }
+  if (layer === 'scene-codec') {
+    return specifier === '@bufbuild/protobuf' || specifier === protocolPrefix + 'scene';
+  }
   if (mcpTestLibraries.has(specifier)) {
     return mcpIntegrationTests.has(from);
   }
@@ -383,36 +445,16 @@ function allowsLibrary(layer, specifier, from) {
   if (protocols.has(specifier)) {
     return protocolLayers.has(layer);
   }
-
   if (isBuiltin(specifier)) {
-    const name = specifier.replace(/^node:/u, '');
-    if (from === mcpRuntime && mcpRuntimeBuiltins.has(name)) {
-      return true;
-    }
-
-    return builtins.get(layer)?.has(name) || (testLayers.has(layer) && testBuiltins.has(name));
+    return allowsBuiltin(layer, specifier.replace(/^node:/u, ''), from, node);
   }
+
   const sources = privateLibraries.get(specifier);
   if (sources) {
     return sources.has(from);
   }
 
   return specifier === 'vitest' && testLayers.has(layer);
-}
-
-function usesTypesOnly(node) {
-  if (node.type === 'TSImportType' || node.importKind === 'type' || node.exportKind === 'type') {
-    return true;
-  }
-
-  const { specifiers } = node;
-
-  return Boolean(
-    specifiers?.length &&
-    specifiers.every(
-      (specifier) => specifier.importKind === 'type' || specifier.exportKind === 'type',
-    ),
-  );
 }
 
 function allowsConnectorRoute(node, from, file) {
@@ -482,16 +524,18 @@ const contractBoundary = {
       }
 
       const targetPath = local && projectPath(root, local.file);
-      const typeOnly = usesTypesOnly(node);
+      const typeOnly = isErasedModuleReference(node);
       const approved = local
         ? allowsLocal(layer, targetPath, typeOnly, from)
-        : allowsLibrary(layer, specifier, from);
+        : allowsLibrary(layer, specifier, from, node);
 
       if (!approved) {
         context.report({ node, messageId: 'dependency' });
         return;
       }
-      if (reexport && !typeOnly && layerOf(targetPath) !== layer) {
+      const privateHttpPayload = targetPath === httpPayload;
+      const crossLayerValue = !typeOnly && layerOf(targetPath) !== layer;
+      if (reexport && (privateHttpPayload || crossLayerValue)) {
         context.report({ node, messageId: 'reexport' });
       }
     }
@@ -501,8 +545,8 @@ const contractBoundary = {
         inspect(node, node.source, true);
         return;
       }
-      const typeOnly = usesTypesOnly(node);
       for (const specifier of node.specifiers) {
+        const typeOnly = node.exportKind === 'type' || specifier.exportKind === 'type';
         inspectExportedBinding(specifier, specifier.local, typeOnly);
       }
     }

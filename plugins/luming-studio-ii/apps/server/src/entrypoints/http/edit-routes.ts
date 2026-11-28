@@ -6,7 +6,6 @@ import { readContentOperation } from './content-edits.js';
 import { readGeometryOperation } from './geometry-edits.js';
 import { readImageOperation } from './image-edits.js';
 import { requireId } from './request.js';
-import type { ObserveEdit } from './room-changes.js';
 import { asyncUnaryRoute, unaryRoute, type RouteEntry } from './unary-route.js';
 
 const {
@@ -23,14 +22,7 @@ export const boardImageRequestLimit = 20 * 1024 * 1024 + 32 * 1024;
 export function createBoardEditRoutes(
   application: BoardEditorApplication,
   digest: (value: Uint8Array) => string,
-  observe?: ObserveEdit,
 ): readonly RouteEntry[] {
-  function changed(edit: ReturnType<BoardEditorApplication['editContent']>) {
-    observe?.(edit);
-
-    return toBoardEditReceipt(edit);
-  }
-
   return [
     unaryRoute(editBoardGeometry, (actor, request) => {
       const operation = readGeometryOperation(request);
@@ -39,7 +31,7 @@ export function createBoardEditRoutes(
       }
 
       return {
-        receipt: changed(
+        receipt: toBoardEditReceipt(
           application.editGeometry(actor, {
             boardId: requireId(request.boardId),
             commandId: requireId(request.commandId),
@@ -50,7 +42,7 @@ export function createBoardEditRoutes(
       };
     }),
     unaryRoute(editObjectContent, (actor, request) => ({
-      receipt: changed(
+      receipt: toBoardEditReceipt(
         application.editContent(actor, {
           boardId: requireId(request.boardId),
           commandId: requireId(request.commandId),
@@ -60,7 +52,7 @@ export function createBoardEditRoutes(
       ),
     })),
     asyncUnaryRoute(attachBoardImage, async (actor, request) => ({
-      receipt: changed(
+      receipt: toBoardEditReceipt(
         await application.attachImage(actor, {
           boardId: requireId(request.boardId),
           commandId: requireId(request.commandId),
@@ -74,7 +66,7 @@ export function createBoardEditRoutes(
       const kind = source.case === 'moveCommandId' ? 'move' : 'edit';
 
       return {
-        receipt: changed(
+        receipt: toBoardEditReceipt(
           application.reverseEdit(actor, {
             boardId: requireId(request.boardId),
             commandId: requireId(request.commandId),

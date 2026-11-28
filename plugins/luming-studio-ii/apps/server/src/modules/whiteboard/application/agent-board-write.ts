@@ -12,6 +12,7 @@ import {
   agentWorkspacesDisjoint,
   type AgentWriteWorkspace,
 } from './agent-board-write-scope.js';
+import type { BoardChangePublication } from './board-content-changes.js';
 import { createSuggestionOverlay } from './board-suggestion-overlay.js';
 import { planSuggestion, scopedOperationTargets } from './board-suggestion-plans.js';
 import { checkBoardEditBeforePreparation, runBoardEdit } from './run-board-edit.js';
@@ -26,6 +27,7 @@ interface AgentBoardWriteCommand extends BoardEditIdentity {
 
 interface AgentBoardWriteOptions {
   readonly now: () => number;
+  readonly boardChanges?: BoardChangePublication;
   readonly resolveWorkspaces: (boardId: string, ownerId: string) => readonly AgentWriteWorkspace[];
 }
 
@@ -91,7 +93,7 @@ function planWrites(
 
 export function createBoardAgentWriteApplication(
   repository: BoardEditRepository,
-  { now, resolveWorkspaces }: AgentBoardWriteOptions,
+  { now, resolveWorkspaces, boardChanges }: AgentBoardWriteOptions,
 ): BoardAgentWriteApplication {
   return {
     getReceipt(ownerId, { boardId, commandId, agentId, signature }) {
@@ -116,6 +118,7 @@ export function createBoardAgentWriteApplication(
         { kind, signature, savedAtMillis: now(), ownerActorId },
         (reader, board) =>
           planWrites(reader, board, command, resolveWorkspaces(boardId, ownerActorId)),
+        boardChanges,
       );
     },
   };

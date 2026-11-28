@@ -1,4 +1,5 @@
 import { basename, dirname, relative, resolve, sep } from 'node:path';
+import { isErasedModuleReference } from '../../../../../tooling/studio-lint/module-reference.mjs';
 import manifest from '../package.json' with { type: 'json' };
 import { allowsConnectorRoute, connectorRoute } from './connector-route-boundary.mjs';
 import {
@@ -343,6 +344,10 @@ const contractBoundary = {
         context.report({ node, messageId: 'dynamic' });
         return;
       }
+      if (entry === canvasContracts && !isErasedModuleReference(node)) {
+        context.report({ node, messageId: 'dom' });
+        return;
+      }
 
       const clean = specifier.split(/[?#]/u)[0];
       if (clean === connectorRoute) {
@@ -391,14 +396,13 @@ const contractBoundary = {
 
     function inspectImport(node) {
       inspectReference(node, node.source);
-      if (entry !== canvasContracts) {
+      if (entry !== canvasContracts || !isErasedModuleReference(node)) {
         return;
       }
 
       for (const specifier of node.specifiers) {
         const name = nameOf(specifier.imported);
-        const typeOnly = node.importKind === 'type' || specifier.importKind === 'type';
-        if (!typeOnly || !publicReactTypes.has(name) || name !== specifier.local.name) {
+        if (!publicReactTypes.has(name) || name !== specifier.local.name) {
           context.report({ node: specifier, messageId: 'dom' });
         }
       }

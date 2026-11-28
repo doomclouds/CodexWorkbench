@@ -32,6 +32,7 @@ import {
   recordObjectHistory,
 } from './board-history-storage.js';
 import { decodeReceiptObject, decodeSceneObject } from './board-object-storage.js';
+import { parseStoredObjectPayload } from './payload-codec/index.js';
 import {
   decodeJson,
   decodePayload,
@@ -101,7 +102,7 @@ interface ImportedObject {
   readonly payload?: ImportedPayload;
 }
 
-export function decodeImportedPayload(object: ImportedObject): PayloadRecord | undefined {
+export function validateImportedObject(object: ImportedObject): void {
   const { payload } = object;
   decodeSceneObject({
     object_id: object.objectId,
@@ -121,14 +122,13 @@ export function decodeImportedPayload(object: ImportedObject): PayloadRecord | u
     detail_json: object.detailJson ?? null,
   });
 
-  return (
-    payload && {
-      objectId: object.objectId,
+  if (payload) {
+    parseStoredObjectPayload({
       bodyKind: payload.kind,
       payloadVersion: payload.version,
       data: decodePayload(payload.json),
-    }
-  );
+    });
+  }
 }
 
 function readObjects(

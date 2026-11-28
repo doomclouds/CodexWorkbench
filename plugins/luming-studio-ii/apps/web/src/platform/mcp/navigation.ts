@@ -1,13 +1,9 @@
+import type { StudioLocation } from '../navigation/index.js';
 import type { McpRestoredView } from './context.js';
-
-export type McpStudioLocation =
-  | { readonly kind: 'workbench' }
-  | { readonly kind: 'whiteboard'; readonly boardId: string }
-  | { readonly kind: 'recycle-bin' };
 
 type Listener = () => void;
 
-function sameLocation(first: McpStudioLocation, second: McpStudioLocation) {
+function sameLocation(first: StudioLocation, second: StudioLocation) {
   if (first.kind === 'whiteboard' && second.kind === 'whiteboard') {
     return first.boardId === second.boardId;
   }
@@ -16,13 +12,13 @@ function sameLocation(first: McpStudioLocation, second: McpStudioLocation) {
 }
 
 export function createMcpNavigation(readOpeningId: () => string | number | undefined) {
-  let location: McpStudioLocation = { kind: 'workbench' };
+  let location: StudioLocation = { kind: 'workbench' };
   let writtenLocally = false;
   let openingId: string | number | undefined;
   let restoredView: McpRestoredView | undefined;
   const listeners = new Set<Listener>();
 
-  function setLocation(next: McpStudioLocation) {
+  function setLocation(next: StudioLocation) {
     if (!sameLocation(location, next)) {
       location = next;
       for (const listener of listeners) {
@@ -34,7 +30,7 @@ export function createMcpNavigation(readOpeningId: () => string | number | undef
   return {
     read: () => location,
     readBoardView: () => restoredView,
-    write(next: McpStudioLocation) {
+    write(next: StudioLocation) {
       openingId ??= readOpeningId();
       writtenLocally = true;
       restoredView = undefined;
@@ -70,7 +66,7 @@ export function createMcpNavigation(readOpeningId: () => string | number | undef
         return false;
       }
 
-      const next: McpStudioLocation = boardId
+      const next: StudioLocation = boardId
         ? { kind: 'whiteboard', boardId }
         : { kind: 'workbench' };
       writtenLocally = false;

@@ -9,6 +9,7 @@ import {
   type BoardVersionKind,
 } from '../domain/index.js';
 import type { BoardEditRepository, BoardEditWriter } from '../ports/index.js';
+import { publishBoardContentChange, type BoardChangePublication } from './board-content-changes.js';
 
 interface BoardEditRequest {
   readonly signature: string;
@@ -30,10 +31,13 @@ export function runBoardEdit(
   identity: BoardEditIdentity,
   request: BoardEditRequest,
   plan: PlanBoardEdit,
+  boardChanges?: BoardChangePublication,
 ): BoardEditReceipt {
-  return repository.write((writer) =>
+  const receipt = repository.write((writer) =>
     runBoardEditInTransaction(writer, actor, identity, request, plan),
   );
+
+  return publishBoardContentChange(receipt, boardChanges);
 }
 
 export function runBoardEditInTransaction(

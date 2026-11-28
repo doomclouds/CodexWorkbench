@@ -39,7 +39,8 @@ luming-studio-ii/
 │       │   └── bootstrap/
 │       └── tests/{unit,contracts,integration,fixtures,support}/
 └── packages/
-    └── contracts/proto/luming/studio/v1/
+    ├── contracts/proto/luming/studio/v1/
+    └── whiteboard-shared/
 ```
 
 ## 对话面板与打包
@@ -57,6 +58,7 @@ pnpm --filter @codexworkbench/luming-studio-ii build:runtime
 - Web 采用 React、TypeScript 和 Vite。页面协调跨 Surface 的用户动作，Surface 管理局部流程，数据层持有服务确认的投影。画布运行时处理手势、视口和绘制预览。
 - 后端先用 Node.js 和 TypeScript。HTTP 与 MCP 入口调用同一应用用例。领域维护业务规则，消费方定义出站端口，由基础设施实现，启动层负责装配。跨上下文同步协作走公开应用服务，持久化提交后分发集成事件。
 - 前后端业务协议采用 Protobuf，模式放在 `packages/contracts/proto/luming/studio/v1/`。协议版本独立于插件版本。后续 Rust 服务端沿用这一协议和同一套行为验收，Codex 宿主接入继续使用 MCP JSON-RPC。
+- Web 画布与服务端导出共用 `packages/whiteboard-shared` 的连接线路由、富文本解析和贴纸图元。该包独立检查运行时依赖，用相同的输入与预期输出校验两端依赖的行为。
 - 浏览器和局域网访客使用二进制 gRPC-Web 订阅 `BoardRoomService.StreamBoardRoomEvents`，现有 SSE 入口继续可用。创建、保存和查回执仍是单次调用。房间事件按权限范围分配游标，访客接收已授权的协作更新，房主另可接收私人建议的更新通知。
 - Codex 面板通过应用专用工具调用 `WaitBoardRoomEvents`。有事件时立即返回，空闲请求最多保留 20 秒；隐藏面板时取消等待，恢复时携带游标续读。事件超出保留范围时读取房间快照。宿主支持恢复视图上下文时，重新打开面板可恢复白板、选区和相机。
 

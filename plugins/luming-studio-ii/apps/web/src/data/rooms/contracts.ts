@@ -1,3 +1,6 @@
+import type { WhiteboardObject } from '../whiteboard/index.js';
+import type { BoardRoomAgentWorkspace, BoardRoomAgentWorkspaceTarget } from './agent-workspaces.js';
+
 export interface BoardRoomPoint {
   readonly x: number;
   readonly y: number;
@@ -80,6 +83,14 @@ export type BoardRoomTimerReceipt =
       readonly kind: 'rejected';
       readonly reason: 'forbidden' | 'invalidAction' | 'commandIdReuse';
     };
+
+export interface BoardRoomContentChange {
+  readonly revision: bigint;
+  readonly changedObjectIds: readonly string[];
+  readonly removedObjectIds: readonly string[];
+  readonly changedObjects?: readonly WhiteboardObject[];
+  readonly refreshScene: boolean;
+}
 
 interface RoomEventHeader {
   readonly boardId: string;
@@ -238,6 +249,3 @@ export interface BoardRoomSessionOptions {
   readonly observation?: 'snapshot';
   readonly visibility?: (listener: (visible: boolean) => void) => () => void;
 }
-
-import type { BoardRoomContentChange } from './room-message.js';
-import type { BoardRoomAgentWorkspace, BoardRoomAgentWorkspaceTarget } from './agent-workspaces.js';

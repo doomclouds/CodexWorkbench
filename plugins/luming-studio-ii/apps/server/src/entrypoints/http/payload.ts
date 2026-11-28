@@ -1,10 +1,10 @@
-import { create, fromJson } from '@bufbuild/protobuf';
-import { ObjectPayloadSchema } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/payload';
+import { create } from '@bufbuild/protobuf';
 import {
   ObjectPayloadResultSchema,
   ObjectPayloadUnavailableReason,
   type ObjectPayloadResult,
 } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/service';
+import { parseStoredObjectPayload } from '../../infrastructure/adapters/payload-codec/index.js';
 import type { PayloadResult } from '../../modules/whiteboard/application/index.js';
 
 export function toPayloadResult(result: PayloadResult): ObjectPayloadResult {
@@ -20,18 +20,8 @@ export function toPayloadResult(result: PayloadResult): ObjectPayloadResult {
     });
   }
 
-  const { objectId, bodyKind, data, payloadVersion } = result.payload;
-  const payload = fromJson(ObjectPayloadSchema, {
-    [bodyKind]: data,
-    payloadVersion: payloadVersion.toString(),
-  });
-
-  if (payload.body.case !== bodyKind) {
-    throw new Error('Stored object payload does not match its Protobuf body');
-  }
-
   return create(ObjectPayloadResultSchema, {
-    objectId,
-    result: { case: 'payload', value: payload },
+    objectId: result.payload.objectId,
+    result: { case: 'payload', value: parseStoredObjectPayload(result.payload) },
   });
 }

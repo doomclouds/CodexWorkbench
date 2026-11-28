@@ -1,0 +1,138 @@
+{
+  "connectorRoutes": [
+    {
+      "name": "routes from a rotated attachment",
+      "start": {
+        "fallback": { "x": 0, "y": 0 },
+        "geometry": { "x": 0, "y": 0, "width": 40, "height": 20, "rotation": 90 },
+        "port": "right"
+      },
+      "end": { "fallback": { "x": 50, "y": 120 } },
+      "points": [
+        { "x": 20, "y": 30 },
+        { "x": 20, "y": 75 },
+        { "x": 50, "y": 75 },
+        { "x": 50, "y": 120 }
+      ],
+      "svgPath": "M 20 30 L 20 67 Q 20 75 28 75 L 42 75 Q 50 75 50 83 L 50 120",
+      "strokeWidth": 2,
+      "endArrow": [
+        { "x": 55, "y": 110 },
+        { "x": 50, "y": 120 },
+        { "x": 45, "y": 110 }
+      ]
+    },
+    {
+      "name": "uses relative bends before absolute bends",
+      "start": { "fallback": { "x": 0, "y": 0 } },
+      "end": { "fallback": { "x": 120, "y": 80 } },
+      "bends": [{ "x": 40, "y": 20 }],
+      "relativeBends": { "firstAxis": "horizontal", "offsets": [30, 20] },
+      "points": [
+        { "x": 0, "y": 0 },
+        { "x": 30, "y": 0 },
+        { "x": 30, "y": 100 },
+        { "x": 120, "y": 100 },
+        { "x": 120, "y": 80 }
+      ],
+      "svgPath": "M 0 0 L 22 0 Q 30 0 30 8 L 30 92 Q 30 100 38 100 L 112 100 Q 120 100 120 92 L 120 80",
+      "strokeWidth": 2,
+      "endArrow": [
+        { "x": 115, "y": 90 },
+        { "x": 120, "y": 80 },
+        { "x": 125, "y": 90 }
+      ]
+    },
+    {
+      "name": "falls back to absolute bends when relative bends are empty",
+      "start": { "fallback": { "x": 0, "y": 0 } },
+      "end": { "fallback": { "x": 80, "y": 40 } },
+      "bends": [
+        { "x": 0, "y": 20 },
+        { "x": 80, "y": 20 }
+      ],
+      "relativeBends": { "firstAxis": "horizontal", "offsets": [] },
+      "points": [
+        { "x": 0, "y": 0 },
+        { "x": 0, "y": 20 },
+        { "x": 80, "y": 20 },
+        { "x": 80, "y": 40 }
+      ],
+      "svgPath": "M 0 0 L 0 12 Q 0 20 8 20 L 72 20 Q 80 20 80 28 L 80 40",
+      "strokeWidth": 2,
+      "endArrow": [
+        { "x": 85, "y": 30 },
+        { "x": 80, "y": 40 },
+        { "x": 75, "y": 30 }
+      ]
+    }
+  ],
+  "richText": [
+    {
+      "name": "parses list indentation, code, emphasis and an HTTP link",
+      "input": "  3. **Important** and `code`\n- [Board](https://Example.test)",
+      "lines": [
+        {
+          "type": "ordered",
+          "marker": "3.",
+          "indent": 1,
+          "segments": [
+            { "type": "bold", "text": "Important" },
+            { "type": "text", "text": " and " },
+            { "type": "code", "text": "code" }
+          ]
+        },
+        {
+          "type": "bullet",
+          "marker": "•",
+          "segments": [{ "type": "link", "text": "Board", "href": "https://example.test/" }]
+        }
+      ],
+      "firstLine": "Important and code"
+    },
+    {
+      "name": "retains a non-HTTP link as literal text",
+      "input": "A [link](mailto:someone@example.test) and *visible*",
+      "lines": [
+        {
+          "type": "paragraph",
+          "segments": [
+            { "type": "text", "text": "A [link](mailto:someone@example.test) and " },
+            { "type": "italic", "text": "visible" }
+          ]
+        }
+      ],
+      "firstLine": "A [link](mailto:someone@example.test) and visible"
+    },
+    {
+      "name": "keeps escaped markers and combined styles",
+      "input": "\\*literal\\* ***both***",
+      "lines": [
+        {
+          "type": "paragraph",
+          "segments": [
+            { "type": "text", "text": "*literal* " },
+            { "type": "bold", "text": "both", "italic": true }
+          ]
+        }
+      ],
+      "firstLine": "*literal* both"
+    }
+  ],
+  "stickers": [
+    {
+      "id": "check",
+      "graphics": [
+        { "kind": "rect", "x": 4, "y": 4, "width": 16, "height": 16, "rx": 2, "fill": "#b3c894" },
+        { "kind": "path", "d": "m7 11 4 4L22 5", "fill": "none" }
+      ],
+      "svgParts": [
+        "<g stroke=\"#ffffff\" stroke-width=\"4\">",
+        "<rect x=\"4\" y=\"4\" width=\"16\" height=\"16\" rx=\"2\" fill=\"#b3c894\"/>",
+        "<path d=\"m7 11 4 4L22 5\" fill=\"none\"/>",
+        "<g stroke=\"#273443\" stroke-width=\"1.3\">"
+      ]
+    },
+    { "id": "missing", "graphics": null, "svgParts": null }
+  ]
+}

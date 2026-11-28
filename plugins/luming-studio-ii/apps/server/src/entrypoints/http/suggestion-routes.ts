@@ -22,8 +22,7 @@ import { readContentOperation } from './content-edits.js';
 import { readGeometryOperation } from './geometry-edits.js';
 import { toPayloadResult } from './payload.js';
 import { decodeRequest, HttpRequestError, requireId } from './request.js';
-import type { ObserveEdit } from './room-changes.js';
-import { toObjectMetadata } from './scene.js';
+import { toObjectMetadata } from '../../infrastructure/adapters/scene-codec/index.js';
 import { unaryRoute, type HttpActor, type RouteEntry } from './unary-route.js';
 
 const {
@@ -215,7 +214,6 @@ function listLimit(limit: number) {
 export function createBoardSuggestionRoutes(
   application: BoardSuggestionApplication,
   digest: (value: Uint8Array) => string,
-  observe?: ObserveEdit,
 ): readonly RouteEntry[] {
   return [
     unaryRoute(createBoardReviewSource, (actor, request) => ({
@@ -288,7 +286,6 @@ export function createBoardSuggestionRoutes(
         },
         decodeEdit,
       );
-      observe?.(receipt);
 
       return { receipt: toBoardEditReceipt(receipt) };
     }),
@@ -328,7 +325,6 @@ export function createBoardSuggestionRoutes(
         },
         decodeEdit,
       );
-      observe?.(receipt);
 
       return { receipt: toAgentChoiceReceipt(receipt) };
     }),

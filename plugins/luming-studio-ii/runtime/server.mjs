@@ -8849,7 +8849,7 @@ import { fileURLToPath } from "node:url";
 var MAX_ARCHIVE_IMPORT_BYTES = 128 * 1024 * 1024;
 var MAX_BOARD_ASSET_IMPORT_BYTES = 20 * 1024 * 1024;
 
-// ../../packages/contracts/whiteboard/stickers.ts
+// ../../packages/whiteboard-shared/src/stickers.ts
 var yellow = "#f5c75e";
 var orange = "#e99662";
 var red = "#e87970";
@@ -9209,7 +9209,7 @@ var maxBoardBackupAssetBytes = 20 * 1024 * 1024;
 // src/modules/whiteboard/domain/section.ts
 var radiansPerDegree = Math.PI / 180;
 
-// ../../packages/contracts/whiteboard/rich-text.ts
+// ../../packages/whiteboard-shared/src/rich-text.ts
 function safeHttpLink(href) {
   try {
     const url2 = new URL(href ?? "");
@@ -15109,7 +15109,7 @@ var BoardSuggestionService = /* @__PURE__ */ serviceDesc(file_luming_studio_v1_b
 var file_luming_studio_v1_board_agent_write_service = /* @__PURE__ */ fileDesc("CjBsdW1pbmcvc3R1ZGlvL3YxL2JvYXJkX2FnZW50X3dyaXRlX3NlcnZpY2UucHJvdG8SEGx1bWluZy5zdHVkaW8udjEiuQEKGkFwcGx5QWdlbnRCb2FyZEVkaXRSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJEg8KB3Rhc2tfaWQYAyABKAkSEgoKZ2VuZXJhdGlvbhgEIAEoCRISCgpjb21tYW5kX2lkGAUgASgJEj4KCm9wZXJhdGlvbnMYBiADKAsyKi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU3VnZ2VzdGlvbkVkaXRJbnB1dCJrChtBcHBseUFnZW50Qm9hcmRFZGl0UmVzcG9uc2USMwoHcmVjZWlwdBgBIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuQm9hcmRFZGl0UmVjZWlwdBIXCg9kZXRhaWxzX29taXR0ZWQYAiABKAgiYQofR2V0QWdlbnRCb2FyZEVkaXRSZWNlaXB0UmVxdWVzdBI+CghvcmlnaW5hbBgBIAEoCzIsLmx1bWluZy5zdHVkaW8udjEuQXBwbHlBZ2VudEJvYXJkRWRpdFJlcXVlc3QicAogR2V0QWdlbnRCb2FyZEVkaXRSZWNlaXB0UmVzcG9uc2USMwoHcmVjZWlwdBgBIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuQm9hcmRFZGl0UmVjZWlwdBIXCg9kZXRhaWxzX29taXR0ZWQYAiABKAgykAIKFkJvYXJkQWdlbnRXcml0ZVNlcnZpY2UScgoTQXBwbHlBZ2VudEJvYXJkRWRpdBIsLmx1bWluZy5zdHVkaW8udjEuQXBwbHlBZ2VudEJvYXJkRWRpdFJlcXVlc3QaLS5sdW1pbmcuc3R1ZGlvLnYxLkFwcGx5QWdlbnRCb2FyZEVkaXRSZXNwb25zZRKBAQoYR2V0QWdlbnRCb2FyZEVkaXRSZWNlaXB0EjEubHVtaW5nLnN0dWRpby52MS5HZXRBZ2VudEJvYXJkRWRpdFJlY2VpcHRSZXF1ZXN0GjIubHVtaW5nLnN0dWRpby52MS5HZXRBZ2VudEJvYXJkRWRpdFJlY2VpcHRSZXNwb25zZWIGcHJvdG8z", [file_luming_studio_v1_board_suggestion_service, file_luming_studio_v1_whiteboard_edits]);
 var BoardAgentWriteService = /* @__PURE__ */ serviceDesc(file_luming_studio_v1_board_agent_write_service, 0);
 
-// src/entrypoints/http/scene.ts
+// src/infrastructure/adapters/scene-codec/index.ts
 var CONNECTOR_PORTS = {
   top: ConnectorPort.TOP,
   bottom: ConnectorPort.BOTTOM,

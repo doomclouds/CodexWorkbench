@@ -3,7 +3,7 @@ import type {
   ObjectPayload,
   TableGrid,
 } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/payload';
-import { parseRichText } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/rich-text';
+import { parseRichText } from '@codexworkbench/luming-studio-ii-whiteboard-shared/rich-text';
 import type { ObjectMetadata } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/scene';
 import { parse, type DefaultTreeAdapterMap } from 'parse5';
 import { selectContextObjects } from './artifact-context-scope.js';

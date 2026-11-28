@@ -3,7 +3,7 @@ import {
   connectorPortPoint,
   resolveConnectorRoute,
   type ConnectorTarget,
-} from '@codexworkbench/luming-studio-ii-contracts/whiteboard/connector-route';
+} from '@codexworkbench/luming-studio-ii-whiteboard-shared/connector-route';
 import type {
   CanvasConnection,
   CanvasConnectionEndpoint,

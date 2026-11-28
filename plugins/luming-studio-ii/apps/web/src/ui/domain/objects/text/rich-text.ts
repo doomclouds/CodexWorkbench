@@ -4,4 +4,4 @@ export {
   richTextFirstLine,
   safeHttpLink,
   type RichTextSegment,
-} from '@codexworkbench/luming-studio-ii-contracts/whiteboard/rich-text';
+} from '@codexworkbench/luming-studio-ii-whiteboard-shared/rich-text';

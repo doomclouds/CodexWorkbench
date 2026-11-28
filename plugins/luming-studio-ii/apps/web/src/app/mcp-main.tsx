@@ -15,12 +15,7 @@ import {
   createWhiteboardExportService,
   createWhiteboardService,
 } from '../data/whiteboard/index.js';
-import type {
-  BoardEditReceipt,
-  EditObjectContentCommand,
-  WhiteboardDocumentBlock,
-  WhiteboardPayloadResult,
-} from '../data/whiteboard/index.js';
+import type { BoardEditReceipt, WhiteboardPayloadResult } from '../data/whiteboard/index.js';
 import {
   boardRoomClock,
   copyShareLink,
@@ -37,136 +32,9 @@ import {
 import { connectMcpApp, createMcpCommandId, observeMcpRoomEvents } from '../platform/mcp/index.js';
 import { StudioApp } from './index.js';
 import type { StudioAppProps } from './index.js';
+import { resolveMcpPayload, restoreMcpContent } from './mcp-whiteboard-assets.js';
 
 type Bridge = Awaited<ReturnType<typeof connectMcpApp>>;
-type Assets = Bridge['assets'];
-type Fields = Readonly<Record<string, unknown>>;
-
-function fields(value: unknown): Fields | undefined {
-  if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-    return value as Fields;
-  }
-}
-
-function resolveField(source: unknown, assets: Assets, signal?: AbortSignal): unknown {
-  return typeof source === 'string' ? assets.resolve(source, signal) : source;
-}
-
-async function resolveBlock(
-  value: unknown,
-  assets: Assets,
-  signal?: AbortSignal,
-): Promise<unknown> {
-  const block = fields(value);
-  if (!block) {
-    return value;
-  }
-
-  const props = fields(block.props);
-  const children = Array.isArray(block.children)
-    ? await Promise.all(block.children.map((child: unknown) => resolveBlock(child, assets, signal)))
-    : block.children;
-  const mapped =
-    props && block.type === 'image'
-      ? { ...props, url: await resolveField(props.url, assets, signal) }
-      : block.props;
-
-  return { ...block, props: mapped, children };
-}
-
-async function resolvePayload(
-  result: WhiteboardPayloadResult,
-  assets: Assets,
-  signal?: AbortSignal,
-): Promise<WhiteboardPayloadResult> {
-  if (result.kind !== 'loaded' || result.payload.body.kind === 'ink') {
-    return result;
-  }
-
-  const { payload } = result;
-  const { kind, value } = result.payload.body;
-  let next: Fields;
-  try {
-    switch (kind) {
-      case 'image':
-        next = { ...value, src: await resolveField(value.src, assets, signal) };
-        break;
-      case 'video': {
-        const [src, poster] = await Promise.all([
-          resolveField(value.src, assets, signal),
-          resolveField(value.poster, assets, signal),
-        ]);
-        next = { ...value, src, poster };
-        break;
-      }
-      case 'document': {
-        const content = fields(value.document);
-        if (!content || !Array.isArray(content.blocks)) {
-          return result;
-        }
-
-        const blocks = await Promise.all(
-          content.blocks.map((block: unknown) => resolveBlock(block, assets, signal)),
-        );
-        next = { ...value, document: { ...content, blocks } };
-        break;
-      }
-      case 'embed':
-      case 'extension':
-      case 'link':
-      case 'sticker':
-      case 'table':
-      case 'text':
-      case 'todo':
-        return result;
-    }
-  } catch (error) {
-    signal?.throwIfAborted();
-    if (!(error instanceof Error)) {
-      throw error;
-    }
-
-    return { kind: 'unavailable', id: payload.id, reason: 'assetUnavailable' };
-  }
-
-  return { kind: 'loaded', payload: { ...payload, body: { kind, value: next } } };
-}
-
-function restoreBlock(block: WhiteboardDocumentBlock, assets: Assets): WhiteboardDocumentBlock {
-  const { type, props, children } = block;
-  const next =
-    type === 'image' && typeof props.url === 'string'
-      ? { ...props, url: assets.restore(props.url) }
-      : props;
-
-  return { ...block, props: next, children: children?.map((child) => restoreBlock(child, assets)) };
-}
-
-function restoreContent(
-  command: EditObjectContentCommand,
-  assets: Assets,
-): EditObjectContentCommand {
-  const { edit } = command;
-  if (edit.kind !== 'document') {
-    return command;
-  }
-
-  const { value } = edit;
-  const { document } = value;
-  return {
-    ...command,
-    edit: {
-      kind: 'document',
-      value: {
-        ...value,
-        document: {
-          ...document,
-          blocks: document.blocks.map((block) => restoreBlock(block, assets)),
-        },
-      },
-    },
-  };
-}
 
 function services(bridge: Bridge) {
   const { assets, postProtobuf } = bridge;
@@ -175,7 +43,7 @@ function services(bridge: Bridge) {
   const history = createBoardHistoryService(postProtobuf, undefined, renderBrowserVectorExport);
 
   function resolvePayloads(payloads: readonly WhiteboardPayloadResult[], signal?: AbortSignal) {
-    return Promise.all(payloads.map((item) => resolvePayload(item, assets, signal)));
+    return Promise.all(payloads.map((item) => resolveMcpPayload(item, assets, signal)));
   }
 
   async function resolveReceipt(
@@ -218,7 +86,7 @@ function services(bridge: Bridge) {
     },
     async editContent(command, signal) {
       return resolveReceipt(
-        await edits.editContent(restoreContent(command, assets), signal),
+        await edits.editContent(restoreMcpContent(command, assets), signal),
         signal,
       );
     },

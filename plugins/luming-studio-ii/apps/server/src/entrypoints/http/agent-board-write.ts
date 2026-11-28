@@ -14,7 +14,6 @@ import { toBoardEditReceipt } from './board-edit-receipt.js';
 import { readContentOperation } from './content-edits.js';
 import { readGeometryOperation } from './geometry-edits.js';
 import { HttpRequestError } from './request.js';
-import type { ObserveEdit } from './room-changes.js';
 import { unaryRoute, type HttpActor } from './unary-route.js';
 
 const { applyAgentBoardEdit, getAgentBoardEditReceipt } = BoardAgentWriteService.method;
@@ -101,7 +100,6 @@ function modelReceipt(receipt: BoardEditReceipt): {
 export function createAgentBoardWriteRoutes(
   application: BoardAgentWriteApplication,
   digest: (bytes: Uint8Array) => string,
-  observe?: ObserveEdit,
 ) {
   function command(actor: HttpActor, request: ApplyAgentBoardEditRequest) {
     if (actor.kind !== 'agent' || actor.guestScope) {
@@ -137,7 +135,7 @@ export function createAgentBoardWriteRoutes(
         ...command(actor, request),
         operations: request.operations.map(readOperation),
       });
-      observe?.(receipt);
+
       return response(receipt);
     }),
     unaryRoute(getAgentBoardEditReceipt, (actor, { original }) => {

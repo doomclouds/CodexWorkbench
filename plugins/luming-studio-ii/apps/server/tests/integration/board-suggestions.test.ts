@@ -46,7 +46,7 @@ const {
   chooseAgentBoardSuggestion,
   rejectBoardSuggestion,
 } = BoardSuggestionService.method;
-const { changeAgentActivity } = BoardRoomService.method;
+const { changeAgentActivity, getBoardRoom, waitBoardRoomEvents } = BoardRoomService.method;
 const suggestionAgentId = 'agent-suggestion-review';
 const geometry = { x: 12, y: 32, width: 100, height: 80, rotation: 0 };
 
@@ -293,10 +293,34 @@ test('keeps the proposal private and the preview read-only, then commits and rep
   assert.equal(preview.result.value.changedObjects[0]?.geometry?.width, 210);
   assert.equal((await currentBoard(boardId)).objects[0]?.geometry?.width, geometry.width);
 
+  const { event: initial } = await callWhiteboard(server.address, owner, getBoardRoom, { boardId });
+  assert.ok(initial);
   const accepted = await callWhiteboard(server.address, owner, acceptBoardSuggestion, choice);
   assert.equal(accepted.receipt?.outcome.case, 'applied');
   assert.equal(accepted.receipt.outcome.value.boardRevision, 2n);
   assert.equal((await currentBoard(boardId)).objects[0]?.geometry?.width, 210);
+
+  const repeated = await callWhiteboard(server.address, owner, acceptBoardSuggestion, choice);
+  assert.deepEqual(repeated, accepted);
+  const { events } = await callWhiteboard(
+    server.address,
+    owner,
+    waitBoardRoomEvents,
+    {
+      boardId,
+      viewId: 'suggestion-review-observer',
+      after: { roomInstanceId: initial.roomInstanceId, sequence: initial.sequence },
+    },
+    AbortSignal.timeout(2000),
+  );
+  assert.deepEqual(
+    events.map(({ payload }) => payload.case),
+    ['suggestionsChanged', 'contentChanged'],
+  );
+  const content = events[1]?.payload;
+  assert.equal(content?.case, 'contentChanged');
+  assert.equal(content.value.boardRevision, 2n);
+  assert.equal(content.value.changedObjects[0]?.geometry?.width, 210);
 
   await server.restart();
   const replayed = await callWhiteboard(server.address, owner, acceptBoardSuggestion, choice);

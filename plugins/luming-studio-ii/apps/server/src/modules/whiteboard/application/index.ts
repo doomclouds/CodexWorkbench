@@ -10,6 +10,7 @@ import type {
   PayloadResult,
 } from '../domain/index.js';
 import type { WhiteboardRepository } from '../ports/index.js';
+import { publishBoardContentChange, type BoardChangePublication } from './board-content-changes.js';
 import {
   payloadResult,
   requireAccess,
@@ -30,6 +31,7 @@ export {
 } from './agent-board-write.js';
 
 export { BoardSuggestionError, createBoardSuggestionApplication } from './board-suggestions.js';
+export type { BoardContentChange } from './board-content-changes.js';
 export type { BoardSuggestionApplication } from './board-suggestions.js';
 export type {
   BoardReviewActor,
@@ -110,7 +112,8 @@ export interface WhiteboardApplication {
   exportBoardFile(actor: Actor, command: ExportBoardFileCommand): Promise<ExportBoardResult>;
 }
 
-interface WhiteboardFileResources {
+interface WhiteboardApplicationOptions {
+  readonly boardChanges?: BoardChangePublication;
   readonly renderPng?: SvgPngRenderer;
   readonly exportArchive?: (
     actor: Actor,
@@ -121,7 +124,7 @@ interface WhiteboardFileResources {
 export function createWhiteboardApplication(
   repository: WhiteboardRepository,
   now?: () => number,
-  files: WhiteboardFileResources = {},
+  { boardChanges, renderPng, exportArchive }: WhiteboardApplicationOptions = {},
 ): WhiteboardApplication {
   function exportBoard(actor: Actor, command: ExportRenderCommand) {
     return executeBoardExport(repository, actor, command, requireAccess, (reader) => {
@@ -165,7 +168,9 @@ export function createWhiteboardApplication(
       });
     },
     moveObjects(actor, command) {
-      return repository.write((writer) => executeMove(writer, actor, command, now));
+      const receipt = repository.write((writer) => executeMove(writer, actor, command, now));
+
+      return publishBoardContentChange(receipt, boardChanges);
     },
     getCommandReceipt(actor, boardId, commandId) {
       return repository.read((reader) => {
@@ -178,13 +183,13 @@ export function createWhiteboardApplication(
     async exportBoardFile(actor, command) {
       const { format } = command;
       if (format === 'zip') {
-        return files.exportArchive?.(actor, command) ?? { kind: 'rejected', reason: 'unsupported' };
+        return exportArchive?.(actor, command) ?? { kind: 'rejected', reason: 'unsupported' };
       }
 
       if (format === 'png') {
         const source = exportBoard(actor, { ...command, format });
 
-        return renderExportPng(source, files.renderPng, () => {
+        return renderExportPng(source, renderPng, () => {
           repository.read((reader) => requireAccess(reader, actor, command.boardId));
         });
       }

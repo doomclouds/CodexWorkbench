@@ -6,7 +6,8 @@ export const serverRoot = fileURLToPath(new URL('../', import.meta.url));
 
 const sourceExtension = /\.(?:[cm]?[jt]s)$/u;
 const emittedExtensions = new Map([
-  ['.js', ['.ts', '.js']],
+  ['.js', ['.ts', '.tsx', '.js', '.jsx']],
+  ['.jsx', ['.tsx', '.jsx']],
   ['.mjs', ['.mts', '.mjs']],
   ['.cjs', ['.cts', '.cjs']],
 ]);
@@ -31,10 +32,16 @@ function candidateFiles(path) {
     return [path];
   }
 
-  return [path, path + '.ts', path + '.js', resolve(path, 'index.ts'), resolve(path, 'index.js')];
+  const extensions = ['.ts', '.tsx', '.js', '.jsx'];
+
+  return [
+    path,
+    ...extensions.map((suffix) => path + suffix),
+    ...extensions.map((suffix) => resolve(path, 'index' + suffix)),
+  ];
 }
 
-function resolveFile(path) {
+export function resolveFile(path) {
   const found = candidateFiles(path).find((candidate) =>
     statSync(candidate, { throwIfNoEntry: false })?.isFile(),
   );

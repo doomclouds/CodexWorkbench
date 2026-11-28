@@ -13,7 +13,7 @@ import type {
   MoveRejectionReason as DomainMoveRejectionReason,
 } from '../../modules/whiteboard/application/index.js';
 import { HttpRequestError, requireId } from './request.js';
-import { toObjectMetadata } from './scene.js';
+import { toObjectMetadata } from '../../infrastructure/adapters/scene-codec/index.js';
 
 const REJECTION_REASONS: Record<DomainMoveRejectionReason, MoveRejectionReason> = {
   forbidden: MoveRejectionReason.FORBIDDEN,

@@ -167,9 +167,9 @@ function allowedLibrary(file, family, specifier) {
     reactLibraries.has(specifier) ||
     (family === 'document' && documentLibraries.has(specifier)) ||
     (stem(file) === resolve(objectsRoot, 'text/rich-text') &&
-      specifier === '@codexworkbench/luming-studio-ii-contracts/whiteboard/rich-text') ||
+      specifier === '@codexworkbench/luming-studio-ii-whiteboard-shared/rich-text') ||
     (stem(file) === resolve(objectsRoot, 'sticker/sticker-catalog') &&
-      specifier === '@codexworkbench/luming-studio-ii-contracts/whiteboard/stickers')
+      specifier === '@codexworkbench/luming-studio-ii-whiteboard-shared/stickers')
   );
 }
 

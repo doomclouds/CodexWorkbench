@@ -8,16 +8,12 @@ import { createExportRoute } from './export-route.js';
 import { toPayloadResult } from './payload.js';
 import { toCommandReceipt, toMoveCommand } from './receipt.js';
 import { requireId } from './request.js';
-import type { ObserveMove } from './room-changes.js';
 import { toBoardScene } from './scene.js';
 import { canReadTrashedBoard, unaryRoute, type RouteEntry } from './unary-route.js';
 
 type ReceiptResponseInit = MessageInitShape<typeof GetCommandReceiptResponseSchema>;
 
-export function createWhiteboardRoutes(
-  application: WhiteboardApplication,
-  observe?: ObserveMove,
-): readonly RouteEntry[] {
+export function createWhiteboardRoutes(application: WhiteboardApplication): readonly RouteEntry[] {
   const { getBoardScene, getObjectPayloads, moveObjects, getCommandReceipt } =
     WhiteboardService.method;
 
@@ -41,8 +37,6 @@ export function createWhiteboardRoutes(
     }),
     unaryRoute(moveObjects, (actor, request) => {
       const receipt = application.moveObjects(actor, toMoveCommand(request));
-      observe?.(receipt);
-
       return { receipt: toCommandReceipt(receipt) };
     }),
     unaryRoute(getCommandReceipt, (actor, request): ReceiptResponseInit => {

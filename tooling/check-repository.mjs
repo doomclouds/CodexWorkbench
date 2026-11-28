@@ -124,7 +124,7 @@ async function checkTextFile(root, file, errors) {
 export async function checkRepository(root) {
   const listing = spawnSync(
     'git',
-    ['ls-files', '-z', '--cached', '--others', '--exclude-standard'],
+    ['ls-files', '-z', '-t', '--cached', '--deleted', '--others', '--exclude-standard'],
     {
       cwd: root,
       encoding: 'utf8',
@@ -135,11 +135,15 @@ export async function checkRepository(root) {
     throw new Error(listing.error?.message ?? listing.stderr.trim());
   }
 
-  const files = [...new Set(listing.stdout.split('\0').filter(Boolean))];
+  const records = listing.stdout.split('\0').filter(Boolean);
+  const deleted = new Set(
+    records.filter((record) => record.startsWith('R ')).map((record) => record.slice(2)),
+  );
+  const files = new Set(records.map((record) => record.slice(2)));
   const errors = [];
   let checked = 0;
   for (const file of files) {
-    if (!isCheckedTextFile(file)) {
+    if (deleted.has(file) || !isCheckedTextFile(file)) {
       continue;
     }
 

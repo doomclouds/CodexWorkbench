@@ -1,4 +1,4 @@
-import { stickerSvgContent } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/stickers';
+import { stickerSvgContent } from '@codexworkbench/luming-studio-ii-whiteboard-shared/stickers';
 
 export function renderThumbnailSticker(id: unknown, frame: string): string | undefined {
   const markup = typeof id === 'string' ? stickerSvgContent(id) : undefined;

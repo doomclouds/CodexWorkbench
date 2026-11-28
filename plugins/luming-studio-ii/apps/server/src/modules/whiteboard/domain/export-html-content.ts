@@ -1,7 +1,7 @@
 import {
   parseRichText,
   type RichTextSegment,
-} from '@codexworkbench/luming-studio-ii-contracts/whiteboard/rich-text';
+} from '@codexworkbench/luming-studio-ii-whiteboard-shared/rich-text';
 import { escapeXml } from './export-svg-content.js';
 import { svgColor } from './export-svg-shapes.js';
 import type { BoardExportAsset } from './export-types.js';

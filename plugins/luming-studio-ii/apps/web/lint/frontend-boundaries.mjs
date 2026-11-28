@@ -1,4 +1,8 @@
 import { basename, dirname, relative, resolve, sep } from 'node:path';
+import {
+  importsRuntimeBinding,
+  isErasedModuleReference,
+} from '../../../../../tooling/studio-lint/module-reference.mjs';
 import manifest from '../package.json' with { type: 'json' };
 import { allowsConnectorRoute, connectorRoute } from './connector-route-boundary.mjs';
 import { isObjectEntry, objectTargets } from './objects-boundaries.mjs';
@@ -11,7 +15,9 @@ const scriptExtension = /\.(?:[cm]?[jt]s|[jt]sx)$/u;
 const moduleRoots = new Set(['pages', 'surfaces', 'data', 'platform']);
 const applicationLayer = 'app';
 const shellRoot = resolve(sourceRoot, 'app/shell');
+const browserPlatform = resolve(sourceRoot, 'platform/browser');
 const mcpPlatform = resolve(sourceRoot, 'platform/mcp');
+const navigationContract = resolve(sourceRoot, 'platform/navigation');
 const mcpSdkLibraries = new Set(['@modelcontextprotocol/ext-apps', '@openai/mcp-extensions/app']);
 const uiDirectories = new Map([
   ['ui/base', 'base'],
@@ -24,7 +30,7 @@ const dependencies = new Map([
   ['pages', ['surfaces', 'data', 'base']],
   ['surfaces', ['data', 'base', 'canvas', 'objects']],
   ['data', []],
-  ['platform', ['platform']],
+  ['platform', []],
 ]);
 const reactLibraries = new Set(['react', 'react/jsx-runtime']);
 const appLibraries = new Set([...reactLibraries, 'react-dom', 'react-dom/client']);
@@ -64,6 +70,7 @@ const suggestionsData = resolve(sourceRoot, 'data/suggestions');
 const whiteboardPage = resolve(sourceRoot, 'pages/whiteboard');
 const guestShell = resolve(shellRoot, 'AppShell.tsx');
 const workbenchSurface = resolve(sourceRoot, 'surfaces/workbench');
+const recycleBinSurface = resolve(sourceRoot, 'surfaces/recycle-bin');
 const editorSurface = resolve(sourceRoot, 'surfaces/whiteboard-editor');
 const viewingSurface = resolve(sourceRoot, 'surfaces/whiteboard-viewing');
 const exportSurface = resolve(sourceRoot, 'surfaces/whiteboard-export');
@@ -91,7 +98,7 @@ const iconSurfaces = new Set([
   ...extraWhiteboardSurfaces,
   editorSurface,
   guestJoinSurface,
-  resolve(sourceRoot, 'surfaces/recycle-bin'),
+  recycleBinSurface,
 ]);
 const surfaceDataValues = new Map([
   [resolve(editorSurface, 'WhiteboardEditorSurface.tsx'), 'createWhiteboardSession'],
@@ -100,10 +107,8 @@ const surfaceDataValues = new Map([
   [resolve(workbenchSurface, 'WorkbenchSurface.tsx'), 'createCatalogDirectory'],
 ]);
 const whiteboardDecoderImports = new Map([
-  [
-    resolve(roomsData, 'room-message.ts'),
-    { types: new Set(['WhiteboardObject']), values: new Set(['readObjects']) },
-  ],
+  [resolve(roomsData, 'room-message.ts'), { values: new Set(['readObjects']) }],
+  [resolve(roomsData, 'contracts.ts'), { types: new Set(['WhiteboardObject']) }],
   [
     resolve(suggestionsData, 'client.ts'),
     {
@@ -115,8 +120,8 @@ const whiteboardDecoderImports = new Map([
 ]);
 const injectedSurfacePorts = new Map([
   [workbenchSurface, catalogData],
+  [recycleBinSurface, catalogData],
   [editorSurface, whiteboardData],
-  [viewingSurface, undefined],
   [exportSurface, whiteboardData],
   [historySurface, whiteboardData],
   [feedbackSurface, feedbackData],
@@ -202,20 +207,9 @@ function publicEntry(file, owner) {
     : stem(file) === resolve(owner.root, 'index');
 }
 
-function isTypeOnly(node) {
-  if (node.type === 'TSImportType' || node.importKind === 'type' || node.exportKind === 'type') {
-    return true;
-  }
-
-  return Boolean(
-    node.specifiers?.length &&
-    node.specifiers.every((member) => member.importKind === 'type' || member.exportKind === 'type'),
-  );
-}
-
 function isSurfaceDataValueImport(file, node) {
   const value = surfaceDataValues.get(file);
-  if (!value || node.type !== 'ImportDeclaration' || !node.specifiers.length) {
+  if (!value || !importsRuntimeBinding(node)) {
     return false;
   }
 
@@ -239,6 +233,9 @@ function isNamedImportAllowed(node, imports) {
   if (node.type !== 'ImportDeclaration' || node.specifiers.length === 0) {
     return false;
   }
+  if (!isErasedModuleReference(node) && !importsRuntimeBinding(node)) {
+    return false;
+  }
 
   return node.specifiers.every((member) => {
     if (member.type !== 'ImportSpecifier') {
@@ -250,6 +247,15 @@ function isNamedImportAllowed(node, imports) {
 
     return allowed?.has(member.imported.name);
   });
+}
+
+function allowedNavigationImport(owner, target, targetOwner, typeOnly) {
+  const consumer =
+    owner.layer === applicationLayer ||
+    owner.root === browserPlatform ||
+    owner.root === mcpPlatform;
+
+  return consumer && typeOnly && publicEntry(target, targetOwner);
 }
 
 function allowedLocal(owner, target, targetOwner, file, node) {
@@ -265,7 +271,11 @@ function allowedLocal(owner, target, targetOwner, file, node) {
     return publicEntry(target, targetOwner) && isNamedImportAllowed(node, decoderImports);
   }
 
-  const typeOnly = isTypeOnly(node);
+  const typeOnly = isErasedModuleReference(node);
+  if (targetOwner.root === navigationContract) {
+    return allowedNavigationImport(owner, target, targetOwner, typeOnly);
+  }
+
   const guestImport = guestShellImport(file, target, targetOwner, typeOnly);
   if (guestImport !== undefined) {
     return guestImport;
@@ -280,7 +290,7 @@ function allowedLocal(owner, target, targetOwner, file, node) {
     return typeOnly && publicEntry(target, targetOwner);
   }
 
-  if (targetOwner.layer === 'data' && injectedSurfacePorts.has(owner.root)) {
+  if (owner.layer === 'surfaces' && targetOwner.layer === 'data') {
     const publicPort =
       targetOwner.root === injectedSurfacePorts.get(owner.root) && publicEntry(target, targetOwner);
 
@@ -338,7 +348,7 @@ function allowedLibrary(owner, specifier, node, file) {
   }
 }
 
-function referenceTargets(file, specifier) {
+export function referenceTargets(file, specifier) {
   const aliases = aliasTargets(specifier);
   if (aliases.length > 0) {
     return aliases;
@@ -354,9 +364,10 @@ function referenceTargets(file, specifier) {
   return objectTargets(file, specifier);
 }
 
-const stickerArtwork = contractPackage + '/whiteboard/stickers';
+const sharedPackage = '@codexworkbench/luming-studio-ii-whiteboard-shared';
+const stickerArtwork = sharedPackage + '/stickers';
 const stickerCatalog = resolve(sourceRoot, 'ui/domain/objects/sticker/sticker-catalog.ts');
-const richTextFormat = contractPackage + '/whiteboard/rich-text';
+const richTextFormat = sharedPackage + '/rich-text';
 const richTextBridge = resolve(sourceRoot, 'ui/domain/objects/text/rich-text.ts');
 
 const contractBoundary = {
@@ -432,7 +443,7 @@ const contractBoundary = {
         return 'dependency';
       }
 
-      const privateExport = !isTypeOnly(node) || mcpSdkLibraries.has(specifier);
+      const privateExport = !isErasedModuleReference(node) || mcpSdkLibraries.has(specifier);
       if (governed && reexport && privateExport) {
         return 'reexport';
       }
@@ -442,7 +453,7 @@ const contractBoundary = {
     }
 
     function localProblem(node, targets, reexport) {
-      const publishesRuntime = reexport && !isTypeOnly(node);
+      const publishesRuntime = reexport && !isErasedModuleReference(node);
 
       for (const target of targets) {
         const problem = boundaryProblem(node, target);
@@ -539,8 +550,8 @@ const contractBoundary = {
           checkReference(node, node.source, true);
           return;
         }
-        const typeOnly = isTypeOnly(node);
         for (const member of node.specifiers) {
+          const typeOnly = node.exportKind === 'type' || member.exportKind === 'type';
           checkExportedBinding(member, member.local, typeOnly);
         }
       },

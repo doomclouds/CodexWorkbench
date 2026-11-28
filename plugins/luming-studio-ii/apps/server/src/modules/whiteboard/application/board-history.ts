@@ -19,6 +19,7 @@ import type {
   WhiteboardReader,
   WhiteboardRepository,
 } from '../ports/index.js';
+import type { BoardChangePublication } from './board-content-changes.js';
 import { payloadResult, requireAccess, WhiteboardAccessError } from './board-read.js';
 import { planBoardRestore } from './board-restore.js';
 import { executeBoardExport } from './export-board.js';
@@ -178,6 +179,7 @@ export function createBoardHistoryApplication(
   repository: BoardEditRepository,
   now: () => number,
   renderPng?: SvgPngRenderer,
+  boardChanges?: BoardChangePublication,
 ): BoardHistoryApplication {
   return {
     listVersions(actor, boardId, before, limit = defaultPageSize) {
@@ -225,8 +227,13 @@ export function createBoardHistoryApplication(
         sourceRevision: revision,
       } as const;
 
-      return runBoardEdit(repository, actor, { boardId, commandId }, commit, (writer, board) =>
-        restorePlan(writer, board, command),
+      return runBoardEdit(
+        repository,
+        actor,
+        { boardId, commandId },
+        commit,
+        (writer, board) => restorePlan(writer, board, command),
+        boardChanges,
       );
     },
     exportVersion(actor, command) {

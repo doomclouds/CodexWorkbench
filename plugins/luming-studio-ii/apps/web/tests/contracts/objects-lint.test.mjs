@@ -12,8 +12,8 @@ const consumer = 'src/surfaces/board/editor.ts';
 const testDocument = 'tests/component/objects/DocumentObject.test.tsx';
 const documentSpecifier = '@codexworkbench/luming-studio-ii-web/ui/domain/objects/document';
 const editsProtocol = '@codexworkbench/luming-studio-ii-contracts/whiteboard/edits';
-const stickerArtwork = '@codexworkbench/luming-studio-ii-contracts/whiteboard/stickers';
-const richTextFormat = '@codexworkbench/luming-studio-ii-contracts/whiteboard/rich-text';
+const stickerArtwork = '@codexworkbench/luming-studio-ii-whiteboard-shared/stickers';
+const richTextFormat = '@codexworkbench/luming-studio-ii-whiteboard-shared/rich-text';
 const editingFamilies = ['table', 'embed', 'sticker', 'media'];
 
 const rejected = [

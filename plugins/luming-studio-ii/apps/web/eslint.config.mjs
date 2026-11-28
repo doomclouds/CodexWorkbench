@@ -25,6 +25,10 @@ const browserEvents = {
   message: 'Open browser event streams in platform/browser.',
 };
 const mcpHost = { name: 'openai', message: 'Use the host interface in platform/mcp.' };
+const browserResponse = {
+  name: 'Response',
+  message: 'Wrap selected files and read response bodies in the platform layer.',
+};
 const indirectImports = [
   { selector: 'TSImportEqualsDeclaration', message: 'Use an ES module import.' },
   {
@@ -57,27 +61,38 @@ const applicationGlobals = [
     message: 'Inject this host capability from the platform layer.',
   })),
 ];
+
+function fileReadSyntax(methods, message) {
+  return [
+    {
+      selector: `MemberExpression:matches([property.name=${methods}], [property.value=${methods}])`,
+      message,
+    },
+    {
+      selector: `ObjectPattern > Property:matches([key.name=${methods}], [key.value=${methods}])`,
+      message,
+    },
+  ];
+}
+
 const archiveReadMethods = '/^(arrayBuffer|bytes|stream|text)$/';
-const archiveReads = [
+const archiveReads = fileReadSyntax(
+  archiveReadMethods,
+  'Pass the archive body to the platform upload capability.',
+);
+const fileReadMessage = 'Read selected files through an injected platform capability.';
+const streamReadMethods = '/^(bytes|stream|text)$/';
+const surfaceFileReads = [
+  ...fileReadSyntax('/^arrayBuffer$/', fileReadMessage),
   {
-    selector: `MemberExpression:matches([property.name=${archiveReadMethods}], [property.value=${archiveReadMethods}])`,
-    message: 'Pass the archive body to the platform upload capability.',
-  },
-  {
-    selector: `ObjectPattern > Property:matches([key.name=${archiveReadMethods}], [key.value=${archiveReadMethods}])`,
-    message: 'Pass the archive body to the platform upload capability.',
-  },
-];
-const mediaFileReads = [
-  {
-    selector: `CallExpression[callee.type="MemberExpression"]:matches([callee.property.name=${archiveReadMethods}], [callee.property.value=${archiveReadMethods}])`,
-    message: 'Read selected media through an injected platform capability.',
-  },
-  {
-    selector: `ObjectPattern > Property:matches([key.name=${archiveReadMethods}], [key.value=${archiveReadMethods}])`,
-    message: 'Read selected media through an injected platform capability.',
+    selector: `CallExpression[callee.type="MemberExpression"]:matches([callee.property.name=${streamReadMethods}], [callee.property.value=${streamReadMethods}])`,
+    message: fileReadMessage,
   },
 ];
+const mediaFileAliases = {
+  selector: `ObjectPattern > Property:matches([key.name=${streamReadMethods}], [key.value=${streamReadMethods}])`,
+  message: fileReadMessage,
+};
 const moduleMockNames = '/^(mock|doMock|importMock|spyOn|stubGlobal)$/';
 const applicationMockSyntax = [
   {
@@ -220,6 +235,21 @@ export default defineConfig([
     },
   },
   {
+    files: ['src/surfaces/' + scripts],
+    rules: {
+      'no-restricted-globals': [
+        'error',
+        { globals: ['require', ...applicationGlobals, browserResponse], checkGlobalObject: true },
+      ],
+      'no-restricted-syntax': [
+        'error',
+        ...errorHandlingSyntax,
+        ...indirectImports,
+        ...surfaceFileReads,
+      ],
+    },
+  },
+  {
     files: [
       'src/app/workflows/archive-import/' + scripts,
       'src/surfaces/workbench/' + scripts,
@@ -241,7 +271,8 @@ export default defineConfig([
         'error',
         ...errorHandlingSyntax,
         ...indirectImports,
-        ...mediaFileReads,
+        ...surfaceFileReads,
+        mediaFileAliases,
       ],
     },
   },

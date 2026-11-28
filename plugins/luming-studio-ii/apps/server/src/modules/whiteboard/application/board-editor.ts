@@ -10,6 +10,7 @@ import type {
 import { archiveImageSource } from '../domain/index.js';
 import type { BoardEditRepository } from '../ports/index.js';
 import { planImageEdit, planVideoEdit } from './attach-image.js';
+import { publishBoardContentChange, type BoardChangePublication } from './board-content-changes.js';
 import { pasteBoardObjects } from './clipboard-paste.js';
 import {
   planDocumentImageUpload,
@@ -44,6 +45,7 @@ export function createBoardEditorApplication(
   repository: BoardEditRepository,
   now: () => number,
   validateUploadedSvg?: ValidateUploadedSvg,
+  boardChanges?: BoardChangePublication,
 ): BoardEditorApplication {
   const editImage = createImageEdit(repository, now, validateUploadedSvg);
 
@@ -58,6 +60,7 @@ export function createBoardEditorApplication(
           operation.kind === 'paste'
             ? pasteBoardObjects(writer, board, actor, operation, signature)
             : planGeometryEdit(writer, board, operation),
+        boardChanges,
       );
     },
     editContent(actor, { operation, signature, boardId, commandId }) {
@@ -67,9 +70,14 @@ export function createBoardEditorApplication(
         { boardId, commandId },
         { kind: 'content', signature, savedAtMillis: now() },
         (writer, board) => planContentEdit(writer, board, operation),
+        boardChanges,
       );
     },
-    attachImage: (actor, command) => editImage(actor, command, planImageEdit),
+    async attachImage(actor, command) {
+      const receipt = await editImage(actor, command, planImageEdit);
+
+      return publishBoardContentChange(receipt, boardChanges);
+    },
     attachVideo(actor, { operation, signature, boardId, commandId }) {
       return runBoardEdit(
         repository,
@@ -77,6 +85,7 @@ export function createBoardEditorApplication(
         { boardId, commandId },
         { kind: 'content', signature, savedAtMillis: now() },
         (writer, board) => planVideoEdit(writer, board, operation),
+        boardChanges,
       );
     },
     async uploadDocumentImage(actor, command) {
@@ -97,6 +106,7 @@ export function createBoardEditorApplication(
         { boardId, commandId },
         { kind: 'geometry', signature, savedAtMillis: now() },
         (writer, board) => planBoardReverse(writer, board, actor, operation),
+        boardChanges,
       );
     },
     getEditReceipt: (actor, identity) => readBoardEditReceipt(repository, actor, identity),

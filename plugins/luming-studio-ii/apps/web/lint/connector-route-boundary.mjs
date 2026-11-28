@@ -1,8 +1,7 @@
 import { resolve } from 'node:path';
 import { sourceRoot } from './project-paths.mjs';
 
-export const connectorRoute =
-  '@codexworkbench/luming-studio-ii-contracts/whiteboard/connector-route';
+export const connectorRoute = '@codexworkbench/luming-studio-ii-whiteboard-shared/connector-route';
 const connectorFiles = new Set([
   resolve(sourceRoot, 'ui/domain/canvas/connectors/geometry.ts'),
   resolve(sourceRoot, 'ui/domain/canvas/connectors/path.ts'),

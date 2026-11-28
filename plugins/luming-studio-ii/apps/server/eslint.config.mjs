@@ -111,6 +111,8 @@ export default defineConfig([
       'src/modules/rooms/domain/' + scripts,
       'src/modules/rooms/ports/' + scripts,
       'src/application/workflows/' + scripts,
+      'src/infrastructure/adapters/payload-codec/' + scripts,
+      'src/infrastructure/adapters/scene-codec/' + scripts,
     ],
     rules: {
       'no-restricted-globals': [
@@ -128,7 +130,7 @@ export default defineConfig([
     },
   },
   {
-    files: ['src/entrypoints/mcp/' + scripts],
+    files: ['src/entrypoints/mcp/' + scripts, 'src/entrypoints/http/' + scripts],
     rules: {
       'no-restricted-globals': [
         'error',

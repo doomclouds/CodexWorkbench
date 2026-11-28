@@ -9,7 +9,6 @@ import {
   type BoardTimerReceipt as WireTimerReceipt,
 } from '@codexworkbench/luming-studio-ii-contracts/rooms/service';
 import { readObjects } from '../whiteboard/index.js';
-import type { WhiteboardObject } from '../whiteboard/index.js';
 import { readAgentWorkspaces, readOnlineAgentIds } from './agent-workspaces.js';
 import type {
   BoardRoomEvent,
@@ -21,14 +20,6 @@ import type {
   BoardRoomViewport,
 } from './contracts.js';
 import { readRoomGesture } from './room-gesture.js';
-
-export interface BoardRoomContentChange {
-  readonly revision: bigint;
-  readonly changedObjectIds: readonly string[];
-  readonly removedObjectIds: readonly string[];
-  readonly changedObjects?: readonly WhiteboardObject[];
-  readonly refreshScene: boolean;
-}
 
 const timerPhases = new Map<BoardRoomTimerPhase, BoardRoomTimer['phase']>([
   [BoardRoomTimerPhase.IDLE, 'idle'],

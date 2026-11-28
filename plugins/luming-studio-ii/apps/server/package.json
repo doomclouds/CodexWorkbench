@@ -9,7 +9,7 @@
     "lint": "eslint --max-warnings 0 src tests lint eslint.config.mjs vitest.config.mts && oxlint --deny-warnings src tests vitest.config.mts && oxfmt --check src tests lint eslint.config.mjs vitest.config.mts",
     "typecheck": "tsc --noEmit",
     "test:lint": "node --test tests/contracts/server-lint.test.mjs",
-    "check": "pnpm --filter @codexworkbench/luming-studio-ii-contracts generate && pnpm lint && pnpm typecheck && pnpm test:lint",
+    "check": "pnpm --filter @codexworkbench/luming-studio-ii-whiteboard-shared check && pnpm --filter @codexworkbench/luming-studio-ii-contracts generate && pnpm lint && node ../../../../tooling/check-luming-studio-ii-dependencies.mjs && pnpm typecheck && pnpm test:lint",
     "test": "pnpm --filter @codexworkbench/luming-studio-ii-contracts generate && pnpm test:lint && vitest run",
     "build": "pnpm check && vitest run && tsc -p tsconfig.build.json",
     "start": "node dist/bootstrap/main.js"
@@ -17,6 +17,7 @@
   "dependencies": {
     "@bufbuild/protobuf": "2.17.0",
     "@codexworkbench/luming-studio-ii-contracts": "workspace:*",
+    "@codexworkbench/luming-studio-ii-whiteboard-shared": "workspace:*",
     "@connectrpc/connect": "2.3.0",
     "@connectrpc/connect-node": "2.3.0",
     "@modelcontextprotocol/sdk": "1.32.2",

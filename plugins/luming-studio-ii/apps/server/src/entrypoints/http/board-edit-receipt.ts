@@ -9,7 +9,7 @@ import type {
   PayloadRecord,
 } from '../../modules/whiteboard/application/index.js';
 import { toPayloadResult } from './payload.js';
-import { toObjectMetadata } from './scene.js';
+import { toObjectMetadata } from '../../infrastructure/adapters/scene-codec/index.js';
 
 const rejection: Readonly<Record<BoardEditRejection, BoardEditRejectionReason>> = {
   forbidden: BoardEditRejectionReason.FORBIDDEN,

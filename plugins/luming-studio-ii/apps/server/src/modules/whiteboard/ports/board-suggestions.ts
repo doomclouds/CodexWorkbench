@@ -4,7 +4,7 @@ import type {
   BoardSuggestionCommandReceipt,
   StoredBoardSuggestion,
 } from '../domain/index.js';
-import type { BoardEditReader, BoardEditWriter } from './index.js';
+import type { BoardEditReader, BoardEditWriter } from './board-repository.js';
 
 export type BoardEditPlanningReader = Pick<
   BoardEditWriter,

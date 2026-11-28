@@ -1,24 +1,17 @@
 import { fromBinary } from '@bufbuild/protobuf';
 import { WhiteboardService } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/service';
 import { BridgeError, invalidArgument, tooLarge } from './errors.js';
+import type { DispatchLocalRequest, LocalRequest } from './local-request.js';
 import { appOperation, archiveMediaType } from './operations.js';
 import { createPanelViewBridge } from './panel-view.js';
 import type { BridgeInput } from './schema.js';
 import { createTransfers, decodeChunk, type TransferFile } from './transfers.js';
 
-export interface LocalRequest {
-  readonly route: string;
-  readonly method: 'GET' | 'POST';
-  readonly mediaType?: string;
-  readonly commandId?: string;
-  readonly body?: Uint8Array | Blob;
-}
-
 export interface AppBridgeOptions {
   readonly now: () => number;
   readonly allocateId: () => string;
   readonly createFile: () => Promise<TransferFile>;
-  readonly dispatch: (request: LocalRequest, signal: AbortSignal) => Promise<Response>;
+  readonly dispatch: DispatchLocalRequest;
 }
 
 interface Session {

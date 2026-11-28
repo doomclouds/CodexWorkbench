@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import test from 'node:test';
@@ -44,6 +44,16 @@ test('reports missing and escaping local links', async (t) => {
   assert.equal(errors.length, 2);
   assert.ok(errors.some((error) => error.includes('broken local link')));
   assert.ok(errors.some((error) => error.includes('leaves the repository')));
+});
+
+test('checks the working tree after a tracked file moves before staging', async (t) => {
+  const root = await fixture(t, { 'old name.md': 'missing newline' });
+  assert.equal(spawnSync('git', ['add', 'old name.md'], { cwd: root }).status, 0);
+  await rename(join(root, 'old name.md'), join(root, 'new name.md'));
+  assert.deepEqual(await checkRepository(root), {
+    checked: 1,
+    errors: ['new name.md: add a final newline'],
+  });
 });
 
 test('preserves original license archives while checking their generated index', async (t) => {

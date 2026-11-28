@@ -17,7 +17,7 @@ import {
   modelCommandId,
   modelVersion,
 } from './artifact-tool-input.js';
-import type { LocalRequest } from './bridge.js';
+import type { LocalRequest } from './local-request.js';
 import { BridgeError, invalidArgument } from './errors.js';
 import { callModelRpc, modelToolFailure, type ModelToolOptions } from './model-tool.js';
 

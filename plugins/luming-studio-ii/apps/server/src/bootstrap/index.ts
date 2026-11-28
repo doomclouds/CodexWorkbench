@@ -3,7 +3,6 @@ import {
   boardSuggestionSubmitPath,
   createWhiteboardHttpServer,
   createWhiteboardRequestHandler,
-  toPayloadResult,
   type GuestHttpOptions,
 } from '../entrypoints/http/index.js';
 import {
@@ -16,10 +15,11 @@ import { createFeedbackRepository } from '../infrastructure/adapters/feedback/in
 import {
   createBoardSuggestionRepository,
   createWhiteboardRepository,
-  decodeImportedPayload,
   recordBoardLifecycleVersion,
+  validateImportedObject,
 } from '../infrastructure/adapters/index.js';
 import { createRoomsRepository } from '../infrastructure/adapters/rooms/index.js';
+import { toRoomContentChange } from '../infrastructure/adapters/scene-codec/index.js';
 import { createSharingRepository } from '../infrastructure/adapters/sharing/index.js';
 import {
   openSqliteDatabase,
@@ -49,6 +49,7 @@ import {
   createBoardSuggestionApplication,
   createWhiteboardApplication,
   prepareBoardAsset,
+  type BoardContentChange,
 } from '../modules/whiteboard/application/index.js';
 import { createRoomWorkspaceScope } from './room-workspace-scope.js';
 
@@ -134,9 +135,16 @@ export function createWhiteboardServer(options: WhiteboardServerOptions): Whiteb
   let httpOptions: HttpOptions;
   let rooms: RoomsApplication;
   let sharing: SharingApplication;
+  const boardChanges = {
+    publish: (change: BoardContentChange) =>
+      rooms.publishContentChange(toRoomContentChange(change)),
+    onError: options.onError,
+  };
+
   try {
     const repository = createWhiteboardRepository(database);
     const application = createWhiteboardApplication(repository, Date.now, {
+      boardChanges,
       renderPng: renderSvgPng,
       exportArchive: createBoardBackup(
         repository,
@@ -145,12 +153,7 @@ export function createWhiteboardServer(options: WhiteboardServerOptions): Whiteb
         ownerDisplayName,
       ),
     });
-    const archives = createArchiveImportRepository(database, (object) => {
-      const payload = decodeImportedPayload(object);
-      if (payload) {
-        toPayloadResult({ kind: 'payload', payload });
-      }
-    });
+    const archives = createArchiveImportRepository(database, validateImportedObject);
     const catalog = createCatalogRepository(database, recordBoardLifecycleVersion);
     const catalogApplication = createCatalogApplication(catalog, {
       newBoardId: randomUUID,
@@ -177,6 +180,7 @@ export function createWhiteboardServer(options: WhiteboardServerOptions): Whiteb
         newId: randomUUID,
         digest,
         onChanged: (boardId) => rooms.publishDiscussionChange(boardId, 'suggestionsChanged'),
+        boardChanges,
         resolveAgentWorkspaces: (boardId, ownerId) => rooms.agentWriteWorkspaces(boardId, ownerId),
         readFeedbackSource(actor, boardId, feedbackThreadId) {
           try {
@@ -229,12 +233,13 @@ export function createWhiteboardServer(options: WhiteboardServerOptions): Whiteb
       catalogApplication,
       archiveApplication,
       features: {
-        editor: createBoardEditorApplication(repository, Date.now, validateSvgUpload),
-        history: createBoardHistoryApplication(repository, Date.now, renderSvgPng),
+        editor: createBoardEditorApplication(repository, Date.now, validateSvgUpload, boardChanges),
+        history: createBoardHistoryApplication(repository, Date.now, renderSvgPng, boardChanges),
         feedback,
         rooms,
         agentBoardWrite: createBoardAgentWriteApplication(repository, {
           now: Date.now,
+          boardChanges,
           resolveWorkspaces: (boardId, ownerId) => rooms.agentWriteWorkspaces(boardId, ownerId),
         }),
         suggestions,

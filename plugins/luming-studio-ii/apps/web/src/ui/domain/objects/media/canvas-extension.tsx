@@ -23,8 +23,6 @@ export interface LinkCanvasValue {
   readonly href?: string;
 }
 
-export type LinkCanvasViewProps = CanvasObjectViewProps;
-
 const mediaCapabilities = {
   move: true,
   resize: true,
@@ -191,9 +189,11 @@ export const videoExtension = {
   View: VideoView,
 } satisfies CanvasObjectExtension;
 
+const linkView: (props: CanvasObjectViewProps) => ReturnType<typeof LinkView> = LinkView;
+
 export const linkExtension = {
   kind: 'link',
   capabilities: mediaCapabilities,
   placement: { kind: 'link', label: '链接', width: 320, height: 94, fill: '#ffffff' },
-  View: LinkView,
+  View: linkView,
 } satisfies CanvasObjectExtension;

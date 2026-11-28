@@ -9,12 +9,14 @@ import { artifactListSchema, listArtifacts } from './artifact-list.js';
 import { registerArtifactRead } from './artifact-read.js';
 import { registerArtifactTools } from './artifact-tools.js';
 import { studioMcpIcon } from './branding.js';
-import { createAppBridge, type AppBridgeOptions, type LocalRequest } from './bridge.js';
+import { createAppBridge, type AppBridgeOptions } from './bridge.js';
+import type { LocalRequest } from './local-request.js';
 import { BridgeError } from './errors.js';
 import type { ModelToolOptions } from './model-tool.js';
 import { bridgeSchema, openSchema } from './schema.js';
 
-export type { AppBridgeOptions, LocalRequest } from './bridge.js';
+export type { AppBridgeOptions } from './bridge.js';
+export type { LocalRequest } from './local-request.js';
 export type { TransferFile } from './transfers.js';
 
 const appUri = 'ui://luming-studio-ii/app';

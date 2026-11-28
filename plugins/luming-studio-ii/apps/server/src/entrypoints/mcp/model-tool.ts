@@ -8,11 +8,13 @@ import {
   type MessageShape,
 } from '@bufbuild/protobuf';
 import { Buffer } from 'node:buffer';
-import type { AppBridgeOptions } from './bridge.js';
 import { BridgeError, tooLarge } from './errors.js';
+import type { DispatchLocalRequest } from './local-request.js';
 import { protobufMediaType } from './operations.js';
 
-export interface ModelToolOptions extends Pick<AppBridgeOptions, 'dispatch' | 'allocateId'> {
+export interface ModelToolOptions {
+  readonly dispatch: DispatchLocalRequest;
+  readonly allocateId: () => string;
   readonly onError: (error: unknown) => void;
   readonly observeRead?: (boardId: string) => (() => void) | undefined;
   readonly readArchiveFile?: (path: string, signal: AbortSignal) => Promise<Uint8Array>;
