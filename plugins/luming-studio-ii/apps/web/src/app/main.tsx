@@ -12,7 +12,7 @@ import {
   type BoardRoomService,
 } from '../data/rooms/index.js';
 import { createBoardSharingService } from '../data/sharing/index.js';
-import { createSuggestionService, type AttachedReviewSource } from '../data/suggestions/index.js';
+import { createSuggestionService } from '../data/suggestions/index.js';
 import {
   createBoardHistoryService,
   createWhiteboardEditService,
@@ -107,30 +107,6 @@ const guest = {
   subscribeRefresh: subscribeGuestAccessRefresh,
 };
 
-function copyReviewSource({
-  boardId,
-  sourceId,
-  capturedBoardRevision,
-  targetsBoardRevision,
-  targets,
-}: AttachedReviewSource & { readonly boardId: string }) {
-  return copyShareLink(
-    JSON.stringify({
-      boardId,
-      sourceId,
-      capturedBoardRevision: capturedBoardRevision.toString(),
-      targetsBoardRevision: targetsBoardRevision.toString(),
-      targets: targets.map(({ objectId, kind, geometryVersion, payloadVersion, geometry }) => ({
-        objectId,
-        kind,
-        geometryVersion: geometryVersion.toString(),
-        payloadVersion: payloadVersion?.toString(),
-        geometry,
-      })),
-    }),
-  );
-}
-
 createRoot(container).render(
   <StudioApp
     catalog={catalog}
@@ -147,8 +123,6 @@ createRoot(container).render(
     historyService={historyService}
     feedbackService={feedbackService}
     suggestions={suggestions}
-    onAttachReviewSource={copyReviewSource}
-    reviewSourceMode="copy"
     createRoomSession={roomFactory(roomService)}
     prepareImage={prepareBoardImage}
     prepareVideo={prepareBoardVideo}

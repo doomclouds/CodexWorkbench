@@ -38,6 +38,7 @@ export interface TableObjectPaint {
 
 export interface TableObjectActivity {
   readonly editing: boolean;
+  readonly editingCell?: true;
   readonly dirty: boolean;
   readonly saving: boolean;
   readonly resizing: boolean;

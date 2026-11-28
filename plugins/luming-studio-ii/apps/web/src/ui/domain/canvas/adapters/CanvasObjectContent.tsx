@@ -21,8 +21,12 @@ interface CanvasObjectContentProps {
 }
 
 const draggableBodyKinds = new Set<CanvasObjectDraft['kind']>(['link', 'image', 'table']);
+const namedFrames = new Map<CanvasObjectDraft['kind'], string>([
+  ['html', 'HTML 图解'],
+  ['video', '视频'],
+]);
 
-function EmbeddedCaption({
+function FrameDragCaption({
   object,
   geometry,
   zoom,
@@ -40,7 +44,7 @@ function EmbeddedCaption({
 
   const scale = selected ? 1 / zoom : Math.min(1 / zoom, 1);
   const width = geometry.width / scale;
-  const name = object.kind === 'html' ? 'HTML 图解' : '嵌入对象';
+  const name = namedFrames.get(object.kind) ?? '嵌入对象';
 
   return (
     <div
@@ -110,7 +114,8 @@ export function CanvasObjectContent({
     />
   );
 
-  const embedded = ownsFrame && mode === 'embedded';
+  const showDragCaption =
+    ownsFrame && (mode === 'embedded' || (object.kind === 'video' && selected));
   const canDragBody = ownsFrame && draggableBodyKinds.has(object.kind);
 
   if (showCaption) {
@@ -132,8 +137,8 @@ export function CanvasObjectContent({
       >
         {content}
       </div>
-      {embedded && (
-        <EmbeddedCaption
+      {showDragCaption && (
+        <FrameDragCaption
           object={object}
           geometry={geometry}
           zoom={zoom}

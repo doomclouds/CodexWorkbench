@@ -9,6 +9,7 @@
   --history-soft: #f0f0ee;
   --history-border: #dedfdf;
   --history-accent: #9c456e;
+  --history-accent-text: #fff;
   --history-accent-soft: #f2e5ec;
   --history-focus: #7962ba;
   --history-shadow: 0 10px 36px #171a2020;
@@ -19,6 +20,7 @@
   --studio-ui-muted: var(--history-muted);
   --studio-ui-border: var(--history-border);
   --studio-ui-accent: var(--history-accent);
+  --studio-ui-accent-text: var(--history-accent-text);
   --studio-ui-focus: var(--history-focus);
   --studio-ui-danger: var(--history-removed);
   --studio-ui-dialog-shadow: var(--history-shadow);
@@ -36,6 +38,7 @@
   --history-soft: #24272a;
   --history-border: #383d42;
   --history-accent: #e5b6ce;
+  --history-accent-text: #252025;
   --history-accent-soft: #442739;
   --history-focus: #bba5f2;
   --history-shadow: 0 12px 40px #0006;
@@ -190,7 +193,8 @@
   :is(
     .whiteboard-history__icon,
     .whiteboard-history__record-button,
-    .whiteboard-history__link
+    .whiteboard-history__link,
+    .whiteboard-history__older
   ):focus-visible {
   outline: 2px solid var(--studio-ui-focus, Highlight);
   outline-offset: 2px;
@@ -293,6 +297,38 @@
 
 .whiteboard-history__link:disabled {
   opacity: 0.55;
+}
+
+.whiteboard-history__footer {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  margin-block-start: 15px;
+  padding-block-start: 8px;
+  border-block-start: 1px solid var(--history-border);
+}
+
+.whiteboard-history__older {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-block-size: 30px;
+  padding-inline: 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--history-accent);
+  font: inherit;
+  font-size: 12px;
+}
+
+.whiteboard-history__older:not([aria-disabled='true']):hover {
+  background: var(--history-soft);
+}
+
+.whiteboard-history__older[aria-disabled='true'] {
+  color: var(--history-muted);
+  cursor: default;
 }
 
 .whiteboard-history__change {
@@ -521,15 +557,53 @@
   font-size: 12px;
 }
 
-.whiteboard-history-preview__controls > .studio-ui-field {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.whiteboard-history-preview__controls > button[aria-expanded='true'] {
+  box-shadow: inset 0 0 0 1px var(--history-border);
 }
 
-.whiteboard-history-preview__controls select {
+.studio-ui-anchored-popover:has(> .whiteboard-history-preview__export) {
+  z-index: var(--studio-ui-menu-layer, 10);
+  box-sizing: border-box;
+  inline-size: min(228px, calc(100vw - 24px));
+  border-radius: 10px;
+}
+
+.whiteboard-history-preview__export {
+  display: grid;
+  gap: 8px;
+}
+
+.whiteboard-history-preview__export select {
   min-block-size: 30px;
   padding-block: 3px;
+}
+
+.whiteboard-history-preview__formats {
+  display: grid;
+  gap: 2px;
+  padding-block-start: 6px;
+  border-block-start: 1px solid var(--history-border);
+}
+
+.whiteboard-history-preview__formats > button {
+  justify-content: start;
+  min-block-size: 30px;
+  padding: 4px 6px;
+  color: var(--history-text);
+}
+
+.whiteboard-history-preview__notice {
+  display: flex;
+  flex: 1 0 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.whiteboard-history-preview__notice > button {
+  min-block-size: 24px;
+  padding: 2px 6px;
+  font-size: 12px;
 }
 
 .whiteboard-history-preview__canvas {

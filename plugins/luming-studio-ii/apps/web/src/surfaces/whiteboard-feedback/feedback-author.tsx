@@ -1,18 +1,13 @@
 import { User } from 'lucide-react';
+import { createContext, useContext } from 'react';
 import type { FeedbackMessage } from '../../data/feedback/index.js';
 
 type FeedbackAuthor = Pick<FeedbackMessage, 'authorId' | 'authorName' | 'authoredByViewer'>;
 
-const viewerColor = '#257de0';
-const palette = [
-  '#785ee8',
-  '#dc3c3d',
-  '#019c7f',
-  '#fbb315',
-  '#ce447d',
-  '#10a122',
-  viewerColor,
-] as const;
+type AuthorColor = (actorId: string) => string;
+
+const defaultColor = '#257de0';
+export const FeedbackAuthorColor = createContext<AuthorColor | undefined>(undefined);
 const contrastPivot = 0.179;
 const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 
@@ -26,17 +21,8 @@ function colorChannel(hex: string) {
   return channel <= 0.04045 ? channel / 12.92 : Math.pow((channel + 0.055) / 1.055, 2.4);
 }
 
-export function feedbackAuthorColors(author?: FeedbackAuthor) {
-  let backgroundColor: string = viewerColor;
-  if (author && !author.authoredByViewer) {
-    let hash = 0;
-    for (const character of author.authorId) {
-      hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
-    }
-
-    backgroundColor = palette[hash % palette.length] ?? palette[0];
-  }
-
+export function feedbackAuthorColors(colorFor: AuthorColor | undefined, actorId?: string) {
+  const backgroundColor = (actorId && colorFor?.(actorId)) || defaultColor;
   const red = colorChannel(backgroundColor.slice(1, 3));
   const green = colorChannel(backgroundColor.slice(3, 5));
   const blue = colorChannel(backgroundColor.slice(5, 7));
@@ -69,10 +55,11 @@ export function FeedbackAuthorGlyph({ author }: { readonly author?: FeedbackAuth
 }
 
 export function FeedbackAvatar({ author }: { readonly author: FeedbackAuthor }) {
+  const colorFor = useContext(FeedbackAuthorColor);
   return (
     <span
       className="whiteboard-feedback__avatar"
-      style={feedbackAuthorColors(author)}
+      style={feedbackAuthorColors(colorFor, author.authorId)}
       aria-hidden="true"
     >
       <FeedbackAuthorGlyph author={author} />

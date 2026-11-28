@@ -23,26 +23,48 @@ function readRequest(route, method) {
 }
 
 export async function holdNextInlineTextWrite(page, studio, { boardId, objectId }) {
-  const origin = new URL(studio.url);
+  const current = new URL(page.url());
+  const initial = studio.edition === "initial";
+  const queryKey = initial ? "artifactId" : "board";
+  assert.equal(current.searchParams.get(queryKey), boardId);
+  const origin = new URL(current.origin);
+  assert.equal(origin.protocol, "http:");
   assert.equal(origin.hostname, "127.0.0.1");
-  assert.equal(studio.edition, "ii");
   const write = BoardEditService.method.editObjectContent;
   const received = Promise.withResolvers();
   const release = Promise.withResolvers();
-  await page.route(
-    rpcUrl(origin, write),
-    async (route) => {
-      const request = readRequest(route, write);
-      assert.equal(request?.boardId, boardId);
-      assert.equal(request.objectId, objectId);
-      received.resolve();
-      await release.promise;
+  const endpoint = initial
+    ? new URL("/api/tools/artifact_apply", origin).href
+    : rpcUrl(origin, write);
+  let holding = false;
+  await page.route(endpoint, async (route) => {
+    if (holding || route.request().method() !== "POST") {
       await route.continue();
-    },
-    { times: 1 },
-  );
+      return;
+    }
+
+    const request = initial ? readInitialTextWrite(route) : readRequest(route, write);
+    if (request?.boardId !== boardId || request.objectId !== objectId) {
+      await route.continue();
+      return;
+    }
+
+    holding = true;
+    received.resolve();
+    await release.promise;
+    await route.continue();
+  });
 
   return { received: received.promise, release: release.resolve };
+}
+
+function readInitialTextWrite(route) {
+  const body = route.request().postDataJSON();
+  const operation = body?.operations?.[0];
+  const writesText = operation?.op === "update" && typeof operation.changes?.text === "string";
+  if (body?.summary === "编辑文字" && body.operations?.length === 1 && writesText) {
+    return { boardId: body.artifactId, objectId: operation.id };
+  }
 }
 
 export async function holdNextInlineTextRefresh(page, studio, { boardId, objectId }) {

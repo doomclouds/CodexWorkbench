@@ -62,6 +62,7 @@ function participantWire({
   activityAtUnixMs,
   gesture,
   gestureExpiresAtUnixMs,
+  editingObjectIds,
   ...participant
 }: Participant) {
   return {
@@ -71,6 +72,7 @@ function participantWire({
     gesture: gesture && { kind: gestureKinds[gesture.kind], changes: [...gesture.changes] },
     gestureExpiresAtUnixMs:
       gestureExpiresAtUnixMs === undefined ? undefined : BigInt(gestureExpiresAtUnixMs),
+    editingObjectIds: editingObjectIds && [...editingObjectIds],
   };
 }
 

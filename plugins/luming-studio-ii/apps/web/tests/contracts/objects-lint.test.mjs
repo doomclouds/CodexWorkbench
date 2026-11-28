@@ -13,6 +13,7 @@ const testDocument = 'tests/component/objects/DocumentObject.test.tsx';
 const documentSpecifier = '@codexworkbench/luming-studio-ii-web/ui/domain/objects/document';
 const editsProtocol = '@codexworkbench/luming-studio-ii-contracts/whiteboard/edits';
 const stickerArtwork = '@codexworkbench/luming-studio-ii-contracts/whiteboard/stickers';
+const richTextFormat = '@codexworkbench/luming-studio-ii-contracts/whiteboard/rich-text';
 const editingFamilies = ['table', 'embed', 'sticker', 'media'];
 
 const rejected = [
@@ -115,6 +116,11 @@ const rejected = [
     "import { createClient } from '@modelcontextprotocol/sdk';",
   ],
   [
+    'object bypasses the rich text format bridge',
+    source + 'document/DocumentObject.tsx',
+    "import { parseRichText } from '" + richTextFormat + "';",
+  ],
+  [
     'object test imports internals',
     testDocument,
     "import { create } from '../../../src/ui/domain/objects/document/editor.js';",
@@ -159,6 +165,7 @@ for (const [name, filePath, text, rule = boundary] of rejected) {
 
 const accepted = [
   [source + 'sticker/sticker-catalog.ts', `export { stickerDefinition } from '${stickerArtwork}';`],
+  [source + 'text/rich-text.ts', `export { parseRichText } from '${richTextFormat}';`],
   ...editingFamilies.map((family) => [
     source + family + '/canvas-extension.tsx',
     [

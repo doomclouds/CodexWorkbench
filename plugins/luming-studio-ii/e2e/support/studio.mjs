@@ -1,10 +1,17 @@
 import { expect, test as base } from "@playwright/test";
 import { createBoardFixtures } from "./board-fixtures.mjs";
 import { seedBoards } from "./boards.mjs";
+import { recordVersionMoves } from "./history-topbar.mjs";
 import { launchStudio } from "./runtime.mjs";
+import { registerTopbarOverlayRuntime } from "./topbar-overlays.mjs";
 import { registerWorkbenchLinkRuntime } from "./workbench-link.mjs";
 
 export { workbenchLinkProbe } from "./workbench-link.mjs";
+export { setRoomConnectionOffline } from "./room-connection.mjs";
+export { failNextOlderVersions } from "./history-topbar.mjs";
+export { downloadBoardExport, failNextBoardExport, readBoardDownload } from "./board-download.mjs";
+export { seedTopbarAgentWorkspace, seedTopbarSuggestion } from "./topbar-overlays.mjs";
+export { inspectBoardExport } from "./board-export-fidelity.mjs";
 export { readPeerCursors, readPlacementPreview } from "./canvas-peer-observation.mjs";
 export { controlNextTextSave } from "./canvas-persistence.mjs";
 export { chooseBoardMedia, mediaDisplaySize, mediaPlaying } from "./media.mjs";
@@ -25,22 +32,25 @@ export const test = base.extend({
   async studio({}, use, testInfo) {
     const edition = testInfo.project.name;
     const workbenchTitle = edition === "initial" ? "Luming Studio" : "Luming Studio II";
-    const runtime = await launchStudio(edition);
+    const overlays = testInfo.file
+      .replaceAll("\\", "/")
+      .endsWith("/whiteboard-topbar/overlays.spec.mjs");
+    const runtime = await launchStudio(edition, { agentSuggestions: overlays && edition === "ii" });
     try {
-      await use(
-        registerWorkbenchLinkRuntime(
-          {
-            edition,
-            url: runtime.url,
-            workbenchTitle,
-            workbenchBackLabel: "返回 " + workbenchTitle,
-            ...createBoardFixtures(edition, runtime),
-            seedBoards: (descriptors) => seedBoards(edition, runtime, descriptors),
-            restart: () => runtime.restart(),
-          },
-          runtime,
-        ),
+      const studio = registerWorkbenchLinkRuntime(
+        {
+          edition,
+          url: runtime.url,
+          workbenchTitle,
+          workbenchBackLabel: "返回 " + workbenchTitle,
+          ...createBoardFixtures(edition, runtime),
+          seedBoards: (descriptors) => seedBoards(edition, runtime, descriptors),
+          seedVersionMoves: (board, count) => recordVersionMoves(runtime, edition, board, count),
+          restart: () => runtime.restart(),
+        },
+        runtime,
       );
+      await use(registerTopbarOverlayRuntime(studio, runtime));
     } finally {
       await runtime.close();
     }

@@ -16,4 +16,6 @@ export {
   sectionExtension,
   shapeExtension,
   textExtension,
+  TextSaveNoticePublisher,
+  type TextSaveIssue,
 } from './canvas-extension.js';

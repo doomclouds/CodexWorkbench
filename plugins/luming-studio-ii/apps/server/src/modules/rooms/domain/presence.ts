@@ -13,6 +13,9 @@ const viewIdPattern = /^[A-Za-z0-9_-]{1,120}$/u;
 const maxGestureObjects = 32;
 const maxGestureObjectIdLength = 160;
 const maxGeometryVersion = BigInt(Number.MAX_SAFE_INTEGER);
+const maxEditingObjectIds = 4;
+const maxEditingIdentifierUnits = 160;
+const editingObjectId = /^[\p{L}\p{N}][\p{L}\p{N}_.:-]*$/u;
 
 export function validViewId(id: string): boolean {
   return viewIdPattern.test(id);
@@ -45,8 +48,23 @@ export function validPresence(input: PresenceInput): boolean {
   const freshIdentity = validViewId(input.viewId) && input.sequence > 0n;
 
   const validView = validCursor(input.cursor) && validViewport(input.viewport);
+  const validActivity = validGesture(input.gesture) && validEditingObjects(input.editingObjectIds);
 
-  return freshIdentity && validView && validGesture(input.gesture);
+  return freshIdentity && validView && validActivity;
+}
+
+function validEditingObjects(ids: readonly string[] | undefined): boolean {
+  if (!ids) {
+    return true;
+  }
+  if (ids.length > maxEditingObjectIds) {
+    return false;
+  }
+
+  const unique = [...new Set(ids)];
+  const length = unique.reduce((total, id) => total + id.length, 0);
+
+  return length <= maxEditingIdentifierUnits && unique.every((id) => editingObjectId.test(id));
 }
 
 function validGestureChange({ objectId, expectedGeometryVersion, geometry }: GestureChange) {

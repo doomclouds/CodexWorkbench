@@ -59,6 +59,7 @@ export type {
   ExportBoardRequest,
   ExportBoardResult,
   ExportBoardScope,
+  RequestBoardDownload,
 } from './export.js';
 export { createBoardHistoryService } from './history.js';
 export type {

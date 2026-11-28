@@ -1,6 +1,6 @@
 import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
-import type { TableObjectProps, TableObjectValue } from './contracts.js';
+import type { TableObjectActivity, TableObjectProps, TableObjectValue } from './contracts.js';
 import {
   clampCell,
   describeTableDraft,
@@ -61,13 +61,14 @@ export function useTableSession(props: TableObjectProps, resizing: boolean) {
 
     return projectionMoved ? projectTableDraft(draft, confirmed) : draft.model;
   }, [confirmed, dirty, displayedValue.version, displayedValue.width, draft]);
-  const editing = Boolean((canEdit && active) || dirty || saving || resizing);
+  const editingCell = canEdit && active !== null;
+  const editing = editingCell || dirty || saving || resizing;
 
   useLayoutEffect(() => {
     propsRef.current = props;
   }, [props]);
 
-  const notifyActivity = useEffectEvent((activity: typeof noActivity) => {
+  const notifyActivity = useEffectEvent((activity: TableObjectActivity) => {
     propsRef.current.onActivityChange?.(activity);
   });
 
@@ -81,8 +82,14 @@ export function useTableSession(props: TableObjectProps, resizing: boolean) {
   }, []);
 
   useEffect(() => {
-    notifyActivity({ editing, dirty, saving, resizing });
-  }, [dirty, editing, resizing, saving]);
+    notifyActivity({
+      editing,
+      ...(editingCell && { editingCell }),
+      dirty,
+      saving,
+      resizing,
+    });
+  }, [dirty, editing, editingCell, resizing, saving]);
 
   function source() {
     const observed = latestValue(propsRef.current.value, receiptRef.current);

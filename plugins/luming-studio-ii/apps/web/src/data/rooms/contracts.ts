@@ -38,6 +38,7 @@ export interface BoardRoomPresence {
   readonly viewport?: BoardRoomViewport;
   readonly following: boolean;
   readonly gesture?: BoardRoomGesturePreview;
+  readonly editingObjectIds?: readonly string[];
 }
 
 export interface BoardRoomParticipant extends BoardRoomParticipantKey, BoardRoomPresence {

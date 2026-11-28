@@ -228,6 +228,7 @@ type CanvasContentUnit =
 
 export interface CanvasContentAnnotationRequest {
   readonly target: CanvasContentUnit | { readonly kind: 'object' };
+  readonly excerpt?: string;
   readonly u: number;
   readonly v: number;
 }
@@ -281,6 +282,7 @@ export interface CanvasObjectViewProps extends CanvasObjectGeometryContext {
   readonly request: (operation: CanvasObjectOperation) => Promise<CanvasObjectReceipt>;
   readonly onNavigation?: (event: CanvasObjectNavigation) => void;
   readonly onRetentionChange?: (retain: boolean) => void;
+  readonly onEditingChange?: (editing: boolean) => void;
 }
 
 export interface CanvasObjectExtension {
@@ -430,6 +432,7 @@ export interface CanvasProps {
   readonly onContextMenu?: (anchor: CanvasPoint, selection: readonly string[]) => void;
   readonly blankDoubleClickPlacement?: CanvasPlacement;
   readonly onObjectActivate?: (activation: CanvasObjectActivation) => void;
+  readonly onObjectEditingChange?: (id: string, editing: boolean) => void;
   readonly editObjectRequest?: { readonly id: string };
   readonly formatObjectRequest?: CanvasObjectFormatRequest & { readonly id: string };
   readonly readHtmlSource?: CanvasObjectViewProps['readHtmlSource'];

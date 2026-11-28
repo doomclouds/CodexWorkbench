@@ -59,8 +59,8 @@ export function useFeedbackQueries({
     enabled ? baseQuery : undefined,
     requestVersion,
   );
-  const ownAuthor = baseList.items.find(({ first }) => first.authoredByViewer)?.first.authorId;
-  const selectedAuthor = mine ? ownAuthor : authorId;
+  const selectedAuthor = mine ? undefined : authorId;
+  const filtering = mine || Boolean(selectedAuthor);
   const openQuery = useMemo(
     () => ({
       load(cursor: string | undefined, signal: AbortSignal) {
@@ -77,12 +77,12 @@ export function useFeedbackQueries({
     () => ({
       load(cursor: string | undefined, signal: AbortSignal) {
         return service.listThreads(
-          { boardId, pageSize, status, cursor, authorId: selectedAuthor },
+          { boardId, pageSize, status, cursor, authorId: selectedAuthor, authoredByViewer: mine },
           signal,
         );
       },
     }),
-    [selectedAuthor, boardId, service, status],
+    [selectedAuthor, boardId, mine, service, status],
   );
   const detailQuery = useMemo(() => {
     if (!threadId) {
@@ -97,7 +97,7 @@ export function useFeedbackQueries({
   }, [threadId, boardId, service]);
 
   const panelEnabled = enabled && panelOpen;
-  const filterEnabled = panelEnabled && Boolean(selectedAuthor);
+  const filterEnabled = panelEnabled && filtering;
   const filteredList = useFeedbackPages<FeedbackThread, FeedbackPage<FeedbackThread>>(
     filterEnabled ? authorQuery : undefined,
     requestVersion,
@@ -111,7 +111,7 @@ export function useFeedbackQueries({
     setLocalVersion((previous) => previous + 1);
   }
 
-  const list = selectedAuthor ? filteredList : baseList;
+  const list = filtering ? filteredList : baseList;
   const unresolved = showResolved ? openThreads : baseList;
 
   return {
@@ -125,7 +125,7 @@ export function useFeedbackQueries({
     pinnedThreads: baseList.items,
     hasUnresolved: unresolved.page && unresolved.items.some((thread) => thread.status === 'open'),
     canWrite: baseList.page?.canWrite === true,
-    list: mine && !ownAuthor ? { ...list, items: [] } : list,
+    list,
     detail,
     refresh,
   };

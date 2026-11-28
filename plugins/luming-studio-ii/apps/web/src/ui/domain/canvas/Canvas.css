@@ -50,17 +50,28 @@
 }
 
 .studio-canvas[data-canvas-annotating='true'] {
+  --canvas-annotation-ink: #389cff;
+  --canvas-annotation-fill: #389cff14;
   --canvas-comment-cursor:
     url('data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2232%22%20height%3D%2232%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20d%3D%22M4%2028V16a12%2012%200%201%201%2012%2012H4Z%22%20fill%3D%22%23389cff%22%20stroke%3D%22%23fff%22%20stroke-width%3D%222.5%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fsvg%3E')
       4 28,
-    crosshair;
+    pointer;
 }
 
-.studio-canvas[data-canvas-annotating='true'] > .studio-canvas__background,
-.studio-canvas[data-canvas-annotating='true'] > .studio-canvas__world > [data-canvas-object],
-.studio-canvas[data-canvas-annotating='true']
+.studio-canvas[data-canvas-annotating='true'][data-tool='select'],
+.studio-canvas[data-canvas-annotating='true'][data-tool='select']
+  > .studio-canvas__world
+  > [data-canvas-object],
+.studio-canvas[data-canvas-annotating='true'][data-tool='select']
   > .studio-canvas__world
   > [data-canvas-object]
-  :not(:where(button, button *, input, select, textarea)) {
+  * {
   cursor: var(--canvas-comment-cursor) !important;
+}
+
+.studio-canvas[data-canvas-annotating='true'][data-tool='select']
+  > .studio-canvas__world
+  > [data-canvas-object]:hover:not(:has(:is(iframe, [data-canvas-content-unit]):hover)) {
+  outline: 2px solid var(--canvas-annotation-ink);
+  outline-offset: 2px;
 }

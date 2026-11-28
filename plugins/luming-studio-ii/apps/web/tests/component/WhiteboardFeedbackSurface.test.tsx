@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type {
   BoardFeedbackService,
   FeedbackContentTarget,
+  FeedbackPage,
   FeedbackThread,
   FeedbackThreadPage,
 } from '../../src/data/feedback/index.js';
@@ -295,6 +296,7 @@ test('saves before attaching, then retries the original attachment without savin
     createCommandId,
   });
   await typeMessage('保存后附加到对话');
+  expect(fixture.host.textContent).toContain('附加到 Codex 对话');
   await act(async () => element<HTMLInputElement>('input[type="checkbox"]').click());
   await click('保存备注');
   expect(onAttachThread).not.toHaveBeenCalled();
@@ -313,6 +315,129 @@ test('saves before attaching, then retries the original attachment without savin
     [{ ...attached, signal: expect.any(AbortSignal) }],
   ]);
   expect(service.apply).toHaveBeenCalledTimes(2);
+});
+
+test('keeps the discussion actions available without an unsupported Codex attachment', async () => {
+  const service = testService();
+  await render(service, { annotationRequest: { objectId: card.id, sequence: 1 } });
+  expect(fixture.host.textContent).not.toContain('附加到 Codex 对话');
+  expect(fixture.host.textContent).not.toContain('复制批注引用');
+  await click('取消');
+  await clickPin();
+  await click('备注操作');
+  expect(fixture.host.textContent).toContain('定位备注');
+  expect(fixture.host.textContent).not.toContain('附加到 Codex 对话');
+  expect(fixture.host.textContent).not.toContain('使用此批注作为建议来源');
+});
+
+test('keeps the notes pager in place while appending the next page', async () => {
+  const service = testService();
+  const older = {
+    ...sample,
+    id: 'older-thread',
+    first: { ...sample.first, id: 'older-message', text: '较早的复核意见' },
+  };
+  let resolve!: (page: FeedbackPage<FeedbackThread>) => void;
+  const promise = new Promise<FeedbackPage<FeedbackThread>>((accept) => {
+    resolve = accept;
+  });
+  service.listThreads.mockImplementation(async ({ cursor }) =>
+    cursor ? promise : { items: [sample], canWrite: true, nextCursor: 'older' },
+  );
+  await render(service);
+  await click('打开备注');
+  const pager = button('更多备注');
+  expect(pager.getAttribute('data-variant')).toBe('ghost');
+  await click('更多备注');
+  expect(button('加载中…')).toBe(pager);
+  expect(pager.getAttribute('aria-busy')).toBe('true');
+  expect(fixture.host.textContent).toContain(sample.first.text);
+
+  await act(async () => resolve({ items: [older], canWrite: true }));
+  expect(fixture.host.textContent).toContain(older.first.text);
+  expect(fixture.host.textContent).toContain(sample.first.text);
+  expect(fixture.host.querySelector('.whiteboard-feedback__pager')).toBeNull();
+});
+
+test('requests the viewer filter even when their notes are absent from the loaded page', async () => {
+  const service = testService();
+  const peer = {
+    ...sample,
+    id: 'peer-thread',
+    first: {
+      ...sample.first,
+      id: 'peer-message',
+      authorId: 'reviewer',
+      authoredByViewer: false,
+      text: '最近来自其他作者的备注',
+    },
+  };
+  service.listThreads.mockImplementation(async ({ authoredByViewer }) =>
+    authoredByViewer
+      ? { items: [sample], canWrite: true }
+      : { items: [peer], canWrite: true, nextCursor: 'older-notes' },
+  );
+  await render(service);
+  await click('打开备注');
+  expect(fixture.host.textContent).toContain(peer.first.text);
+  expect(fixture.host.textContent).not.toContain(sample.first.text);
+
+  await click('我发起');
+  expect(service.listThreads).toHaveBeenCalledWith(
+    expect.objectContaining({ authoredByViewer: true, cursor: undefined, authorId: undefined }),
+    expect.any(AbortSignal),
+  );
+  const list = element('[aria-label="备注讨论"]');
+  expect(list.textContent).toContain(sample.first.text);
+  expect(list.textContent).not.toContain(peer.first.text);
+});
+
+test('keeps author colors consistent across pins, the list, threads and viewers', async () => {
+  const owner = { id: 'owner-id', text: '所有者的备注', color: '#785ee8' };
+  const guest = { id: 'guest-id', text: '来宾的备注', color: '#fbb315' };
+  const owners = [owner, guest];
+  const colorForAuthor = (actorId: string) => (actorId === owner.id ? owner.color : guest.color);
+  const service = testService();
+
+  async function readAs(viewerActorId: string) {
+    const threads = owners.map(({ id, text }) => ({
+      ...sample,
+      id,
+      first: { ...sample.first, text, authorId: id, authoredByViewer: id === viewerActorId },
+    }));
+    service.listThreads.mockResolvedValue({ items: threads, canWrite: true });
+    service.getThread.mockImplementation(async ({ threadId }) => {
+      const thread = threads.find(({ id }) => id === threadId);
+      if (!thread) {
+        throw new Error('Could not find the fixture discussion');
+      }
+
+      return { thread, canWrite: true, items: [] };
+    });
+    await render(service, { viewerActorId, colorForAuthor, updateKey: viewerActorId });
+    await click('打开备注');
+
+    const colors = new Map<string, string>();
+    for (const { id, text } of owners) {
+      const pin = element(`[data-feedback-pin="${id}"]`);
+      const avatar = button('展开备注 · ' + text).querySelector<HTMLElement>(
+        '.whiteboard-feedback__avatar',
+      );
+      expect(avatar?.style.backgroundColor).toBe(pin.style.backgroundColor);
+      colors.set(id, pin.style.backgroundColor);
+    }
+    await click('展开备注 · ' + owner.text);
+    expect(
+      element('.whiteboard-feedback__thread .whiteboard-feedback__avatar').style.backgroundColor,
+    ).toBe(colors.get(owner.id));
+    await click('关闭备注');
+
+    return colors;
+  }
+
+  const before = await readAs(owner.id);
+  expect(before.get(owner.id)).not.toBe(before.get(guest.id));
+  expect(await readAs(guest.id)).toEqual(before);
 });
 
 test('creates a real document-block anchor and locates its resolved position', async () => {
@@ -348,6 +473,141 @@ test('creates a real document-block anchor and locates its resolved position', a
   expect(fixture.host.textContent).toContain('保留选择的原文');
   await chooseAction('备注操作', '定位备注');
   expect(focusWorldPoint).toHaveBeenCalledWith(contentPoint);
+});
+
+test.each([
+  { content: { kind: 'document', blockIds: ['paragraph'] }, caption: '文档段落' },
+  { content: { kind: 'todo', itemId: 'task' }, caption: '待办事项' },
+  { content: { kind: 'html', nodeIds: ['node'], sourceRevision: 1n }, caption: 'HTML 内部选区' },
+] as const)('keeps the precise $caption location while posting', async ({ content, caption }) => {
+  const object = { ...card, kind: content.kind, label: '评审记录' };
+  const target = {
+    kind: 'content',
+    objectId: object.id,
+    geometryVersion: object.geometryVersion,
+    payloadVersion: 4n,
+    u: 0.75,
+    v: 0.25,
+    content,
+  } satisfies FeedbackContentTarget;
+  const thread = {
+    ...sample,
+    anchor: {
+      ...sample.anchor,
+      target,
+      frozenObject: { ...object.geometry, label: object.label, kind: object.kind },
+      frozenExcerpt: '发布时的原文',
+    },
+  };
+  const service = testService(thread);
+  service.listThreads.mockResolvedValue({ items: [], canWrite: true });
+  let publish!: (page: FeedbackPage<FeedbackThread>) => void;
+  const refresh = new Promise<FeedbackPage<FeedbackThread>>((accept) => {
+    publish = accept;
+  });
+  service.apply.mockImplementationOnce(async () => {
+    service.listThreads.mockReturnValue(refresh);
+
+    return { kind: 'applied', threadId: thread.id, threadVersion: 2n, deleted: false };
+  });
+  const onContentLocationRequests =
+    vi.fn<NonNullable<WhiteboardFeedbackSurfaceProps['onContentLocationRequests']>>();
+  const options = {
+    objects: [object],
+    contentAnnotationRequest: { sequence: 1, target, excerpt: '选取的原文' },
+    onContentLocationRequests,
+    viewerActorId: sample.first.authorId,
+    colorForAuthor: () => '#ce447d',
+  };
+  await render(service, options);
+  const request = onContentLocationRequests.mock.lastCall?.[0]?.get(object.id)?.[0];
+  expect(request).toEqual({
+    id: expect.any(String),
+    target: content,
+    u: target.u,
+    v: target.v,
+    reveal: undefined,
+  });
+  const point = { x: 156, y: 64 };
+  expect(request).toBeDefined();
+  if (!request) {
+    throw new Error('Missing location for the pending note');
+  }
+
+  await render(service, { ...options, contentLocations: new Map([[request.id, { point }]]) });
+
+  const captionText = caption + ' · ' + object.label;
+  const draftSelector = '.whiteboard-feedback__draft-pin';
+  const position = { left: '332px', top: '158px' };
+  expect(element('.whiteboard-feedback__target-label').textContent).toBe(captionText);
+  expect(element('blockquote').textContent).toBe('选取的原文');
+  expect(element(draftSelector).style).toMatchObject(position);
+
+  const color = element(draftSelector).style.backgroundColor;
+  await typeMessage('请核对这里');
+  await click('保存备注');
+
+  expect(service.apply.mock.calls[0]?.[0].operation).toEqual({
+    kind: 'create',
+    text: '请核对这里',
+    anchor: target,
+  });
+  expect(element(draftSelector).style).toMatchObject(position);
+  expect(element('.whiteboard-feedback__target-label').textContent).toBe(captionText);
+  expect(element('blockquote').textContent).toBe('发布时的原文');
+  await act(async () => publish({ items: [thread], canWrite: true }));
+  expect(element('[data-feedback-pin="thread"]').style).toMatchObject(position);
+  expect(element('[data-feedback-pin="thread"]').style.backgroundColor).toBe(color);
+  expect(fixture.host.querySelector(draftSelector)).toBeNull();
+});
+
+test('clips saved pins above the whiteboard while keeping the open thread and list accessible', async () => {
+  const service = testService();
+  const viewportSize = { width: 670, height: 400 };
+  const options = { viewportSize };
+  await render(service, options);
+  vi.spyOn(element('.whiteboard-feedback'), 'getBoundingClientRect').mockReturnValue(
+    new DOMRect(60, 96, viewportSize.width, viewportSize.height),
+  );
+  const pin = '[data-feedback-pin="thread"]';
+  await clickPin();
+  expect(element(pin).parentElement?.classList.contains('whiteboard-feedback__pin-layer')).toBe(
+    true,
+  );
+
+  await render(service, { ...options, viewport: { ...viewport, y: -400, zoom: 1.25 } });
+  expect(fixture.host.querySelector(pin)).toBeNull();
+  const popup = element('[aria-label="备注线程"]');
+  expect(Number.parseFloat(popup.style.top)).toBeGreaterThanOrEqual(96);
+  expect(Number.parseFloat(popup.style.left)).toBeGreaterThanOrEqual(60);
+  expect(Number.parseFloat(popup.style.maxHeight)).toBeLessThanOrEqual(viewportSize.height);
+
+  await render(service, options);
+  expect(element(pin).getAttribute('data-selected')).toBe('true');
+  await click('打开备注');
+  expect(element('[aria-label="备注讨论"]').textContent).toContain(sample.first.text);
+});
+
+test('clips the draft pin after panning and keeps the draft available in the whiteboard', async () => {
+  const options = {
+    viewportSize: { width: 380, height: 280 },
+    annotationRequest: { objectId: card.id, sequence: 1, u: 0.75, v: 0.25 },
+  };
+  const service = testService();
+  await render(service, options);
+  vi.spyOn(element('.whiteboard-feedback'), 'getBoundingClientRect').mockReturnValue(
+    new DOMRect(30, 80, options.viewportSize.width, options.viewportSize.height),
+  );
+  await typeMessage('平移时继续写');
+  const draft = '.whiteboard-feedback__draft-pin';
+  expect(element(draft)).toBeDefined();
+  await render(service, { ...options, viewport: { ...viewport, y: -400 } });
+  expect(fixture.host.querySelector(draft)).toBeNull();
+  const popup = element('[aria-label="新建备注"]');
+  expect(Number.parseFloat(popup.style.top)).toBeGreaterThanOrEqual(80);
+  expect(element<HTMLTextAreaElement>('textarea').value).toBe('平移时继续写');
+  await render(service, options);
+  expect(element(draft)).toBeDefined();
 });
 
 test('lets the host pick directly, keeps Escape and applies only a new point request', async () => {
@@ -748,7 +1008,11 @@ test('the numeric-tools setting guards 9 and Escape leaves annotation mode witho
   expect(fixture.host.querySelector('[aria-label="所有备注"]')).toBeNull();
   expect(onAnnotationActiveChange).toHaveBeenLastCalledWith(true);
 
-  await press('Escape');
+  await act(async () => {
+    document.body.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+    );
+  });
   expect(fixture.host.querySelector('[aria-label="在白板选取备注位置"]')).toBeNull();
   expect(onAnnotationActiveChange).toHaveBeenLastCalledWith(false);
 });

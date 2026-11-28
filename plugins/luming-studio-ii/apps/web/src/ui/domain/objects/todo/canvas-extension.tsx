@@ -91,6 +91,34 @@ function TodoPlacementView(props: CanvasObjectViewProps) {
   return <TodoCanvasBody {...props} />;
 }
 
+interface TodoCanvasActivity extends Pick<
+  CanvasObjectViewProps,
+  'onRetentionChange' | 'onEditingChange'
+> {
+  readonly hasSnapshot: boolean;
+  readonly readOnly: boolean;
+  readonly editing: boolean;
+  readonly retaining: boolean;
+}
+
+function useTodoCanvasActivity({
+  hasSnapshot,
+  readOnly,
+  editing,
+  retaining,
+  onRetentionChange,
+  onEditingChange,
+}: TodoCanvasActivity) {
+  const active = hasSnapshot && !readOnly && editing;
+  const retained = hasSnapshot && retaining;
+  const report = useEffectEvent((editing: boolean, retained: boolean) => {
+    onEditingChange?.(editing);
+    onRetentionChange?.(retained);
+  });
+  useEffect(() => report(active, retained), [active, retained]);
+  useEffect(() => () => report(false, false), []);
+}
+
 function TodoCanvasBody({
   id,
   payload,
@@ -112,21 +140,25 @@ function TodoCanvasBody({
   zoom,
   request,
   onRetentionChange,
+  onEditingChange,
 }: CanvasObjectViewProps) {
   const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const [expandedEditing, setExpandedEditing] = useState(false);
   const current = useMemo(() => todoPayload(id, payload), [id, payload]);
-  const value = useLoadedTodoSnapshot(current, editing || expandedEditing);
+  const editingContent = editing || expandedEditing;
+  const value = useLoadedTodoSnapshot(current, editingContent);
   const keepExpanded = expanded || expandedEditing;
   const nativeExpanded = expandedOnBoard || focusedReading;
-  const hasSnapshot = value !== undefined;
-  const retentionNeeded = nativeExpanded || editing || keepExpanded;
-  const publishRetention = useEffectEvent((retain: boolean) => onRetentionChange?.(retain));
-  useEffect(() => {
-    publishRetention(hasSnapshot && retentionNeeded);
-  }, [hasSnapshot, retentionNeeded]);
-  useEffect(() => () => publishRetention(false), []);
+  const bodyReadOnly = readOnly || current === undefined;
+  useTodoCanvasActivity({
+    hasSnapshot: value !== undefined,
+    readOnly: bodyReadOnly,
+    editing: editingContent,
+    retaining: nativeExpanded || editing || keepExpanded,
+    onEditingChange,
+    onRetentionChange,
+  });
 
   if (!value) {
     return content ?? (id ? <StatusText message="任务清单正文尚未加载" /> : null);
@@ -157,7 +189,6 @@ function TodoCanvasBody({
 
   const appearance = { paper: object.fill ?? todoPaper, uiScale: focusedReading ? 1 : 1 / zoom };
   const overview = isTodoOverview(geometry.width * zoom, geometry.height * zoom);
-  const bodyReadOnly = readOnly || current === undefined;
   const open = onOpenPresentation ?? (() => setExpanded(true));
   const nativeControls = {
     onOpenSource: onOpenNativeSource,

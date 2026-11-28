@@ -16,6 +16,9 @@ import {
   imageId,
   legacyStickerId,
   lockedImageId,
+  metadataConnectorId,
+  metadataConnectorLabel,
+  seedMetadataConnector,
   seedNativeObjects,
   stickerId,
   tableId,
@@ -26,8 +29,8 @@ type ContentRequest = MessageInitShape<typeof EditObjectContentRequestSchema>;
 type ContentEdit = ContentRequest['edit'];
 
 const server = useWhiteboardTestServer();
-const { editObjectContent } = BoardEditService.method;
-const { getObjectPayloads } = WhiteboardService.method;
+const { editObjectContent, reverseBoardEdit } = BoardEditService.method;
+const { getBoardScene, getObjectPayloads } = WhiteboardService.method;
 const originalWidth = 480;
 const initialColumns = ['col-1', 'col-2'];
 const extendedColumns = [...initialColumns, 'col-3'];
@@ -48,6 +51,69 @@ function readPayload(objectId: string) {
     objectIds: [objectId],
   });
 }
+
+function connectorText(text: string, payloadVersion: bigint) {
+  return {
+    objectId: metadataConnectorId,
+    result: { case: 'payload', value: { payloadVersion, body: { case: 'text', value: { text } } } },
+  };
+}
+
+async function expectMetadataConnector(revision: bigint) {
+  const { results } = await readPayload(metadataConnectorId);
+  expect(results[0]?.result.case).toBe('unavailable');
+  const { scene } = await callWhiteboard(server.address, viewerId, getBoardScene, {
+    boardId: mainBoardId,
+  });
+  expect(scene?.boardRevision).toBe(revision);
+  const connector = scene?.objects.find(({ objectId }) => objectId === metadataConnectorId);
+  expect(connector).toMatchObject({
+    kind: 'connector',
+    label: metadataConnectorLabel,
+  });
+  expect(connector?.payloadVersion).toBeUndefined();
+}
+
+test('materializes imported connector text on first edit and rejects stale edits after undo', async () => {
+  seedMetadataConnector(server.databasePath);
+  await expectMetadataConnector(0n);
+
+  const commandId = 'edit-imported-connector';
+  const text = 'Updated imported connector';
+  const edit = { case: 'text', value: { text } } as const;
+  const saved = await editContent(metadataConnectorId, commandId, 0n, edit);
+  expect(saved.receipt?.outcome).toMatchObject({
+    case: 'applied',
+    value: {
+      boardRevision: 1n,
+      changedObjects: [{ objectId: metadataConnectorId, label: text, payloadVersion: 1n }],
+      changedPayloads: [connectorText(text, 1n)],
+    },
+  });
+  await server.restart();
+  expect((await readPayload(metadataConnectorId)).results).toMatchObject([connectorText(text, 1n)]);
+  expect(await editContent(metadataConnectorId, commandId, 0n, edit)).toEqual(saved);
+
+  const undone = await callWhiteboard(server.address, editorId, reverseBoardEdit, {
+    boardId: mainBoardId,
+    commandId: 'undo-imported-connector',
+    source: { case: 'editCommandId', value: commandId },
+  });
+  expect(undone.receipt?.outcome).toMatchObject({ case: 'applied', value: { boardRevision: 2n } });
+  await expectMetadataConnector(2n);
+
+  const stale = await editContent(metadataConnectorId, 'stale-imported-connector', 0n, edit);
+  expect(stale.receipt?.outcome).toMatchObject({
+    case: 'conflict',
+    value: { boardRevision: 2n, currentPayloads: [connectorText(metadataConnectorLabel, 2n)] },
+  });
+  await expectMetadataConnector(2n);
+  const edited = await editContent(metadataConnectorId, 'retry-imported-connector', 2n, edit);
+  expect(edited.receipt?.outcome).toMatchObject({
+    case: 'applied',
+    value: { boardRevision: 3n, changedPayloads: [connectorText(text, 3n)] },
+  });
+});
 
 function tableEdit(
   columnIds: string[],
@@ -224,14 +290,28 @@ test.each(['html', 'diagram'] as const)(
     const oldState = await editContent(embedId, 'old-embed-state', 0n, stateEdit);
     expect(oldSource.receipt?.outcome.case).toBe('conflict');
     expect(oldState.receipt?.outcome.case).toBe('conflict');
-
-    const chart = await editContent(chartId, 'chart-state', 0n, stateEdit);
-    expect(chart.receipt?.outcome).toMatchObject({
-      case: 'rejected',
-      value: { reason: BoardEditRejectionReason.UNSUPPORTED_KIND },
-    });
   },
 );
+
+test('persists historical chart state and rejects source editing', async () => {
+  seedNativeObjects(server.databasePath, false);
+  const chart = await editContent(chartId, 'chart-state', 0n, stateEdit);
+  expect(chart.receipt?.outcome.case).toBe('applied');
+  const payload = await readPayload(chartId);
+  expect(payload.results[0]?.result).toMatchObject({
+    case: 'payload',
+    value: {
+      payloadVersion: 1n,
+      body: { case: 'embed', value: { sourceRevision: 0n, state: savedState.state } },
+    },
+  });
+
+  const source = await editContent(chartId, 'chart-source', 1n, updateSource);
+  expect(source.receipt?.outcome).toMatchObject({
+    case: 'rejected',
+    value: { reason: BoardEditRejectionReason.UNSUPPORTED_KIND },
+  });
+});
 
 test('rejects non-object and oversized HTML state', async () => {
   seedNativeObjects(server.databasePath, false);

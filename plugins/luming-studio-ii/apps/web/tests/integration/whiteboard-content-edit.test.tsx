@@ -279,6 +279,9 @@ test.each(['toolbar', 'keyboard'] as const)(
         '[data-document-focused-reading][data-document-view="edit"]',
       );
       expect(app.host.querySelector('dialog[open]')).toBeNull();
+      await expect
+        .poll(() => editing.querySelector('[data-document-editor]'), { timeout: 10_000 })
+        .not.toBeNull();
       const title = required<HTMLInputElement>(editing, 'input:not([type="search"])');
       replaceTitle(title, '确认正文版本');
       if (entry === 'keyboard') {
@@ -326,11 +329,14 @@ test.each(['toolbar', 'keyboard'] as const)(
       expect(app.host.querySelector('[data-document-focused-reading]')).toBeNull();
 
       await app.open(boardId, 'reopened');
-      expect(app.host.textContent).toContain('确认正文版本');
+      await expect
+        .poll(() => app.host.querySelector('h2[aria-label="文档标题"]')?.textContent)
+        .toBe('确认正文版本');
     } finally {
       app.dispose();
     }
   },
+  15_000,
 );
 
 test('keeps the document focus surface read-only for a viewer', async () => {
@@ -523,6 +529,111 @@ async function editContentText(app: ReturnType<typeof mountContent>, text: strin
     editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   });
 }
+
+test('shows a single page-top text save error and reconciles the retry with the draft', async () => {
+  const mock = createContentMock(
+    {
+      id: 'editable-text',
+      version: initialVersion,
+      body: { kind: 'text', value: { text: '原有文字' } },
+    },
+    { loseFirstResponse: true },
+  );
+  const app = mountContent(mock);
+
+  try {
+    await app.open(boardId);
+    await editContentText(app, '保留的文字草稿');
+    const notices = required(app.host, '[role="region"][aria-label="操作通知"]');
+    const editor = '[role="textbox"][contenteditable="true"]';
+    expect(required(app.canvas(), editor).textContent).toBe('保留的文字草稿');
+    expect(required(notices, '[role="alert"]').textContent).toContain('正文保存结果未知');
+    expect(app.host.textContent?.match(/正文保存结果未知/g)).toHaveLength(1);
+    expect(app.canvas().querySelector('[role="alert"]')).toBeNull();
+
+    await click(button(notices, '重试保存文字'));
+    expect(mock.commands).toHaveLength(2);
+    expect(mock.commands[1]).toBe(mock.commands[0]);
+    expect(notices.textContent).toBe('');
+    expect(app.canvas().querySelector(editor)).toBeNull();
+    expect(app.canvas().textContent).toContain('保留的文字草稿');
+  } finally {
+    app.dispose();
+  }
+});
+
+test.each([undefined, initialVersion])(
+  'only opens a connector label editor before payload loading when no version is recorded (%s)',
+  async (payloadVersion) => {
+    const objectId = 'legacy-connector';
+    const label = '原有连接线';
+    const revision = 9n;
+    const start = { x: 30, y: 50 };
+    const end = { x: 350, y: 50 };
+    const position = { x: 120, y: 50 };
+    const mock = createContentMock({
+      id: objectId,
+      version: initialVersion,
+      body: { kind: 'text', value: { text: label } },
+    });
+    const app = createAppMock(
+      {
+        ...mock.service,
+        async getScene() {
+          const scene = await mock.service.getScene(boardId);
+
+          return {
+            ...scene,
+            revision,
+            objects: [
+              {
+                id: objectId,
+                kind: 'connector',
+                label,
+                geometryVersion: 0n,
+                payloadVersion,
+                geometry: { ...start, width: 320, height: 1, rotation: 0 },
+                locked: false,
+                detail: {
+                  kind: 'connector',
+                  connection: { start: { point: start }, end: { point: end } },
+                },
+              },
+            ],
+          };
+        },
+        getPayloads: () => new Promise(() => {}),
+      },
+      { editService: mock.editService },
+    );
+
+    try {
+      await app.open(boardId);
+      await app.drag(position, position);
+      await press(app.canvas(), 'Enter');
+      const selector = '[role="textbox"][aria-label="连接线文字"]';
+      if (payloadVersion !== undefined) {
+        expect(app.host.querySelector(selector)).toBeNull();
+        expect(mock.commands).toHaveLength(0);
+        return;
+      }
+
+      const editor = required(app.host, selector);
+      expect(editor.textContent).toBe(label);
+      const text = '改写原有连接线';
+      await app.update(() => {
+        editor.replaceChildren(document.createTextNode(text));
+        editor.dispatchEvent(new Event('input', { bubbles: true }));
+        editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      });
+      expect(mock.commands).toMatchObject([
+        { objectId, expectedPayloadVersion: revision, edit: { kind: 'text', value: { text } } },
+      ]);
+    } finally {
+      app.dispose();
+    }
+  },
+);
 
 test('keeps independent local drafts after remount and only applies a manually compared current version', async () => {
   const objectId = 'saved-text';

@@ -105,6 +105,7 @@ function readKey(key: WireParticipantKey | undefined): BoardRoomParticipantKey {
 }
 
 function readParticipant(participant: WireParticipant): BoardRoomParticipant {
+  const { editingObjectIds } = participant;
   return {
     ...readKey(participant.key),
     displayName: participant.displayName,
@@ -123,6 +124,7 @@ function readParticipant(participant: WireParticipant): BoardRoomParticipant {
       participant.gestureExpiresAtUnixMs === undefined
         ? undefined
         : readServerTime(participant.gestureExpiresAtUnixMs),
+    ...(editingObjectIds.length ? { editingObjectIds } : {}),
   };
 }
 

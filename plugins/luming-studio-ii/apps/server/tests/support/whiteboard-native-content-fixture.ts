@@ -9,7 +9,32 @@ export const stickerId = 'native-sticker';
 export const legacyStickerId = 'native-symbol';
 export const imageId = 'native-image';
 export const lockedImageId = 'native-locked-image';
+export const metadataConnectorId = 'metadata-only-connector';
+export const metadataConnectorLabel = 'Imported connector label';
 export const assetPath = '/studio-archive-assets/' + mainBoardId + '/crop-asset';
+
+export function seedMetadataConnector(path: string) {
+  const database = openSqliteDatabase(path);
+  const detail = {
+    kind: 'connector',
+    start: { point: { x: 12, y: 28 } },
+    end: { point: { x: 492, y: 28 } },
+    bends: [],
+  };
+
+  try {
+    database.write((connection) => {
+      connection
+        .prepare(`
+          INSERT INTO board_objects (board_id, object_id, kind, label, layer_index, x, y, width, height, detail_json)
+          VALUES (?, ?, 'connector', ?, 3, 12, 28, 480, 1, ?)
+        `)
+        .run(mainBoardId, metadataConnectorId, metadataConnectorLabel, JSON.stringify(detail));
+    });
+  } finally {
+    database.close();
+  }
+}
 
 export function seedNativeObjects(
   path: string,

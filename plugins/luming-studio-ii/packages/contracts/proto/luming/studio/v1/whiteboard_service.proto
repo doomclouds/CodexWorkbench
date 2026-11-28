@@ -36,6 +36,7 @@ enum BoardExportFormat {
   BOARD_EXPORT_FORMAT_PNG = 3;
   BOARD_EXPORT_FORMAT_HTML = 4;
   BOARD_EXPORT_FORMAT_ZIP = 5;
+  BOARD_EXPORT_FORMAT_HTML_SOURCE = 6;
 }
 
 message ExportBoardResponse {
@@ -61,6 +62,7 @@ message ExportPngRegion {
   string html = 2;
   double width = 3;
   double height = 4;
+  optional bool scripted = 5;
 }
 
 message ExportBoardFile {

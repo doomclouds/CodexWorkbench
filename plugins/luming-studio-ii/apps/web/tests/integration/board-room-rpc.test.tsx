@@ -449,6 +449,7 @@ test('publishes ordered temporary presence and leaves using its next sequence', 
         cursor: { x: 10, y: 20 },
         following: true,
         gesture: wireGesture,
+        editingObjectIds: ['card'],
       });
 
       return toBinary(
@@ -475,6 +476,7 @@ test('publishes ordered temporary presence and leaves using its next sequence', 
       cursor: { x: 10, y: 20 },
       following: true,
       gesture,
+      editingObjectIds: ['card'],
     }),
   ).resolves.toBe(true);
   await expect(service.leavePresence(boardId, viewId, 2n)).resolves.toBe(true);
@@ -500,6 +502,7 @@ test('decodes a peer gesture lease and an explicit zero geometry version', () =>
               expiresAtUnixMs: BigInt(now + 18_000),
               gesture: wireGesture,
               gestureExpiresAtUnixMs: BigInt(now + 1_200),
+              editingObjectIds: ['card'],
             },
           ],
         },
@@ -529,6 +532,7 @@ test('decodes a peer gesture lease and an explicit zero geometry version', () =>
           viewId: 'peer-tab',
           gesture,
           gestureExpiresAtMillis: now + 1_200,
+          editingObjectIds: ['card'],
         },
       ],
     },

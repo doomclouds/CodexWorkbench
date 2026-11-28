@@ -153,7 +153,14 @@ export function createBoardRoomService(
       const result = await request(
         post,
         methods.updateBoardPresence,
-        { boardId, viewId, sequence, ...presence, gesture: writeRoomGesture(presence.gesture) },
+        {
+          boardId,
+          viewId,
+          sequence,
+          ...presence,
+          gesture: writeRoomGesture(presence.gesture),
+          editingObjectIds: [...(presence.editingObjectIds ?? [])],
+        },
         signal,
       );
 

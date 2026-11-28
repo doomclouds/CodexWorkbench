@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react';
 import type {
-  AttachedReviewSource,
   SuggestionAppliedReceipt,
   SuggestionPreviewFrame,
   SuggestionService,
@@ -17,7 +16,6 @@ export interface BoardSuggestionsSurfaceProps {
   readonly anchor: HTMLElement | null;
   readonly boardId: string;
   readonly updateKey?: string;
-  readonly revision: bigint;
   readonly service: SuggestionService;
   readonly createCommandId: () => string;
   readonly onRequestClose: () => void;
@@ -25,10 +23,6 @@ export interface BoardSuggestionsSurfaceProps {
   readonly onApplied: (receipt: SuggestionAppliedReceipt) => void;
   readonly onPreviewChange?: (active: boolean) => void;
   readonly renderPreview?: (frame: SuggestionPreviewFrame) => ReactNode;
-  readonly selection?: readonly string[];
-  readonly feedbackThreadId?: string;
-  readonly onAttachSource?: (reference: AttachedReviewSource) => void | Promise<void>;
-  readonly attachmentMode?: 'context' | 'copy';
   readonly inline?: InlineBoardSuggestions;
 }
 

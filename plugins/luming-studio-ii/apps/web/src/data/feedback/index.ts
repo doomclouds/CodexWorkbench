@@ -53,7 +53,7 @@ export function createBoardFeedbackService(post: FeedbackPost): BoardFeedbackSer
   const { listThreads, getThread, applyFeedback, getFeedbackReceipt } = FeedbackService.method;
 
   return {
-    async listThreads({ boardId, pageSize, cursor, status, authorId }, signal) {
+    async listThreads({ boardId, pageSize, cursor, status, authorId, authoredByViewer }, signal) {
       const response = await request(
         post,
         listThreads,
@@ -63,6 +63,7 @@ export function createBoardFeedbackService(post: FeedbackPost): BoardFeedbackSer
           cursor,
           status: status ? threadStatus[status] : undefined,
           authorActorId: authorId,
+          authoredByViewer,
         },
         signal,
       );

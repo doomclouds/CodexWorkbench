@@ -1,6 +1,12 @@
-import { useEffectEvent, useLayoutEffect, useRef, useState } from 'react';
+import {
+  createContext,
+  useContext,
+  useEffectEvent,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import type { CSSProperties } from 'react';
-import { createPortal } from 'react-dom';
 import { Button, StatusText } from '../../../base/index.js';
 import type {
   CanvasObjectExtension,
@@ -31,8 +37,18 @@ interface SaveFailure {
   readonly attempt: TextCommit;
   readonly finish?: FinishMode;
   readonly conflict?: true;
-  readonly noticeRoot: HTMLElement | null;
 }
+
+export interface TextSaveIssue {
+  readonly objectId: string;
+  readonly message: string;
+  readonly retry?: () => void;
+  readonly discard?: () => void;
+}
+
+export const TextSaveNoticePublisher = createContext<
+  ((notice: TextSaveIssue) => () => void) | undefined
+>(undefined);
 
 type FinishMode = 'close' | 'adjacent';
 type SaveMode = 'autosave' | FinishMode;
@@ -138,7 +154,7 @@ function TextSaveNotice({ failure, selected, writable, onRetry, onDiscard }: Tex
     return null;
   }
 
-  const notice = (
+  return (
     <div className="studio-ui-canvas-text-failure" data-canvas-native="" data-canvas-controls="">
       <StatusText message={failure.message} tone="error" announcement="assertive" />
       {writable && !failure.conflict && <Button label="重试保存文字" onActivate={onRetry} />}
@@ -147,8 +163,6 @@ function TextSaveNotice({ failure, selected, writable, onRetry, onDiscard }: Tex
       )}
     </div>
   );
-
-  return failure.noticeRoot ? createPortal(notice, failure.noticeRoot) : notice;
 }
 
 interface TextPaintStyle extends CSSProperties {
@@ -287,6 +301,7 @@ function CanvasTextBody({
   request,
   content,
   onRetentionChange,
+  onEditingChange,
 }: CanvasObjectViewProps) {
   const [receiptSource, setReceiptSource] = useState<TextSource>();
   const [draft, setDraft] = useState<TextDraft>();
@@ -295,11 +310,11 @@ function CanvasTextBody({
   const [closedFormatRequest, setClosedFormatRequest] = useState<number>();
   const [failure, setFailure] = useState<SaveFailure>();
   const [saving, setSaving] = useState<SaveMode>();
-  const frame = useRef<HTMLDivElement>(null);
   const latestDraft = useRef<TextDraft | undefined>(undefined);
   const writeInFlight = useRef<SaveMode | undefined>(undefined);
   const pendingFinish = useRef<FinishMode | undefined>(undefined);
   const canWrite = useRef(false);
+  const publishNotice = useContext(TextSaveNoticePublisher);
   const source = resolveSource(readTextSource(payload, object.label), receiptSource);
   const body = source?.body ?? { text: object.label };
   const canMutate = canWriteText(id, readOnly, source);
@@ -315,6 +330,17 @@ function CanvasTextBody({
   const editingRequested = requested || formatting || localEdit;
   const editing = writable && editingRequested;
   useTextRetention(editing, draft, failure, saving !== undefined, onRetentionChange);
+  const reportEditing = useEffectEvent(() => {
+    onEditingChange?.(true);
+
+    return () => onEditingChange?.(false);
+  });
+  useLayoutEffect(() => {
+    if (editing) {
+      return reportEditing();
+    }
+  }, [editing]);
+
   useLayoutEffect(() => {
     canWrite.current = canMutate;
   }, [canMutate]);
@@ -394,8 +420,7 @@ function CanvasTextBody({
   }
 
   function reportSaveFailure(message: string, attempt: TextCommit, conflict?: true) {
-    const noticeRoot = frame.current?.closest<HTMLElement>('[data-canvas-root]') ?? null;
-    setFailure({ message, attempt, finish: pendingFinish.current, conflict, noticeRoot });
+    setFailure({ message, attempt, finish: pendingFinish.current, conflict });
   }
 
   async function save(mode: SaveMode, { confirmed = source, retry }: SaveOptions = {}) {
@@ -474,6 +499,20 @@ function CanvasTextBody({
     }
   }
 
+  const publishSaveFailure = useEffectEvent((objectId: string, current: SaveFailure) =>
+    publishNotice?.({
+      objectId,
+      message: current.message,
+      retry: canMutate && !current.conflict ? handleRetry : undefined,
+      discard: canMutate ? handleCloseEditor : undefined,
+    }),
+  );
+  useLayoutEffect(() => {
+    if (publishNotice && id && failure) {
+      return publishSaveFailure(id, failure);
+    }
+  }, [id, failure, publishNotice, canMutate, editRequest, formatSequence]);
+
   const autosaveAllowed = editing && !saving && !failure;
   useTextAutosave(automaticText(draft, object.kind, autosaveAllowed), () => sendSave('autosave'));
 
@@ -491,7 +530,6 @@ function CanvasTextBody({
 
   return (
     <div
-      ref={frame}
       className="studio-ui-canvas-text-body"
       data-canvas-label-state={captionState}
       style={textPaintStyle(object)}
@@ -515,13 +553,15 @@ function CanvasTextBody({
           onRequestEdit={canRequestDirectly ? () => setLocalEdit(true) : undefined}
         />
       </div>
-      <TextSaveNotice
-        failure={failure}
-        selected={selected}
-        writable={writable}
-        onRetry={handleRetry}
-        onDiscard={handleCloseEditor}
-      />
+      {!publishNotice && (
+        <TextSaveNotice
+          failure={failure}
+          selected={selected}
+          writable={writable}
+          onRetry={handleRetry}
+          onDiscard={handleCloseEditor}
+        />
+      )}
     </div>
   );
 }

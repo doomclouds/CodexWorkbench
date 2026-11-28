@@ -250,6 +250,30 @@ test('rejects gesture publication by a viewer and malformed or oversized geometr
   expect(duplicate.status).toBe(400);
 });
 
+test('rejects oversized or unauthorized editing targets while retaining view-only presence', async () => {
+  const sample = { ...scope, viewId, sequence: 1n, cursor: extras.cursor };
+  const editing = { ...sample, editingObjectIds: [shapeId] };
+  const denied = await sendWhiteboardRequest(
+    server.address,
+    viewerId,
+    updateBoardPresence,
+    editing,
+  );
+  expect(denied.status).toBe(403);
+
+  const { accepted } = await callWhiteboard(server.address, viewerId, updateBoardPresence, sample);
+  expect(accepted).toBe(true);
+
+  const invalidTargets = [['bad/id'], ['a', 'b', 'c', 'd', 'e'], ['表'.repeat(160), shapeId]];
+  for (const editingObjectIds of invalidTargets) {
+    const invalid = await sendWhiteboardRequest(server.address, editorId, updateBoardPresence, {
+      ...sample,
+      editingObjectIds,
+    });
+    expect(invalid.status).toBe(400);
+  }
+});
+
 test('closes the old stream on role downgrade and denies another board', async () => {
   const forbidden = await fetch(streamUrl(secondBoardId, viewId), {
     headers: { [actorHeader]: viewerId },

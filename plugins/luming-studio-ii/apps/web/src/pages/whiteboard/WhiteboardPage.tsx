@@ -6,13 +6,13 @@ import type { AttachedReviewSource, SuggestionService } from '../../data/suggest
 import type {
   BoardHistoryService,
   ExportBoard,
-  ExportBoardFile,
+  RequestBoardDownload,
   WhiteboardEditService,
   WhiteboardService,
 } from '../../data/whiteboard/index.js';
 import { BoardSharingSurface } from '../../surfaces/board-sharing/index.js';
 import { BoardSuggestionsSurface } from '../../surfaces/board-suggestions/index.js';
-import { RoomPresenceSurface } from '../../surfaces/room-presence/index.js';
+import { participantColor, RoomPresenceSurface } from '../../surfaces/room-presence/index.js';
 import { SharedTimerSurface } from '../../surfaces/shared-timer/index.js';
 import {
   WhiteboardEditorSurface,
@@ -28,6 +28,9 @@ import { StatePanel } from '../../ui/base/index.js';
 
 interface BoardReviewReference extends AttachedReviewSource {
   readonly boardId: string;
+  readonly feedbackThreadId: string;
+  readonly comment: string;
+  readonly excerpt?: string;
 }
 
 interface DocumentAsset {
@@ -41,7 +44,7 @@ export interface WhiteboardPageProps {
   readonly createCommandId: () => string;
   readonly onBack?: () => void;
   readonly exportBoard?: ExportBoard;
-  readonly downloadExport?: (file: ExportBoardFile) => void;
+  readonly downloadExport?: RequestBoardDownload;
   readonly downloadObjectFile?: WhiteboardEditorFeatures['downloadObjectFile'];
   readonly clipboard?: WhiteboardEditorFeatures['clipboard'];
   readonly localDrafts?: WhiteboardEditorFeatures['localDrafts'];
@@ -55,11 +58,13 @@ export interface WhiteboardPageProps {
   readonly historyService?: BoardHistoryService;
   readonly feedbackService?: BoardFeedbackService;
   readonly suggestions?: SuggestionService;
-  readonly onAttachReviewSource?: (reference: BoardReviewReference) => Promise<void>;
-  readonly reviewSourceMode?: 'context' | 'copy';
+  readonly onAttachReviewSource?: (
+    reference: BoardReviewReference,
+    signal: AbortSignal,
+  ) => Promise<void>;
   readonly sharingService?: BoardSharingService;
   readonly copyShareLink?: (url: string) => Promise<void>;
-  readonly theme?: ComponentProps<typeof BoardSharingSurface>['theme'];
+  readonly theme?: WhiteboardEditorFeatures['theme'];
   readonly lanSharing?: boolean;
   readonly consumeShareEntry?: () => boolean;
   readonly commentAccess?: boolean;
@@ -93,14 +98,45 @@ function roomFeatures({
   };
 }
 
+function activeShareMembers(room: BoardRoomSession) {
+  const { status, actorId, participants } = room.getSnapshot();
+  if (status !== 'online') {
+    return undefined;
+  }
+
+  const members = new Set(participants.map((participant) => participant.actorId));
+  if (actorId !== undefined) {
+    members.delete(actorId);
+  }
+  return members;
+}
+
+function subscribeShareMembers(room: BoardRoomSession, changed: () => void) {
+  let members = activeShareMembers(room);
+  return room.subscribe(() => {
+    const previous = members;
+    members = activeShareMembers(room);
+    if (!members) {
+      return;
+    }
+
+    const different =
+      !previous || members.size !== previous.size || [...members].some((id) => !previous.has(id));
+
+    if (different) {
+      changed();
+    }
+  });
+}
+
 function shareAndExport({
   sharingService,
   copyShareLink,
   createCommandId,
   exportBoard,
   downloadExport,
-  theme,
   lanSharing,
+  room,
 }: WhiteboardPageProps): WhiteboardEditorFeatures['renderExport'] {
   if (!sharingService || !copyShareLink) {
     return exportBoard && downloadExport
@@ -110,6 +146,10 @@ function shareAndExport({
       : undefined;
   }
 
+  const subscribeMemberPresence = room
+    ? (listener: () => void) => subscribeShareMembers(room, listener)
+    : undefined;
+
   return (frame) => (
     <BoardSharingSurface
       anchor={frame.anchor}
@@ -118,8 +158,8 @@ function shareAndExport({
       service={sharingService}
       createCommandId={createCommandId}
       copyLink={copyShareLink}
-      theme={theme}
       onLanSharingChange={lanSharing === undefined ? frame.onLanSharingChange : undefined}
+      subscribeMemberPresence={subscribeMemberPresence}
       onRequestClose={frame.onRequestClose}
       restoreFocus={frame.restoreFocus}
       exportContent={
@@ -180,13 +220,13 @@ function whiteboardFeatures(props: WhiteboardPageProps): WhiteboardEditorFeature
     commentAccess,
     suggestions,
     onAttachReviewSource,
-    reviewSourceMode,
   } = props;
 
   return {
     ...roomFeatures(props),
     fitOnMount: props.fitOnMount,
     initialBoardView: props.initialBoardView,
+    theme: props.theme,
     ...documentImages(props),
     Viewing: WhiteboardViewingSurface,
     editService,
@@ -215,22 +255,33 @@ function whiteboardFeatures(props: WhiteboardPageProps): WhiteboardEditorFeature
             {...frame}
             service={feedbackService}
             createCommandId={createCommandId}
-            attachmentMode={reviewSourceMode}
+            colorForAuthor={participantColor}
             onAttachThread={
               suggestions && onAttachReviewSource
                 ? async ({ boardId, threadId, commandId, signal }) => {
+                    const { thread } = await feedbackService.getThread(
+                      { boardId, threadId, pageSize: 1 },
+                      signal,
+                    );
+                    signal.throwIfAborted();
                     const source = await suggestions.createReviewSource(
                       { boardId, commandId, origin: { kind: 'feedback', threadId } },
                       signal,
                     );
                     signal.throwIfAborted();
-                    await onAttachReviewSource({
-                      boardId,
-                      sourceId: source.sourceId,
-                      capturedBoardRevision: source.capturedBoardRevision,
-                      targetsBoardRevision: source.targetsBoardRevision,
-                      targets: source.targets,
-                    });
+                    await onAttachReviewSource(
+                      {
+                        boardId,
+                        feedbackThreadId: thread.id,
+                        comment: thread.first.text,
+                        excerpt: thread.anchor.frozenExcerpt,
+                        sourceId: source.sourceId,
+                        capturedBoardRevision: source.capturedBoardRevision,
+                        targetsBoardRevision: source.targetsBoardRevision,
+                        targets: source.targets,
+                      },
+                      signal,
+                    );
                   }
                 : undefined
             }
@@ -244,7 +295,6 @@ function whiteboardFeatures(props: WhiteboardPageProps): WhiteboardEditorFeature
             inline={frame.inline}
             boardId={frame.boardId}
             updateKey={frame.updateKey}
-            revision={frame.revision}
             service={suggestions}
             createCommandId={createCommandId}
             onRequestClose={frame.onClose}
@@ -254,14 +304,6 @@ function whiteboardFeatures(props: WhiteboardPageProps): WhiteboardEditorFeature
             renderPreview={({ proposalId, optionId, changes }) =>
               frame.renderPreview(proposalId + ':' + optionId, changes)
             }
-            selection={frame.selection}
-            feedbackThreadId={frame.feedbackThreadId}
-            onAttachSource={
-              onAttachReviewSource
-                ? (source) => onAttachReviewSource({ boardId: frame.boardId, ...source })
-                : undefined
-            }
-            attachmentMode={reviewSourceMode}
           />
         )
       : undefined,

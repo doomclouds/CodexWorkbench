@@ -1,5 +1,8 @@
+import { captureScriptedRaster } from './vector-scripted-capture.js';
+import { freezeVideoFrame } from './vector-video.js';
+
 const regionPolicy =
-  "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'; form-action 'none'\">";
+  "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'; img-src data:; media-src data:; font-src data:; base-uri 'none'; form-action 'none'\">";
 const removeElements = [
   'script',
   'style',
@@ -159,14 +162,16 @@ interface BrowserVectorRegion {
   readonly html: string;
   readonly width: number;
   readonly height: number;
+  readonly scripted?: boolean;
 }
 
 export async function captureVectorRegion(
-  { html, width, height }: BrowserVectorRegion,
+  region: BrowserVectorRegion,
   signal: AbortSignal,
 ): Promise<string> {
+  const { html, width, height } = region;
   const frame = document.createElement('iframe');
-  frame.setAttribute('sandbox', 'allow-same-origin');
+  frame.setAttribute('sandbox', region.scripted ? 'allow-scripts' : 'allow-same-origin');
   frame.setAttribute('aria-hidden', 'true');
   frame.inert = true;
   frame.style.cssText = [
@@ -179,9 +184,23 @@ export async function captureVectorRegion(
     'width:' + width + 'px',
     'height:' + height + 'px',
   ].join(';');
-  frame.srcdoc = regionPolicy + html;
 
   try {
+    if (region.scripted) {
+      const raster = await captureScriptedRaster(frame, region, signal);
+      const image = new Image();
+      await loadRenderResource(
+        image,
+        () => {
+          image.src = raster;
+        },
+        signal,
+      );
+
+      return `<image width="${width}" height="${height}" preserveAspectRatio="none" href="${raster}"/>`;
+    }
+
+    frame.srcdoc = '<!doctype html>' + regionPolicy + html.replace(/^\s*<!doctype[^>]*>/iu, '');
     await loadRenderResource(frame, () => document.body.append(frame), signal);
     const body = frame.contentDocument?.body;
     const view = frame.contentWindow;
@@ -189,6 +208,11 @@ export async function captureVectorRegion(
       throw new Error('浏览器无法读取隔离的 HTML 排版。请导出 HTML。');
     }
 
+    for (const video of body.querySelectorAll<HTMLVideoElement>(
+      'video[data-studio-export-video]',
+    )) {
+      await freezeVideoFrame(video, region, signal);
+    }
     signal.throwIfAborted();
 
     return serializeRegion(body, view);

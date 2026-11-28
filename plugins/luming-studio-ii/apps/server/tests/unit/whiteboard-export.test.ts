@@ -129,7 +129,7 @@ describe('fixed revision board export', () => {
       [{ objectId: diagram.objectId, payloadVersion: 0n, bodyKind: 'embed', data: { html } }],
     );
     const application = createWhiteboardApplication(repository);
-    const command = { ...allJson, format: 'html' } as const;
+    const command = { ...allJson, format: 'html-source' } as const;
     const result = application.exportBoard(viewer, {
       ...command,
       scope: { kind: 'selection', objectIds: [diagram.objectId] },
@@ -156,6 +156,137 @@ describe('fixed revision board export', () => {
         scope: { kind: 'selection', objectIds: [neighbor.objectId] },
       }),
     ).toEqual({ kind: 'rejected', reason: 'unsupported' });
+  });
+
+  it('composes scoped offline HTML with native tables, pictures, tasks, and formatted text', () => {
+    const table = object('table', { kind: 'table', label: 'Schedule', geometry: outline });
+    const doc = object('doc', {
+      kind: 'document',
+      label: 'Specification',
+      geometry: { ...outline, x: 120, rotation: 15 },
+    });
+    const note = object('note', { kind: 'note', label: 'note', geometry: { ...outline, x: 240 } });
+    const tasks = object('todo', {
+      kind: 'todo',
+      label: 'Tasks',
+      geometry: { ...outline, x: 360 },
+    });
+    const media = object('video', {
+      kind: 'video',
+      label: 'Recording',
+      geometry: { ...outline, x: 480 },
+    });
+    const outside = object('outside', {
+      kind: 'text',
+      label: 'Excluded',
+      geometry: { ...outline, x: 600 },
+    });
+    const repository = new AssetRepository(
+      [table, doc, note, tasks, media, outside],
+      [
+        {
+          objectId: 'table',
+          payloadVersion: 0n,
+          bodyKind: 'table',
+          data: {
+            grid: {
+              head: true,
+              columnWidths: [40, 60],
+              rows: [
+                { cells: [{ text: 'Stage' }, { text: '**Date**' }] },
+                { cells: [{ text: 'Implement' }, { number: 2026 }] },
+              ],
+            },
+          },
+        },
+        {
+          objectId: 'doc',
+          payloadVersion: 0n,
+          bodyKind: 'document',
+          data: {
+            blocks: [
+              {
+                type: 'numberedListItem',
+                props: { start: 3 },
+                content: 'Part three',
+                children: [{ type: 'bulletListItem', content: 'Nested task' }],
+              },
+              { type: 'image', props: { url: coverSource, caption: 'Figure' } },
+            ],
+          },
+        },
+        {
+          objectId: 'note',
+          payloadVersion: 0n,
+          bodyKind: 'text',
+          data: {
+            text: '**Important** [Guide](https://example.test/guide)',
+          },
+        },
+        {
+          objectId: 'todo',
+          payloadVersion: 0n,
+          bodyKind: 'todo',
+          data: {
+            items: [{ text: 'Review completed', checked: true }],
+          },
+        },
+        {
+          objectId: 'video',
+          payloadVersion: 0n,
+          bodyKind: 'video',
+          data: {
+            src: 'data:video/mp4;base64,AAAA',
+            poster: coverSource,
+          },
+        },
+      ],
+    );
+    const command = {
+      ...allJson,
+      format: 'html',
+      scope: { kind: 'selection', objectIds: ['video', 'todo', 'note', 'doc', 'table'] },
+    } as const;
+    const html = fileText(createWhiteboardApplication(repository).exportBoard(viewer, command));
+
+    expect(html).toContain('<table class="board-export-table"');
+    expect(html).toContain('<col style="width:40%">');
+    expect(html).toContain('<strong>Date</strong>');
+    expect(html).toContain('2026</div></td>');
+    expect(html).toContain('<ol start="3"><li>Part three<ul><li>Nested task</li>');
+    expect(html).toContain('rotate(15deg)');
+    expect(html).toContain('data:image/png;base64,' + png);
+    expect(html).toContain('<strong>Important</strong>');
+    expect(html).toContain('href="https://example.test/guide"');
+    expect(html).toContain('type="checkbox" checked>Review completed');
+    expect(html).toContain('<video controls playsinline');
+    expect(html).toContain('src="data:video/mp4;base64,AAAA"');
+    expect(html).not.toContain('Excluded');
+    expect(html.indexOf('aria-label="Schedule"')).toBeLessThan(html.indexOf('Review completed'));
+    expect(repository.assetQueries).toEqual(['cover']);
+  });
+
+  it('rejects document media that cannot be included offline', () => {
+    const doc = object('doc', { kind: 'document', geometry: outline });
+    const repository = new TestWhiteboardRepository(
+      [doc],
+      [
+        {
+          objectId: 'doc',
+          payloadVersion: 0n,
+          bodyKind: 'document',
+          data: {
+            blocks: [{ type: 'image', props: { url: 'https://example.test/cover.png' } }],
+          },
+        },
+      ],
+    );
+    const result = createWhiteboardApplication(repository).exportBoard(viewer, {
+      ...allJson,
+      format: 'html',
+    });
+
+    expect(result).toEqual({ kind: 'rejected', reason: 'assetUnavailable' });
   });
 
   it('checks access before exposing a revision and rechecks access when delivering', () => {

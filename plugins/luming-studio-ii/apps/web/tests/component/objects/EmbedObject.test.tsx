@@ -99,6 +99,7 @@ it('anchors a verified sandbox selection to a node or to the clicked object posi
   await act(async () => runtime.click('[data-studio-id="value"]', 125, 150));
   expect(onAnnotateContent).toHaveBeenCalledExactlyOnceWith({
     target: { kind: 'html', nodeIds: ['value'], sourceRevision: 2n },
+    excerpt: 'A poll',
     u: 0.25,
     v: 0.5,
   });

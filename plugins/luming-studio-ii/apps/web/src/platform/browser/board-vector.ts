@@ -15,7 +15,7 @@ const maxSvgSize = 64 * 1024 * 1024;
 const renderTimeout = 15_000;
 const pngMimeType = 'image/png';
 const markerPattern =
-  /<div xmlns="http:\/\/www\.w3\.org\/1999\/xhtml" data-studio-png-region="(\d+)"><\/div>/gu;
+  /<div xmlns="http:\/\/www\.w3\.org\/1999\/xhtml" data-studio-png-region="(\d+)"><\/div>|<g data-studio-png-region="(\d+)"><\/g>/gu;
 
 function checkSize(width: number, height: number): void {
   const validWidth = width > 0 && width <= maxRenderSide;
@@ -27,9 +27,14 @@ function checkSize(width: number, height: number): void {
 
 async function collectSvg(source: BrowserVectorSource, signal: AbortSignal): Promise<string> {
   const { svgTemplate, regions } = source;
-  const placeholders = new Set<number>();
-  for (const [, id] of svgTemplate.matchAll(markerPattern)) {
-    placeholders.add(Number(id));
+  const placeholders = new Map<number, boolean>();
+  for (const [, staticId, scriptedId] of svgTemplate.matchAll(markerPattern)) {
+    const id = Number(staticId ?? scriptedId);
+    if (placeholders.has(id)) {
+      throw new Error('图解排版区域与已保存的白板不匹配。');
+    }
+
+    placeholders.set(id, scriptedId !== undefined);
   }
   if (placeholders.size !== regions.length) {
     throw new Error('PNG 排版区域与已保存的白板不匹配。');
@@ -40,10 +45,11 @@ async function collectSvg(source: BrowserVectorSource, signal: AbortSignal): Pro
   for (const region of regions) {
     signal.throwIfAborted();
     checkSize(region.width, region.height);
-    if (!placeholders.delete(region.index)) {
+    if (placeholders.get(region.index) !== (region.scripted === true)) {
       throw new Error('图解排版区域与已保存的白板不匹配。');
     }
 
+    placeholders.delete(region.index);
     const regionMarkup = await captureVectorRegion(region, signal);
     size += regionMarkup.length;
     if (size > maxSvgSize) {
@@ -53,17 +59,20 @@ async function collectSvg(source: BrowserVectorSource, signal: AbortSignal): Pro
     markup.set(region.index, regionMarkup);
   }
 
-  return svgTemplate.replaceAll(markerPattern, (_marker, id: string) => {
-    const key = Number(id);
-    const region = markup.get(key);
-    if (region === undefined) {
-      throw new Error('图解排版区域与已保存的白板不匹配。');
-    }
+  return svgTemplate.replaceAll(
+    markerPattern,
+    (_marker, staticId?: string, scriptedId?: string) => {
+      const key = Number(staticId ?? scriptedId);
+      const region = markup.get(key);
+      if (region === undefined) {
+        throw new Error('图解排版区域与已保存的白板不匹配。');
+      }
 
-    markup.delete(key);
+      markup.delete(key);
 
-    return region;
-  });
+      return region;
+    },
+  );
 }
 
 function encodePng(canvas: HTMLCanvasElement): Promise<Blob> {

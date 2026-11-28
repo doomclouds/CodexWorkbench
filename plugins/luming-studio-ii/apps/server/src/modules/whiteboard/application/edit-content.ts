@@ -132,12 +132,18 @@ function contentKinds(kind: ContentOperation['kind']) {
   }
 }
 
-function objectTakesContent(kind: string, expected: string) {
-  return (
-    kind === expected ||
-    (expected === 'text' && textObjects.has(kind)) ||
-    (expected === 'html' && kind === 'diagram')
-  );
+function objectTakesContent(kind: string, expected: string, operation: ContentOperation['kind']) {
+  if (kind === expected) {
+    return true;
+  }
+  if (expected === 'text') {
+    return textObjects.has(kind);
+  }
+
+  const diagram = expected === 'html' && kind === 'diagram';
+  const chartState = operation === 'embedState' && kind === 'chart';
+
+  return diagram || chartState;
 }
 
 const textObjects = new Set(['note', 'shape', 'section', 'connector']);
@@ -273,6 +279,24 @@ function clearStandaloneText(
   });
 }
 
+function metadataConnectorText(
+  board: BoardHeader,
+  object: BoardObject,
+  operation: ContentOperation,
+): PayloadRecord | undefined {
+  const connector = object.kind === 'connector' && object.detail?.kind === 'connector';
+  if (operation.kind !== 'text' || !connector || object.payloadVersion !== undefined) {
+    return undefined;
+  }
+
+  return {
+    objectId: object.objectId,
+    bodyKind: 'text',
+    payloadVersion: board.revision,
+    data: { text: object.label },
+  };
+}
+
 export function planContentEdit(
   writer: BoardEditPlanningReader,
   board: BoardHeader,
@@ -286,11 +310,12 @@ export function planContentEdit(
   }
 
   const { objectKind, bodyKind } = contentKinds(operation.kind);
-  if (!objectTakesContent(object.kind, objectKind)) {
+  if (!objectTakesContent(object.kind, objectKind, operation.kind)) {
     return { kind: 'rejected', reason: 'unsupportedKind' };
   }
 
-  const [current] = writer.getPayloads(boardId, [objectId]);
+  const [stored] = writer.getPayloads(boardId, [objectId]);
+  const current = stored ?? metadataConnectorText(board, object, operation);
   if (!current || current.bodyKind !== bodyKind) {
     return { kind: 'rejected', reason: 'versionUnavailable' };
   }

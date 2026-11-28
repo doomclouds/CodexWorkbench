@@ -5,9 +5,7 @@ import { createPortal } from 'react-dom';
 import type { BoardSuggestion } from '../../data/suggestions/index.js';
 import { AnchoredPopover, Button, StatusText, type ButtonHandle } from '../../ui/base/index.js';
 import type { BoardSuggestionsSurfaceProps } from './contracts.js';
-import { SuggestionAttachment } from './SuggestionAttachment.js';
 import { SuggestionCard } from './SuggestionCard.js';
-import { useReviewAttachment } from './use-review-attachment.js';
 import { useSuggestionDecision } from './use-suggestion-decision.js';
 import { useSuggestionList } from './use-suggestion-list.js';
 import { useSuggestionPreview } from './use-suggestion-preview.js';
@@ -171,7 +169,6 @@ function SuggestionReviewSurface(props: BoardSuggestionsSurfaceProps) {
   const refresh = () => list.requestRead();
   const preview = useSuggestionPreview({ boardId, service, active, refresh });
   const decision = useSuggestionDecision({ ...props, refresh });
-  const attachment = useReviewAttachment(props);
   const busy = Boolean(decision.recovery) || list.loading || list.failure !== undefined;
   const hasPreviewHost = !inline || inline.previewHost !== null;
   const previewEnabled = renderPreview !== undefined && hasPreviewHost;
@@ -234,7 +231,6 @@ function SuggestionReviewSurface(props: BoardSuggestionsSurfaceProps) {
       onClose={handleClose}
       overlay={overlay}
     >
-      <SuggestionAttachment {...props} attachment={attachment} />
       <ReviewRecovery decision={decision} />
       {active && (
         <SuggestionResults

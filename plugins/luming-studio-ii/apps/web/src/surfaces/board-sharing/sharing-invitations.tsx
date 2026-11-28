@@ -1,4 +1,5 @@
 import {
+  Check,
   ChevronDown,
   Copy,
   Eye,
@@ -113,10 +114,12 @@ function InvitationRow({
   link,
   state,
   actions,
+  copied,
 }: {
   link: SharingLink;
   state: BoardSharingState;
   actions: InvitationActions;
+  copied: boolean;
 }) {
   const { role, enabled, url } = link;
   const owned = state.role === 'owner';
@@ -148,25 +151,39 @@ function InvitationRow({
         disabled={actions.locked || (state.enabled && enabled && !url)}
         onClick={(event) => handleInvitationClick(event.currentTarget)}
       >
-        {canCopy && <Copy size={14} aria-hidden="true" />}
-        {canCopy ? '复制链接' : '启用链接'}
+        {canCopy ? <CopyLinkLabel label="复制链接" copied={copied} /> : '启用链接'}
       </button>
       {owned && state.enabled ? <InvitationMenu link={link} actions={actions} /> : null}
     </div>
   );
 }
 
+function CopyLinkLabel({ label, copied }: { label: string; copied: boolean }) {
+  const Icon = copied ? Check : Copy;
+  return (
+    <>
+      <Icon size={14} aria-hidden="true" />
+      <span className="board-sharing__copy-label">
+        <span aria-hidden={copied || undefined}>{label}</span>
+        {copied && <span>已复制</span>}
+      </span>
+    </>
+  );
+}
+
 export function SharingInvitations({
   state,
   actions,
+  copiedUrl,
   onCopyMember,
 }: {
   state: BoardSharingState;
   actions: InvitationActions;
+  copiedUrl?: string;
   onCopyMember: (url: string, trigger: HTMLButtonElement) => void;
 }) {
   const owner = state.role === 'owner';
-  const defaults = invitationRoles.map((role) => ({ role, enabled: true }));
+  const defaults: readonly SharingLink[] = invitationRoles.map((role) => ({ role, enabled: true }));
   const ownerLinks = state.enabled ? state.links : defaults;
   const links = owner ? ownerLinks : state.links.filter(({ enabled, url }) => enabled && url);
   const memberUrl = state.memberUrl;
@@ -176,7 +193,13 @@ export function SharingInvitations({
       <h3>邀请链接</h3>
       <div className="board-sharing__invitation-list">
         {links.map((link) => (
-          <InvitationRow key={link.role} link={link} state={state} actions={actions} />
+          <InvitationRow
+            key={link.role}
+            link={link}
+            state={state}
+            actions={actions}
+            copied={Boolean(copiedUrl && copiedUrl === link.url)}
+          />
         ))}
       </div>
       {!owner && (
@@ -190,6 +213,7 @@ export function SharingInvitations({
           <button
             type="button"
             className="board-sharing__button board-sharing__button--copy"
+            aria-label="复制页面链接"
             disabled={actions.locked || !memberUrl}
             onClick={(event) => {
               if (memberUrl) {
@@ -197,13 +221,19 @@ export function SharingInvitations({
               }
             }}
           >
-            <Copy size={14} aria-hidden="true" /> 复制页面链接
+            <CopyLinkLabel
+              label="复制页面链接"
+              copied={Boolean(copiedUrl && copiedUrl === memberUrl)}
+            />
           </button>
         </div>
       ) : null}
       {owner && !state.enabled ? (
         <p className="board-sharing__muted">复制链接仅创建本机邀请，不会自动开启局域网共享。</p>
       ) : null}
+      <span className="board-sharing__copy-status" role="status">
+        {copiedUrl ? '已复制链接' : ''}
+      </span>
     </section>
   );
 }

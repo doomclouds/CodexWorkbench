@@ -7,12 +7,14 @@ import type {
 } from '../../data/feedback/index.js';
 import type { CanvasContentLocationRequest } from '../../ui/domain/canvas/index.js';
 import type { FeedbackCanvasObject, WhiteboardFeedbackSurfaceProps } from './contracts.js';
+import type { CreateDraft } from './FeedbackPanelContent.js';
 import { locateAnchor, locateDraft } from './geometry.js';
 
 interface AnchorSelection {
   readonly id: string;
   readonly anchor?: FeedbackAnchor;
   readonly draftTarget?: FeedbackTarget;
+  readonly draftPoint?: FeedbackAnchor['frozenPoint'];
 }
 
 interface LocationOptions extends Pick<
@@ -27,8 +29,23 @@ interface LocationOptions extends Pick<
   readonly pinnedThreads: readonly FeedbackThread[];
   readonly selection?: AnchorSelection;
   readonly detail?: FeedbackThreadPage;
+  readonly draft?: CreateDraft;
   readonly focusedObjectId?: string;
   readonly objects: ReadonlyMap<string, FeedbackCanvasObject>;
+}
+
+function draftPointFor(
+  draft: CreateDraft | undefined,
+  objects: LocationOptions['objects'],
+  locations: LocationOptions['contentLocations'],
+) {
+  if (draft) {
+    return (
+      locations?.get(draft.locationId)?.point ??
+      locateDraft(draft.target, objects) ??
+      draft.frozenPoint
+    );
+  }
 }
 
 export function useFeedbackContentLocations({
@@ -43,48 +60,63 @@ export function useFeedbackContentLocations({
   pinnedThreads,
   selection,
   detail,
+  draft,
 }: LocationOptions) {
   const sequence = useRef(0);
   const [pending, setPending] = useState<{ id: string; reveal: number }>();
   const threads = pinnedThreads.length ? pinnedThreads : undefined;
   const id = selection?.id;
   const anchor = detail?.thread.anchor ?? selection?.anchor;
+  const draftId = draft?.locationId;
+  const draftTarget = draft?.target;
   const requests = useMemo(() => {
     if (viewing || !onContentLocationRequests) {
       return undefined;
     }
 
     const entries = new Map<string, CanvasContentLocationRequest[]>();
-    function request(threadId: string, anchor: FeedbackAnchor) {
-      const { target, targetMissing } = anchor;
-      if (target.kind !== 'content' || targetMissing) {
+    function request(targetId: string, target: FeedbackTarget) {
+      if (target.kind !== 'content') {
         return;
       }
-      if (focusedObjectId && target.objectId !== focusedObjectId && pending?.id !== threadId) {
+      if (focusedObjectId && target.objectId !== focusedObjectId && pending?.id !== targetId) {
         return;
       }
 
       const object = entries.get(target.objectId) ?? [];
       object.push({
-        id: threadId,
+        id: targetId,
         target: target.content,
         u: target.u,
         v: target.v,
-        reveal: pending?.id === threadId ? pending.reveal : undefined,
+        reveal: pending?.id === targetId ? pending.reveal : undefined,
       });
       entries.set(target.objectId, object);
     }
     for (const thread of threads ?? []) {
-      if (thread.id !== id || !anchor) {
-        request(thread.id, thread.anchor);
+      if (!thread.anchor.targetMissing && (thread.id !== id || !anchor)) {
+        request(thread.id, thread.anchor.target);
       }
     }
-    if (id && anchor) {
-      request(id, anchor);
+    if (id && anchor && !anchor.targetMissing) {
+      request(id, anchor.target);
+    }
+    if (draftId && draftTarget) {
+      request(draftId, draftTarget);
     }
 
     return entries.size ? entries : undefined;
-  }, [anchor, focusedObjectId, id, onContentLocationRequests, pending, threads, viewing]);
+  }, [
+    anchor,
+    draftId,
+    draftTarget,
+    focusedObjectId,
+    id,
+    onContentLocationRequests,
+    pending,
+    threads,
+    viewing,
+  ]);
 
   useEffect(() => {
     onContentLocationRequests?.(requests);
@@ -129,13 +161,20 @@ export function useFeedbackContentLocations({
   }
 
   function pointFor(threadId: string, anchor: FeedbackAnchor) {
-    const point = contentLocations?.get(threadId)?.point ?? contentPoints?.get(threadId);
+    const point =
+      contentLocations?.get(threadId)?.point ??
+      contentPoints?.get(threadId) ??
+      (threadId === id ? selection?.draftPoint : undefined);
 
     return locateAnchor(anchor, objects, point);
   }
 
-  const draft = selection?.draftTarget;
-  const threadPoint = id && anchor ? pointFor(id, anchor) : draft && locateDraft(draft, objects);
+  const submitted = selection?.draftTarget;
+  const submittedPoint = submitted && (selection.draftPoint ?? locateDraft(submitted, objects));
+  const threadPoint = id && anchor ? pointFor(id, anchor) : submittedPoint;
+  const awaitingPostedPoint =
+    submitted && !pinnedThreads.some((thread) => thread.id === id) ? threadPoint : undefined;
+  const draftPoint = draftPointFor(draft, objects, contentLocations);
 
   function focusThread({ id, anchor }: FeedbackThread) {
     if (!reveal(id, anchor)) {
@@ -153,5 +192,12 @@ export function useFeedbackContentLocations({
     }
   }
 
-  return { threadPoint, focusThread, focusSelected, cancel: () => setPending(undefined) };
+  return {
+    draftPoint,
+    threadPoint,
+    awaitingPostedPoint,
+    focusThread,
+    focusSelected,
+    cancel: () => setPending(undefined),
+  };
 }

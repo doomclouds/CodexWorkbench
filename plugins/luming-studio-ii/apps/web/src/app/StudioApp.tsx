@@ -11,7 +11,11 @@ import type { ArchiveImportService } from '../data/archive-import/index.js';
 import type { BoardCatalogService, CatalogManagementService } from '../data/catalog/index.js';
 import { createCatalogBoardRename, createCatalogDirectory } from '../data/catalog/index.js';
 import type { BoardSharingService } from '../data/sharing/index.js';
-import type { ExportBoard, ExportBoardFile, WhiteboardService } from '../data/whiteboard/index.js';
+import type {
+  ExportBoard,
+  RequestBoardDownload,
+  WhiteboardService,
+} from '../data/whiteboard/index.js';
 import type { StudioLocation } from '../platform/browser/index.js';
 import './app.css';
 import { createCatalogThumbnailRenderer } from './catalog-thumbnails.js';
@@ -67,7 +71,7 @@ export interface StudioAppProps {
   readonly onViewContext?: BoardPageProps['onViewContext'];
   readonly archiveImport?: ArchiveImportService;
   readonly exportBoard?: ExportBoard;
-  readonly downloadExport?: (file: ExportBoardFile) => void;
+  readonly downloadExport?: RequestBoardDownload;
   readonly downloadObjectFile?: BoardPageProps['downloadObjectFile'];
   readonly clipboard?: BoardPageProps['clipboard'];
   readonly localDrafts?: BoardPageProps['localDrafts'];
@@ -78,7 +82,6 @@ export interface StudioAppProps {
   readonly feedbackService?: BoardPageProps['feedbackService'];
   readonly suggestions?: BoardPageProps['suggestions'];
   readonly onAttachReviewSource?: BoardPageProps['onAttachReviewSource'];
-  readonly reviewSourceMode?: BoardPageProps['reviewSourceMode'];
   readonly prepareImage?: BoardPageProps['prepareImage'];
   readonly prepareVideo?: BoardPageProps['prepareVideo'];
   readonly readHtmlSource?: BoardPageProps['readHtmlSource'];
@@ -139,7 +142,6 @@ export function StudioApp({
   feedbackService,
   suggestions,
   onAttachReviewSource,
-  reviewSourceMode,
   prepareImage,
   prepareVideo,
   readHtmlSource,
@@ -300,7 +302,6 @@ export function StudioApp({
           feedbackService={feedbackService}
           suggestions={suggestions}
           onAttachReviewSource={onAttachReviewSource}
-          reviewSourceMode={reviewSourceMode}
           prepareImage={prepareImage}
           prepareVideo={prepareVideo}
           renameBoard={renameBoard}

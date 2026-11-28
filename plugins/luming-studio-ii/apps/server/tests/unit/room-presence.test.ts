@@ -84,6 +84,41 @@ test('expires presence, rejects late duplicates and accepts a fresh same-view he
   application.close();
 });
 
+test('replaces the editing targets with each accepted presence sample without a durable write', () => {
+  const { application, advance, events } = fixture();
+  const sample = {
+    viewId: peer.viewId,
+    sequence: 1n,
+    following: false,
+    editingObjectIds: ['note-b', 'note-a', 'note-b'],
+  };
+  expect(application.publishPresence(boardId, peer.actorId, sample)).toBe(true);
+  expect(events[0]?.payload).toMatchObject({
+    kind: 'participants',
+    changes: { upserts: [{ editingObjectIds: ['note-a', 'note-b'] }] },
+  });
+  expect(application.snapshot(boardId, peer.actorId).payload).toMatchObject({
+    kind: 'snapshot',
+    snapshot: { participants: [{ editingObjectIds: ['note-a', 'note-b'] }] },
+  });
+
+  advance(50);
+  expect(
+    application.publishPresence(boardId, peer.actorId, {
+      ...sample,
+      sequence: 2n,
+      editingObjectIds: [],
+    }),
+  ).toBe(true);
+  expect(application.publishPresence(boardId, peer.actorId, sample)).toBe(false);
+  expect(events.at(-1)?.payload).toMatchObject({
+    kind: 'participants',
+    changes: { upserts: [{ editingObjectIds: undefined }] },
+  });
+
+  application.close();
+});
+
 test('keeps private suggestion events and their watermarks out of public room traffic', () => {
   const { application, events } = fixture();
   const ownerEvents: RoomEvent[] = [];

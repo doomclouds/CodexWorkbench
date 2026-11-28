@@ -12,7 +12,7 @@ export interface ExportBoardCommand {
   readonly boardId: string;
   readonly expectedRevision: bigint;
   readonly scope: BoardExportScope;
-  readonly format: 'json' | 'svg' | 'html';
+  readonly format: 'json' | 'svg' | 'html' | 'html-source';
 }
 
 export interface ExportRenderCommand extends Omit<ExportBoardCommand, 'format'> {
@@ -52,6 +52,7 @@ export interface BoardExportPngRegion {
   readonly html: string;
   readonly width: number;
   readonly height: number;
+  readonly scripted?: boolean;
 }
 
 export interface BoardExportBrowserPng {

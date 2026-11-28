@@ -208,7 +208,7 @@ function createGuestAppMock(
 
 function guestButton(host: HTMLElement, label: string): HTMLButtonElement {
   const element = [...host.querySelectorAll('button')].find(
-    (button) => button.textContent?.trim() === label,
+    (button) => (button.getAttribute('aria-label') ?? button.textContent?.trim()) === label,
   );
 
   if (!element) {
@@ -376,14 +376,15 @@ test('uses authorized guest sharing scope and switches theme without leaving the
     await app.refresh();
     expect(share.hasAttribute('aria-description')).toBe(false);
 
-    await act(async () => share.click());
-    await act(async () => guestButton(app.host, '切换为明亮主题').click());
+    const theme = guestButton(app.host, '切换为明亮主题');
+    expect(share.getAttribute('aria-expanded')).toBe('false');
+    await act(async () => theme.click());
     expect(app.host.querySelector('.studio-whiteboard-app')?.getAttribute('data-theme')).toBe(
       'light',
     );
-    expect(app.host.querySelector('[aria-label="分享"]')?.getAttribute('aria-expanded')).toBe(
-      'true',
-    );
+    expect(share.getAttribute('aria-expanded')).toBe('false');
+    await act(async () => share.click());
+    expect(share.getAttribute('aria-expanded')).toBe('true');
     expect(app.guestBoard.sceneReads).toEqual([sampleBoardId]);
   } finally {
     app.dispose();

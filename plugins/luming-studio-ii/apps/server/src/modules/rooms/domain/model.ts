@@ -49,6 +49,7 @@ export interface PresenceInput {
   readonly viewport?: RoomViewport;
   readonly following: boolean;
   readonly gesture?: GesturePreview;
+  readonly editingObjectIds?: readonly string[];
 }
 
 export interface Participant {
@@ -63,6 +64,7 @@ export interface Participant {
   readonly following: boolean;
   readonly gesture?: GesturePreview;
   readonly gestureExpiresAtUnixMs?: number;
+  readonly editingObjectIds?: readonly string[];
 }
 
 export interface ParticipantChanges {

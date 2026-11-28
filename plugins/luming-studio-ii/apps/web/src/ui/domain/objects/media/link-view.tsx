@@ -38,6 +38,16 @@ export function LinkView(props: LinkCanvasViewProps) {
   const retain = useEffectEvent((retained: boolean) => onRetentionChange?.(retained));
   const writable = !readOnly;
   const open = editor !== undefined;
+  const reportEditing = useEffectEvent(() => {
+    props.onEditingChange?.(true);
+
+    return () => props.onEditingChange?.(false);
+  });
+  useLayoutEffect(() => {
+    if (open && writable) {
+      return reportEditing();
+    }
+  }, [open, writable]);
 
   if (editRequest !== handled) {
     setHandled(editRequest);

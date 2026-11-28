@@ -161,7 +161,6 @@ test.each(nativeCases)(
     try {
       await app.open(boardId);
       const target = element(app.host, '[' + marker + ']');
-      const tracked = element(app.host, '[data-feedback-pin="tracked"]');
       const missing = element(app.host, '[data-feedback-pin="missing"]');
       const frozenTop = missing.style.top;
       let y = 130;
@@ -170,6 +169,7 @@ test.each(nativeCases)(
       });
       await app.update(() => target.setAttribute('data-test-layout', 'initial'));
       await draw();
+      const tracked = element(app.host, '[data-feedback-pin="tracked"]');
       const liveTop = Number.parseFloat(tracked.style.top);
       expect(tracked.style.top).not.toBe(frozenTop);
       await app.update(() => {

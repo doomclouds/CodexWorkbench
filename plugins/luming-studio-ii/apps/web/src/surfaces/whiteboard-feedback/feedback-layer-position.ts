@@ -1,6 +1,7 @@
 import type { FeedbackPoint } from '../../data/feedback/index.js';
 
 export const commentPinSize = 28;
+export const commentPopupGutter = 8;
 export const commentsPanelWidth = 360;
 export const commentPopupWidth = 330;
 
@@ -46,7 +47,7 @@ export function placeCommentsList(
 }
 
 export function placeComment(point: FeedbackPoint, size: LayerSize, viewport: LayerSize) {
-  const gutter = 8;
+  const gutter = commentPopupGutter;
   const gap = 6;
   const pinTop = point.y - commentPinSize;
   const right = point.x + commentPinSize + gap;
@@ -54,7 +55,7 @@ export function placeComment(point: FeedbackPoint, size: LayerSize, viewport: La
   const fitsRight = right + size.width + gutter <= viewport.width;
   const fitsLeft = left >= gutter;
   const maxHeight = Math.max(
-    48,
+    0,
     Math.min(Math.max(320, viewport.height * 0.6), viewport.height - gutter * 2),
   );
 
@@ -75,7 +76,7 @@ export function placeComment(point: FeedbackPoint, size: LayerSize, viewport: La
   const roomAbove = pinTop - gap - gutter;
   const roomBelow = viewport.height - point.y - gap - gutter;
   const above = roomBelow < size.height && roomAbove > roomBelow;
-  const heightLimit = Math.max(48, Math.min(maxHeight, above ? roomAbove : roomBelow));
+  const heightLimit = Math.min(maxHeight, Math.max(48, above ? roomAbove : roomBelow));
   const height = Math.min(size.height, heightLimit);
   const top = above ? pinTop - gap - height : point.y + gap;
 

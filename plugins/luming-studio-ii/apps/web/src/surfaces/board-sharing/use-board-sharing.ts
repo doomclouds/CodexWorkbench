@@ -17,6 +17,7 @@ interface SharingControls {
   readonly createCommandId: () => string;
   readonly copyLink: (url: string) => Promise<void>;
   readonly onLanSharingChange?: (active: boolean) => void;
+  readonly subscribeMemberPresence?: (listener: () => void) => () => void;
 }
 
 interface PendingSharingCommand {
@@ -32,6 +33,7 @@ interface CopyOnApply {
 interface ManualLinkCopy {
   readonly url: string;
   readonly trigger: HTMLButtonElement;
+  readonly description: string;
 }
 
 function formatFailure(error: unknown, message: string) {
@@ -45,16 +47,20 @@ export function useBoardSharing({
   createCommandId,
   copyLink,
   onLanSharingChange,
+  subscribeMemberPresence,
 }: SharingControls) {
   const [snapshot, setSnapshot] = useState<BoardSharingState>();
   const [pending, setPending] = useState<PendingSharingCommand>();
-  const [notice, setNotice] = useState<{ text: string; error: boolean }>();
+  const [notice, setNotice] = useState<string>();
+  const [copiedLink, setCopiedLink] = useState<{ url: string }>();
   const [manualLink, setManualLink] = useState<ManualLinkCopy>();
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [memberPresenceVersion, setMemberPresenceVersion] = useState(0);
   const lifetime = useRef<AbortController>(undefined);
   const readNumber = useRef(0);
   const executing = useRef(false);
+  const readMemberPresenceVersion = useRef(0);
 
   async function refresh(signal = lifetime.current?.signal, background = false) {
     if (!signal || signal.aborted) {
@@ -62,7 +68,9 @@ export function useBoardSharing({
     }
 
     const request = ++readNumber.current;
-    setLoading(true);
+    if (!background) {
+      setLoading(true);
+    }
     try {
       const next = await service.getBoardSharing(boardId, signal);
       if (!signal.aborted && request === readNumber.current) {
@@ -73,7 +81,7 @@ export function useBoardSharing({
     } catch (error) {
       if (!signal.aborted && request === readNumber.current && !background) {
         setSnapshot(undefined);
-        setNotice({ text: formatFailure(error, '读取分享设置失败，请重试。'), error: true });
+        setNotice(formatFailure(error, '读取分享设置失败，请重试。'));
       }
     } finally {
       if (!signal.aborted && request === readNumber.current) {
@@ -84,7 +92,7 @@ export function useBoardSharing({
 
   function reportFailure(error: unknown) {
     if (!lifetime.current?.signal.aborted) {
-      setNotice({ text: formatFailure(error, '分享操作未能完成。'), error: true });
+      setNotice(formatFailure(error, '分享操作未能完成。'));
     }
   }
 
@@ -92,10 +100,14 @@ export function useBoardSharing({
     refresh().catch(reportFailure);
   }
 
-  const refreshOnOpen = useEffectEvent(readSharing);
+  const refreshOnPresenceChange = useEffectEvent(() => {
+    refresh(undefined, true).catch(reportFailure);
+  });
   const observeLanSharing = onLanSharingChange !== undefined;
-  const refreshLanSharing = useEffectEvent(() => {
-    if (!open) {
+  const refreshForView = useEffectEvent(() => {
+    if (open) {
+      readSharing();
+    } else if (observeLanSharing) {
       refresh(undefined, true).catch(reportFailure);
     }
   });
@@ -107,28 +119,56 @@ export function useBoardSharing({
   }, [boardId, service]);
 
   useEffect(() => {
-    if (observeLanSharing) {
-      refreshLanSharing();
-    }
-  }, [boardId, observeLanSharing, service]);
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) {
+        refreshForView();
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [boardId, observeLanSharing, open, service]);
 
   useEffect(() => {
     if (open) {
-      refreshOnOpen();
+      return subscribeMemberPresence?.(() => setMemberPresenceVersion((version) => version + 1));
     }
-  }, [boardId, open, service]);
+  }, [open, subscribeMemberPresence]);
+
+  const canReadMembers = open && snapshot?.role === 'owner';
+  useEffect(() => {
+    const idle = !busy && !loading;
+    const invalidated = readMemberPresenceVersion.current !== memberPresenceVersion;
+    if (canReadMembers && idle && invalidated) {
+      readMemberPresenceVersion.current = memberPresenceVersion;
+      refreshOnPresenceChange();
+    }
+  }, [busy, canReadMembers, loading, memberPresenceVersion]);
+
+  useEffect(() => {
+    if (copiedLink) {
+      const timeout = setTimeout(() => setCopiedLink(undefined), 2000);
+      return () => clearTimeout(timeout);
+    }
+  }, [copiedLink]);
 
   async function copy(url: string, trigger: HTMLButtonElement) {
     const signal = lifetime.current?.signal;
     try {
       await copyLink(url);
-      if (!signal?.aborted) {
-        setNotice({ text: '已复制链接', error: false });
+      if (!signal?.aborted && trigger.isConnected) {
+        setCopiedLink({ url });
       }
     } catch (error) {
-      if (!signal?.aborted) {
-        setNotice({ text: formatFailure(error, '复制链接失败。'), error: true });
-        setManualLink({ url, trigger });
+      if (!signal?.aborted && trigger.isConnected) {
+        setCopiedLink(undefined);
+        setManualLink({
+          url,
+          trigger,
+          description: formatFailure(error, '浏览器未能自动复制，请复制下面的邀请链接。'),
+        });
       }
     }
   }
@@ -142,7 +182,7 @@ export function useBoardSharing({
     setPending(undefined);
 
     if (receipt.kind === 'rejected') {
-      setNotice({ text: rejectionMessages[receipt.reason], error: true });
+      setNotice(rejectionMessages[receipt.reason]);
       await refresh(signal);
       return false;
     }
@@ -189,7 +229,7 @@ export function useBoardSharing({
       }
 
       setPending(entry);
-      setNotice({ text: formatFailure(error, '分享操作结果未知，请重试原操作。'), error: true });
+      setNotice(formatFailure(error, '分享操作结果未知，请重试原操作。'));
       return false;
     } finally {
       executing.current = false;
@@ -230,6 +270,7 @@ export function useBoardSharing({
   return {
     snapshot,
     notice,
+    copiedUrl: open ? copiedLink?.url : undefined,
     manualLink,
     loading,
     busy,

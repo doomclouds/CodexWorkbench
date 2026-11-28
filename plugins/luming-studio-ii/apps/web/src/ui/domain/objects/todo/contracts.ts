@@ -57,6 +57,7 @@ export interface TodoPoint {
 
 export interface TodoContentAnnotation {
   readonly target: { readonly kind: 'todo'; readonly itemId: string };
+  readonly excerpt?: string;
   readonly u: number;
   readonly v: number;
 }

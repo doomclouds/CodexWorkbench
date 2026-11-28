@@ -1,4 +1,13 @@
-import { ArrowLeft, ChevronDown, Clock3, Maximize, MessageSquare, Share2 } from 'lucide-react';
+import {
+  ArrowLeft,
+  ChevronDown,
+  Clock3,
+  Maximize,
+  MessageSquare,
+  Moon,
+  Share2,
+  Sun,
+} from 'lucide-react';
 import {
   useEffectEvent,
   useLayoutEffect,
@@ -9,6 +18,7 @@ import {
 } from 'react';
 
 import type { GeometryToolbarProps } from './GeometryToolbar.js';
+import type { WhiteboardEditorFeatures } from './board-features.js';
 import type { BoardTitleEditor } from './use-board-title.js';
 import './board-chrome.css';
 
@@ -23,6 +33,7 @@ interface BoardHeaderProps {
   readonly canManage?: boolean;
   readonly onBack?: () => void;
   readonly titleEditor?: BoardTitleEditor;
+  readonly theme?: WhiteboardEditorFeatures['theme'];
   readonly onOpenHistory?: (trigger: HTMLButtonElement) => void;
   readonly historyOpen?: boolean;
   readonly onOpenShare?: (trigger: HTMLButtonElement) => void;
@@ -153,12 +164,34 @@ function FeedbackTools({
   );
 }
 
+function BoardThemeButton({ theme }: Pick<BoardHeaderProps, 'theme'>) {
+  if (!theme) {
+    return null;
+  }
+
+  const dark = theme.resolvedTheme === 'dark';
+  const label = dark ? '切换为明亮主题' : '切换为暗色主题';
+
+  return (
+    <button
+      className="whiteboard-chrome__action"
+      aria-label={label}
+      title={label}
+      type="button"
+      onClick={() => theme.onThemeChange(dark ? 'light' : 'dark')}
+    >
+      {dark ? <Sun size={18} aria-hidden="true" /> : <Moon size={18} aria-hidden="true" />}
+    </button>
+  );
+}
+
 export function BoardHeader({
   title,
   status,
   participants,
   onBack,
   titleEditor,
+  theme,
   canManage = onBack !== undefined || titleEditor !== undefined,
   onOpenHistory,
   historyOpen = false,
@@ -218,6 +251,7 @@ export function BoardHeader({
         >
           <Clock3 size={20} />
         </button>
+        <BoardThemeButton theme={theme} />
         <button
           ref={shareButton}
           className="whiteboard-chrome__action whiteboard-chrome__share"

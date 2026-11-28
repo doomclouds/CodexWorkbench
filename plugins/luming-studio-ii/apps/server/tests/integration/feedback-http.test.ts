@@ -116,6 +116,29 @@ function assertRejected(receipt: FeedbackReceipt, reason: FeedbackRejectionReaso
   expect(receipt.outcome.value.reason).toBe(reason);
 }
 
+test('filters notes by the authenticated viewer before the first page is taken', async () => {
+  const own = applied(await apply('own-earlier-note', boardPoint('My earlier note.')));
+  for (let index = 0; index < 31; index++) {
+    applied(await apply('peer-note-' + index, boardPoint('Peer note ' + index), teammateId));
+  }
+
+  const query = { boardId: mainBoardId, pageSize: 30 };
+  const firstPage = await callProtobuf(server.address, editorId, listThreads, query);
+  expect(firstPage.threads).toHaveLength(30);
+  expect(firstPage.threads.every((thread) => thread.first?.authorActorId === teammateId)).toBe(
+    true,
+  );
+  expect(firstPage.nextCursor).toBeDefined();
+
+  const filtered = await callProtobuf(server.address, editorId, listThreads, {
+    ...query,
+    authoredByViewer: true,
+  });
+  expect(filtered.threads.map(({ threadId }) => threadId)).toEqual([own.threadId]);
+  expect(filtered.threads[0]?.first?.authoredByViewer).toBe(true);
+  expect(filtered.nextCursor).toBeUndefined();
+});
+
 test('freezes the explicit document block and reports missing content after its deletion', async () => {
   const target = contentPoint({
     objectId: documentId,

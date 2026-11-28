@@ -10,7 +10,7 @@ import {
 } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/service';
 import type { WhiteboardPost } from './contracts.js';
 
-export type ExportBoardFormat = 'png' | 'svg' | 'html' | 'json' | 'zip';
+export type ExportBoardFormat = 'png' | 'svg' | 'html' | 'html-source' | 'json' | 'zip';
 
 export type ExportBoardScope =
   | { readonly kind: 'whole' }
@@ -29,6 +29,18 @@ export interface ExportBoardFile {
   readonly revision: bigint;
   readonly content: Uint8Array;
 }
+
+export interface BoardDownloadNotice {
+  readonly kind: 'requested' | 'unavailable';
+  readonly message: string;
+}
+
+type BoardDownloadResult = BoardDownloadNotice | void;
+
+export type RequestBoardDownload = (
+  file: ExportBoardFile,
+  signal?: AbortSignal,
+) => BoardDownloadResult | Promise<BoardDownloadResult>;
 
 export type ExportBoardRejection =
   | 'invalidSelection'
@@ -58,6 +70,7 @@ const formats = {
   png: { mimeType: 'image/png', suffix: '.png' },
   svg: { mimeType: 'image/svg+xml', suffix: '.svg' },
   html: { mimeType: 'text/html', suffix: '.html' },
+  'html-source': { mimeType: 'text/html', suffix: '.html' },
   json: { mimeType: 'application/json', suffix: '.json' },
   zip: { mimeType: 'application/zip', suffix: '.studio.zip' },
 } as const;
@@ -65,6 +78,7 @@ const formats = {
 export const wireFormats = {
   png: BoardExportFormat.PNG,
   html: BoardExportFormat.HTML,
+  'html-source': BoardExportFormat.HTML_SOURCE,
   json: BoardExportFormat.JSON,
   svg: BoardExportFormat.SVG,
   zip: BoardExportFormat.ZIP,

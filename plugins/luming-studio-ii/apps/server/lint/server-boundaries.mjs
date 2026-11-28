@@ -285,7 +285,14 @@ const privateLibraries = new Map([
   ['proper-lockfile', new Set([mcpRuntime])],
   ['@resvg/resvg-wasm', new Set(['src/infrastructure/platform/png-renderer'])],
   ['parse5', new Set([feedbackAdapters + 'content-source', catalogAdapters + 'thumbnail-html'])],
-  [protocolPrefix + 'stickers', new Set([catalog + 'domain/thumbnail-sticker'])],
+  [
+    protocolPrefix + 'rich-text',
+    new Set([whiteboard + 'domain/export-html-content', whiteboard + 'domain/export-svg-content']),
+  ],
+  [
+    protocolPrefix + 'stickers',
+    new Set([catalog + 'domain/thumbnail-sticker', whiteboard + 'domain/export-svg-content']),
+  ],
   ['eslint', new Set(['tests/contracts/server-lint.test'])],
 ]);
 

@@ -235,12 +235,12 @@ export function createFeedbackRoutes(application: FeedbackApplication): readonly
 
   return [
     unaryRoute(listThreads, (actor, request) => {
-      const { boardId, pageSize, cursor, status, authorActorId } = request;
+      const { boardId, pageSize, cursor, status, authorActorId, authoredByViewer } = request;
       const page = application.listThreads(actor, requireId(boardId), {
         pageSize,
         cursor,
         status: readStatus(status),
-        authorActorId,
+        authorActorId: authoredByViewer ? actor.id : authorActorId,
       });
 
       return { ...page, threads: page.threads.map(writeThread) };

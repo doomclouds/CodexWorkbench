@@ -273,8 +273,9 @@ export function createRoomsApplication(
     access,
     publishPresence(boardId, actorId, input) {
       const authorized = requireAccess(access(boardId, actorId));
-      if (input.gesture && !authorized.canEdit) {
-        throw new RoomAccessError('Gesture preview requires editing access');
+      const editingActivity = input.gesture || input.editingObjectIds?.length;
+      if (editingActivity && !authorized.canEdit) {
+        throw new RoomAccessError('Editing presence requires editing access');
       }
       if (!validPresence(input)) {
         throw new RoomInputError('Invalid room presence');

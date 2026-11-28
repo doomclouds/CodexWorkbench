@@ -3,6 +3,7 @@ import { useLayoutEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import type { FeedbackThread } from '../../data/feedback/index.js';
 import { Button, StatusText } from '../../ui/base/index.js';
+import { FeedbackPager } from './FeedbackPager.js';
 import { FeedbackAvatar, feedbackAuthorName } from './feedback-author.js';
 
 interface FeedbackListProps {
@@ -188,7 +189,7 @@ export function FeedbackList({
           />
         ))}
       </ul>
-      {hasMore && <Button label="更多备注" disabled={pending} onActivate={loadMore} />}
+      {hasMore && <FeedbackPager label="更多备注" pending={pending} onActivate={loadMore} />}
     </>
   );
 }

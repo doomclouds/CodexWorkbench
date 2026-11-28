@@ -304,7 +304,7 @@ interface BoardDownload {
   readonly content: Uint8Array;
 }
 
-export function downloadBoardFile({ filename, mimeType, content }: BoardDownload): void {
+export function downloadBoardFile({ filename, mimeType, content }: BoardDownload) {
   const type = mimeType === 'text/html' ? 'application/octet-stream' : mimeType;
   const url = URL.createObjectURL(new Blob([new Uint8Array(content)], { type }));
   const anchor = document.createElement('a');
@@ -318,4 +318,9 @@ export function downloadBoardFile({ filename, mimeType, content }: BoardDownload
     anchor.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1_000);
   }
+
+  return {
+    kind: 'requested' as const,
+    message: `已发起下载「${filename}」。请在浏览器的「下载内容」中查看。`,
+  };
 }

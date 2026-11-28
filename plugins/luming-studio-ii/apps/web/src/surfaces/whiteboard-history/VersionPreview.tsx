@@ -1,7 +1,18 @@
-import { Clock3, Download, RotateCcw } from 'lucide-react';
+import { ChevronDown, Clock3, Download, RotateCcw } from 'lucide-react';
 import { useCallback, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
-import type { ExportBoardScope, WhiteboardScene } from '../../data/whiteboard/index.js';
-import { Button, Select, StatusText, type ButtonHandle } from '../../ui/base/index.js';
+import type {
+  ExportBoardScope,
+  ExportBoardVersionCommand,
+  WhiteboardScene,
+} from '../../data/whiteboard/index.js';
+import {
+  ActionMenu,
+  AnchoredPopover,
+  Button,
+  Select,
+  StatusText,
+  type ButtonHandle,
+} from '../../ui/base/index.js';
 import type { WhiteboardHistorySurfaceProps } from './contracts.js';
 import { RestoreRecovery } from './RestoreRecovery.js';
 import { useVersionExport } from './useVersionExport.js';
@@ -29,6 +40,102 @@ function actionScope(kind: ScopeKind, selection: readonly string[]): ExportBoard
   return kind === 'whole' ? { kind } : { kind, objectIds: [...selection] };
 }
 
+const selectionFormats = [
+  ['json', '导出 JSON'],
+  ['svg', '导出 SVG'],
+  ['png', '导出 PNG'],
+] as const;
+
+function VersionExportControl({
+  selection,
+  busy,
+  onExport,
+}: {
+  readonly selection: readonly string[];
+  readonly busy: boolean;
+  readonly onExport: (format: ExportBoardVersionCommand['format'], scope: ExportBoardScope) => void;
+}) {
+  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
+  const [scope, setScope] = useState<ScopeKind>('whole');
+  const panel = useRef<HTMLDivElement>(null);
+  const currentScope = selection.length > 0 ? scope : 'whole';
+
+  function handleExport(format: ExportBoardVersionCommand['format']) {
+    setAnchor(null);
+    anchor?.focus({ preventScroll: true });
+    onExport(format, actionScope(format === 'html' ? 'whole' : currentScope, selection));
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        className="studio-ui-button"
+        aria-label="导出历史版本"
+        aria-haspopup="dialog"
+        aria-expanded={anchor !== null}
+        aria-disabled={busy || undefined}
+        onClick={(event) => {
+          if (!busy) {
+            setAnchor(anchor ? null : event.currentTarget);
+          }
+        }}
+      >
+        <Download size={14} aria-hidden="true" />
+        导出
+        <ChevronDown size={12} aria-hidden="true" />
+      </button>
+      <AnchoredPopover
+        open={anchor !== null}
+        anchor={anchor}
+        label="导出历史版本"
+        align="end"
+        initialFocus={() => panel.current?.querySelector('select')?.focus({ preventScroll: true })}
+        onRequestClose={(reason) => {
+          setAnchor(null);
+          if (reason === 'escape') {
+            anchor?.focus({ preventScroll: true });
+          }
+        }}
+      >
+        <div className="whiteboard-history-preview__export" ref={panel}>
+          <Select
+            label="导出范围"
+            value={currentScope}
+            disabled={busy}
+            options={[
+              { id: 'whole', label: '整张白板' },
+              {
+                id: 'selection',
+                label: '所选对象 (' + selection.length + ')',
+                disabled: selection.length === 0,
+              },
+            ]}
+            onValueChange={(value) => setScope(value === 'selection' ? 'selection' : 'whole')}
+          />
+          <div className="whiteboard-history-preview__formats">
+            {selectionFormats.map(([format, label]) => (
+              <Button
+                key={format}
+                label={label}
+                variant="ghost"
+                disabled={busy}
+                onActivate={() => handleExport(format)}
+              />
+            ))}
+            <Button
+              label="导出整板 HTML"
+              variant="ghost"
+              disabled={busy}
+              onActivate={() => handleExport('html')}
+            />
+          </div>
+        </div>
+      </AnchoredPopover>
+    </>
+  );
+}
+
 export function VersionPreview({
   boardId,
   canEdit,
@@ -43,9 +150,9 @@ export function VersionPreview({
   download,
 }: VersionPreviewProps) {
   const [selection, setSelection] = useState<readonly string[]>([]);
-  const [scope, setScope] = useState<ScopeKind>('whole');
+  const [restoreAnchor, setRestoreAnchor] = useState<HTMLButtonElement | null>(null);
   const exitButton = useRef<ButtonHandle>(null);
-  const restoreButton = useRef<ButtonHandle>(null);
+  const restoreButton = useRef<HTMLButtonElement>(null);
 
   useLayoutEffect(() => exitButton.current?.focus(), []);
 
@@ -57,9 +164,16 @@ export function VersionPreview({
   });
   const restoring = restore.pending !== undefined;
   const busy = restoring || exporting.pending;
-  const emptySelection = scope === 'selection' && selection.length === 0;
-  const unavailable = busy || emptySelection;
   const confirmation = canEdit ? restore.confirmation : undefined;
+
+  function focusRestore() {
+    restoreButton.current?.focus({ preventScroll: true });
+  }
+
+  function requestRestore(scope: ScopeKind) {
+    setRestoreAnchor(null);
+    onRequestRestore(scene.revision, actionScope(scope, selection), focusRestore);
+  }
 
   function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
     const isEscape = event.key === 'Escape' && !event.defaultPrevented;
@@ -93,64 +207,70 @@ export function VersionPreview({
           <span>正在预览版本 {scene.revision.toString()}，当前白板未改变。</span>
         </p>
         <div className="whiteboard-history-preview__controls">
-          <Button ref={exitButton} label="退出预览" onActivate={onExit} />
+          <Button ref={exitButton} label="退出预览" variant="ghost" onActivate={onExit} />
+          <VersionExportControl
+            selection={selection}
+            busy={busy}
+            onExport={exporting.handleExport}
+          />
           {canEdit && (
-            <Button
-              ref={restoreButton}
-              label="恢复此版本"
-              icon={<RotateCcw size={14} />}
-              variant="primary"
-              disabled={unavailable || Boolean(restore.recovery)}
-              onActivate={() =>
-                onRequestRestore(scene.revision, actionScope(scope, selection), () =>
-                  restoreButton.current?.focus(),
-                )
-              }
-            />
+            <>
+              <button
+                ref={restoreButton}
+                type="button"
+                className="studio-ui-button"
+                data-variant="primary"
+                aria-haspopup={selection.length ? 'menu' : undefined}
+                aria-expanded={selection.length ? restoreAnchor !== null : undefined}
+                disabled={busy || Boolean(restore.recovery)}
+                onClick={(event) => {
+                  if (selection.length) {
+                    setRestoreAnchor(restoreAnchor ? null : event.currentTarget);
+                  } else {
+                    requestRestore('whole');
+                  }
+                }}
+              >
+                <RotateCcw size={14} aria-hidden="true" />
+                恢复此版本
+                {selection.length > 0 && <ChevronDown size={12} aria-hidden="true" />}
+              </button>
+              <ActionMenu
+                open={restoreAnchor !== null}
+                anchor={restoreAnchor}
+                label="恢复范围"
+                items={[
+                  { id: 'whole', label: '恢复整张白板' },
+                  {
+                    id: 'selection',
+                    label: '恢复所选对象 (' + selection.length + ')',
+                    disabled: selection.length === 0,
+                  },
+                ]}
+                returnFocus={focusRestore}
+                onAction={(value) => requestRestore(value === 'selection' ? 'selection' : 'whole')}
+                onRequestClose={() => setRestoreAnchor(null)}
+              />
+            </>
           )}
-          <Select
-            label="操作范围"
-            value={scope}
-            disabled={busy}
-            options={[
-              { id: 'whole', label: '整张白板' },
-              {
-                id: 'selection',
-                label: '所选对象 (' + selection.length + ')',
-                disabled: !selection.length,
-              },
-            ]}
-            onValueChange={(value) => setScope(value === 'selection' ? 'selection' : 'whole')}
-          />
-          <Button
-            label="导出 JSON"
-            icon={<Download size={14} />}
-            disabled={unavailable}
-            onActivate={() => exporting.handleExport('json', actionScope(scope, selection))}
-          />
-          <Button
-            label="导出 SVG"
-            disabled={unavailable}
-            onActivate={() => exporting.handleExport('svg', actionScope(scope, selection))}
-          />
-          <Button
-            label="导出 PNG"
-            disabled={unavailable}
-            onActivate={() => exporting.handleExport('png', actionScope(scope, selection))}
-          />
-          <Button
-            label="导出整板 HTML"
-            disabled={busy}
-            onActivate={() => exporting.handleExport('html', { kind: 'whole' })}
-          />
         </div>
         {exporting.pending && <StatusText message="正在导出版本…" announcement="polite" busy />}
         {exporting.notice && (
-          <StatusText
-            message={exporting.notice.message}
-            tone={exporting.notice.tone}
-            announcement="polite"
-          />
+          <div className="whiteboard-history-preview__notice">
+            <StatusText
+              message={exporting.notice.message}
+              tone={exporting.notice.tone}
+              announcement="polite"
+            />
+            {exporting.notice.retry && (
+              <Button
+                label={exporting.notice.retry.label}
+                variant="ghost"
+                disabled={busy}
+                onActivate={exporting.notice.retry.onActivate}
+              />
+            )}
+          </div>
         )}
         {!confirmation && !historyOpen && <RestoreRecovery restore={restore} canEdit={canEdit} />}
       </header>

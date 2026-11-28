@@ -5,13 +5,17 @@ import type {
   ExportBoardFile,
   ExportBoardFormat,
   ExportBoardRejection,
+  ExportBoardRequest,
   ExportBoardResult,
+  RequestBoardDownload,
 } from '../../data/whiteboard/index.js';
 import {
   AnchoredPopover,
   Button,
+  Dialog,
   Select,
   StatusText,
+  type ButtonHandle,
   type StatusTextTone,
 } from '../../ui/base/index.js';
 import './whiteboard-export.css';
@@ -28,7 +32,7 @@ export interface WhiteboardExportSurfaceProps {
   readonly anchor: Element | null;
   readonly context: WhiteboardExportContext;
   readonly exportBoard: ExportBoard;
-  readonly download: (file: ExportBoardFile) => void;
+  readonly download: RequestBoardDownload;
   readonly onRequestClose: () => void;
   readonly restoreFocus?: () => void;
   readonly inline?: boolean;
@@ -38,12 +42,19 @@ export interface WhiteboardExportSurfaceProps {
 interface ExportNotice {
   readonly message: string;
   readonly tone: StatusTextTone;
+  readonly retry?: { readonly label: string; readonly onActivate: () => void };
 }
 
 interface ExportOption {
   readonly format: ExportBoardFormat;
   readonly label: string;
   readonly description?: string;
+}
+
+interface ExportSelection {
+  readonly option: ExportOption;
+  readonly request: ExportBoardRequest;
+  readonly trigger: HTMLButtonElement;
 }
 
 const formats: readonly ExportOption[] = [
@@ -59,9 +70,14 @@ const formats: readonly ExportOption[] = [
 const backup = {
   format: 'zip',
   label: '完整作品备份',
-  description: '包含历史记录与资源',
+  description: '包含历史记录、备注与资源',
 } as const;
-const htmlSource = { format: 'html', label: 'HTML 源码' } as const;
+const htmlSelection = {
+  format: 'html',
+  label: '选区网页（HTML）',
+  description: '导出选中对象的已保存内容，不含协作评论和历史。',
+} as const;
+const htmlSource = { format: 'html-source', label: 'HTML 源码' } as const;
 
 const rejectionMessages: Record<ExportBoardRejection, string> = {
   invalidSelection: '部分选中对象已发生变化。请重新选择导出范围。',
@@ -70,10 +86,8 @@ const rejectionMessages: Record<ExportBoardRejection, string> = {
   tooLarge: '该范围超出文件大小上限。请选择较小的范围。',
 };
 
-function resultNotice(result: ExportBoardResult): ExportNotice {
+function resultNotice(result: Exclude<ExportBoardResult, { kind: 'file' }>): ExportNotice {
   switch (result.kind) {
-    case 'file':
-      return { tone: 'success', message: '导出已生成。' };
     case 'stale':
       return {
         tone: 'warning',
@@ -85,20 +99,21 @@ function resultNotice(result: ExportBoardResult): ExportNotice {
 }
 
 function supportsSelection(format: ExportBoardFormat): boolean {
-  return format !== 'html' && format !== 'zip';
+  return format !== 'zip';
 }
 
 interface ExportFormatButtonProps {
   readonly option: ExportOption;
   readonly buttonRef?: Ref<HTMLButtonElement>;
   readonly disabled: boolean;
-  readonly onExport: (format: ExportBoardFormat) => void;
+  readonly onExport: (option: ExportOption, trigger: HTMLButtonElement) => void;
 }
 
 function ExportFormatButton({ option, buttonRef, disabled, onExport }: ExportFormatButtonProps) {
   const { format, label, description } = option;
   const isBackup = format === 'zip';
   const Icon = isBackup ? Archive : Download;
+  const extension = format === 'html-source' ? 'HTML' : format.toUpperCase();
 
   return (
     <button
@@ -108,14 +123,14 @@ function ExportFormatButton({ option, buttonRef, disabled, onExport }: ExportFor
       data-export-format={format}
       aria-label={label}
       disabled={disabled}
-      onClick={() => onExport(format)}
+      onClick={(event) => onExport(option, event.currentTarget)}
     >
       <Icon size={18} aria-hidden="true" />
       <span>
         {isBackup ? <strong>{label}</strong> : label}
         {description && <small className="whiteboard-export__description">{description}</small>}
       </span>
-      <small>{format.toUpperCase()}</small>
+      <small>{extension}</small>
     </button>
   );
 }
@@ -131,10 +146,13 @@ function OpenExport({
   canBackup = false,
 }: WhiteboardExportSurfaceProps) {
   const [scope, setScope] = useState<'whole' | 'selection'>('whole');
-  const [pendingFormat, setPendingFormat] = useState<ExportBoardFormat>();
+  const [selection, setSelection] = useState<ExportSelection>();
+  const [file, setFile] = useState<ExportBoardFile>();
+  const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<ExportNotice>();
   const pending = useRef<AbortController>(undefined);
   const firstFormat = useRef<HTMLButtonElement>(null);
+  const cancel = useRef<ButtonHandle>(null);
   const selectionCount = context.selectedIds.length;
   const selectionUnavailable = scope === 'selection' && selectionCount === 0;
   const exportHtmlSource =
@@ -144,60 +162,108 @@ function OpenExport({
 
   useLayoutEffect(() => () => pending.current?.abort(), []);
 
-  function handleClose() {
+  function handleCloseDownload() {
     pending.current?.abort();
     pending.current = undefined;
-    setPendingFormat(undefined);
+    setBusy(false);
+    setSelection(undefined);
+    setFile(undefined);
+    setNotice(undefined);
+  }
+
+  function handleClose() {
+    handleCloseDownload();
     onRequestClose();
   }
 
-  function handleExport(format: ExportBoardFormat) {
-    if (pending.current || (selectionUnavailable && supportsSelection(format))) {
+  function runExport(request: ExportBoardRequest, preparedFile?: ExportBoardFile) {
+    if (pending.current) {
       return;
     }
 
-    const { boardId, revision, selectedIds } = context;
-    const isHtmlSource = format === 'html' && exportHtmlSource;
-    const selectedScope =
-      scope === 'selection' && (supportsSelection(format) || isHtmlSource)
-        ? { kind: 'selection' as const, objectIds: [...selectedIds] }
-        : { kind: 'whole' as const };
     const controller = new AbortController();
     const { signal } = controller;
     pending.current = controller;
-    setPendingFormat(format);
+    setBusy(true);
     setNotice(undefined);
+    cancel.current?.focus();
 
-    Promise.resolve()
-      .then(() => {
+    async function completeExport() {
+      if (preparedFile) {
+        const delivery = await download(preparedFile, signal);
         signal.throwIfAborted();
-        return exportBoard(
-          { boardId, expectedRevision: revision, scope: selectedScope, format },
-          signal,
-        );
-      })
-      .then((result) => {
-        signal.throwIfAborted();
-        if (result.kind === 'file') {
-          download(result.file);
+        if (delivery?.kind === 'unavailable') {
+          setNotice({ tone: 'warning', message: delivery.message });
+        } else {
+          setSelection(undefined);
+          setFile(undefined);
         }
+        return;
+      }
 
+      const result = await exportBoard(request, signal);
+      signal.throwIfAborted();
+      if (result.kind === 'file') {
+        setFile(result.file);
+      } else {
         setNotice(resultNotice(result));
-      })
+      }
+    }
+
+    completeExport()
       .catch((error: unknown) => {
         if (!signal.aborted) {
           setNotice({
             tone: 'error',
             message: error instanceof Error ? error.message : '导出未能完成。',
+            retry: {
+              label: preparedFile ? '重试下载' : '重试导出',
+              onActivate: () => runExport(request, preparedFile),
+            },
           });
         }
       })
       .finally(() => {
         if (pending.current === controller && !signal.aborted) {
           pending.current = undefined;
-          setPendingFormat(undefined);
+          setBusy(false);
         }
       });
+  }
+
+  function handleExport(option: ExportOption, trigger: HTMLButtonElement) {
+    const { format } = option;
+    const unavailable = selectionUnavailable && supportsSelection(format);
+    if (selection || pending.current || unavailable) {
+      return;
+    }
+    if (format === 'html-source' && !exportHtmlSource) {
+      return;
+    }
+
+    const { boardId, revision, selectedIds } = context;
+    const request: ExportBoardRequest = {
+      boardId,
+      expectedRevision: revision,
+      format,
+      scope:
+        scope === 'selection' && supportsSelection(format)
+          ? { kind: 'selection', objectIds: [...selectedIds] }
+          : { kind: 'whole' },
+    };
+    setSelection({ option, request, trigger });
+    runExport(request);
+  }
+
+  function handleDownload() {
+    if (selection && file) {
+      runExport(selection.request, file);
+    }
+  }
+
+  function handleRestoreDownloadFocus() {
+    const target = selection?.trigger.isConnected ? selection.trigger : firstFormat.current;
+    target?.focus({ preventScroll: true });
   }
 
   function renderFormat(option: ExportOption) {
@@ -208,16 +274,14 @@ function OpenExport({
         key={format}
         option={option}
         buttonRef={format === 'png' ? firstFormat : undefined}
-        disabled={
-          pendingFormat !== undefined || (selectionUnavailable && supportsSelection(format))
-        }
+        disabled={selectionUnavailable && supportsSelection(format)}
         onExport={handleExport}
       />
     );
   }
 
   const content = (
-    <section className="whiteboard-export" aria-busy={pendingFormat !== undefined}>
+    <section className="whiteboard-export">
       {!inline && (
         <header className="whiteboard-export__header">
           <h2 className="whiteboard-export__title">导出白板</h2>
@@ -236,7 +300,6 @@ function OpenExport({
       <Select
         label="导出范围"
         value={scope}
-        disabled={pendingFormat !== undefined}
         options={[
           { id: 'whole', label: '整板' },
           {
@@ -250,12 +313,51 @@ function OpenExport({
       <div className="whiteboard-export__formats">
         <p className="whiteboard-export__revision">选择导出格式</p>
         {formats.map((option) =>
-          renderFormat(option.format === 'html' && exportHtmlSource ? htmlSource : option),
+          renderFormat(option.format === 'html' && scope === 'selection' ? htmlSelection : option),
         )}
+        {exportHtmlSource && renderFormat(htmlSource)}
       </div>
       {canBackup && renderFormat(backup)}
-      {pendingFormat && <StatusText message="正在导出…" announcement="polite" busy />}
-      {notice && <StatusText message={notice.message} tone={notice.tone} announcement="polite" />}
+      {selection && (
+        <Dialog
+          open
+          title="下载导出文件"
+          description={selection.option.label}
+          closeLabel="关闭下载窗口"
+          initialFocus={() => cancel.current?.focus()}
+          restoreFocus={handleRestoreDownloadFocus}
+          onRequestClose={handleCloseDownload}
+        >
+          {file && <p className="whiteboard-export__filename">{file.filename}</p>}
+          {busy && (
+            <StatusText
+              message={file ? '正在打开下载…' : '正在生成导出文件…'}
+              announcement="polite"
+              busy
+            />
+          )}
+          {notice && (
+            <StatusText message={notice.message} tone={notice.tone} announcement="polite" />
+          )}
+          <div className="whiteboard-export__actions">
+            <Button ref={cancel} label="取消" onActivate={handleCloseDownload} />
+            {notice?.retry ? (
+              <Button
+                label={notice.retry.label}
+                variant="primary"
+                onActivate={notice.retry.onActivate}
+              />
+            ) : (
+              <Button
+                label="下载"
+                variant="primary"
+                disabled={!file || busy || notice !== undefined}
+                onActivate={handleDownload}
+              />
+            )}
+          </div>
+        </Dialog>
+      )}
     </section>
   );
 

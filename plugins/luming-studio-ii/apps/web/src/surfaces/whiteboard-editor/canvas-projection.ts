@@ -18,6 +18,7 @@ type ContentKind = Exclude<CanvasObjectKind, 'shape' | 'section' | 'ink' | 'conn
 interface SceneProjection {
   readonly scene: CanvasScene;
   readonly objectsById: ReadonlyMap<string, CanvasObject>;
+  readonly connectorLabels: ReadonlyMap<string, CanvasObjectPayload>;
 }
 
 const shapes = new Set<string>([
@@ -143,6 +144,7 @@ export function projectScene(board: WhiteboardScene): SceneProjection | undefine
   }
 
   const objectsById = new Map<string, CanvasObject>();
+  const connectorLabels = new Map<string, CanvasObjectPayload>();
   for (const object of board.objects) {
     const version = safeVersion(object.geometryVersion);
     if (version === undefined) {
@@ -150,11 +152,15 @@ export function projectScene(board: WhiteboardScene): SceneProjection | undefine
     }
 
     objectsById.set(object.id, projectObject(object, version));
+    const connector = object.kind === 'connector' && object.detail?.kind === 'connector';
+    if (connector && object.payloadVersion === undefined) {
+      connectorLabels.set(object.id, { version: revision, value: { text: object.label } });
+    }
   }
 
   const objects = [...objectsById.values()];
 
-  return { scene: { boardId: board.boardId, revision, objects }, objectsById };
+  return { scene: { boardId: board.boardId, revision, objects }, objectsById, connectorLabels };
 }
 
 function convertTodoSource(item: unknown): unknown {
@@ -278,7 +284,7 @@ export function projectPayloads(
   projection: SceneProjection,
   payloads: ReadonlyMap<string, WhiteboardPayload>,
 ) {
-  const payloadById = new Map<string, CanvasObjectPayload>();
+  const payloadById = new Map(projection.connectorLabels);
   const inkById = new Map<string, CanvasInk>();
   let unsafePayloadVersion = false;
 

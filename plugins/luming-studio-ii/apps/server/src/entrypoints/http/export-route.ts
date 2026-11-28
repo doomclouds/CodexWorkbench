@@ -29,6 +29,7 @@ const formatByWire = new Map<BoardExportFormat, ExportBoardFileCommand['format']
   [BoardExportFormat.SVG, 'svg'],
   [BoardExportFormat.PNG, 'png'],
   [BoardExportFormat.HTML, 'html'],
+  [BoardExportFormat.HTML_SOURCE, 'html-source'],
   [BoardExportFormat.ZIP, 'zip'],
 ]);
 

@@ -59,6 +59,7 @@ interface CanvasObjectsProps {
   onClosePresentation?: CanvasProps['onClosePresentation'];
   onObjectNavigation?: (id: string, event: CanvasObjectNavigation) => void;
   onObjectRetentionChange?: (id: string, retain: boolean) => void;
+  onObjectEditingChange?: CanvasProps['onObjectEditingChange'];
 }
 
 interface CanvasRenderedObjectProps {
@@ -95,6 +96,7 @@ interface CanvasRenderedObjectProps {
   onClosePresentation?: CanvasObjectsProps['onClosePresentation'];
   onObjectNavigation?: CanvasObjectsProps['onObjectNavigation'];
   onObjectRetentionChange?: CanvasObjectsProps['onObjectRetentionChange'];
+  onObjectEditingChange?: CanvasObjectsProps['onObjectEditingChange'];
   zoom: number;
 }
 
@@ -232,6 +234,7 @@ const CanvasObjectView = memo(
     onClosePresentation,
     onObjectNavigation,
     onObjectRetentionChange,
+    onObjectEditingChange,
     zoom,
   }: CanvasRenderedObjectProps) => {
     const draft = id === undefined;
@@ -289,6 +292,7 @@ const CanvasObjectView = memo(
         onObjectIntent={blockedEmbed ? undefined : onObjectIntent}
         onObjectNavigation={interactive ? onObjectNavigation : undefined}
         onObjectRetentionChange={onObjectRetentionChange}
+        onObjectEditingChange={onObjectEditingChange}
       />
     ) : (
       content
@@ -381,6 +385,7 @@ export function CanvasObjects({
   onClosePresentation,
   onObjectNavigation,
   onObjectRetentionChange,
+  onObjectEditingChange,
 }: CanvasObjectsProps) {
   const selectedIds = useMemo(() => new Set(selection), [selection]);
   const annotateEmbeds = Boolean(annotationActive && onAnnotateContent);
@@ -438,6 +443,7 @@ export function CanvasObjects({
         onClosePresentation={expanded || focused ? onClosePresentation : undefined}
         onObjectNavigation={onObjectNavigation}
         onObjectRetentionChange={onObjectRetentionChange}
+        onObjectEditingChange={onObjectEditingChange}
         zoom={objectZoom(frame, extension, zoom)}
       />
     );

@@ -356,6 +356,8 @@ function referenceTargets(file, specifier) {
 
 const stickerArtwork = contractPackage + '/whiteboard/stickers';
 const stickerCatalog = resolve(sourceRoot, 'ui/domain/objects/sticker/sticker-catalog.ts');
+const richTextFormat = contractPackage + '/whiteboard/rich-text';
+const richTextBridge = resolve(sourceRoot, 'ui/domain/objects/text/rich-text.ts');
 
 const contractBoundary = {
   meta: {
@@ -468,6 +470,9 @@ const contractBoundary = {
         return written === specifier && allowsConnectorRoute(file, node) ? undefined : 'dependency';
       }
       if (file === stickerCatalog && written === stickerArtwork) {
+        return;
+      }
+      if (file === richTextBridge && written === richTextFormat) {
         return;
       }
 

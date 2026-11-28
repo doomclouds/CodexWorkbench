@@ -1,6 +1,7 @@
 import { Check } from 'lucide-react';
+import { useContext } from 'react';
 import type { MouseEvent } from 'react';
-import type { FeedbackPoint, FeedbackTarget, FeedbackThread } from '../../data/feedback/index.js';
+import type { FeedbackPoint, FeedbackThread } from '../../data/feedback/index.js';
 import type {
   FeedbackCanvasObject,
   FeedbackViewport,
@@ -8,20 +9,25 @@ import type {
 } from './contracts.js';
 import {
   feedbackAuthorColors,
+  FeedbackAuthorColor,
   FeedbackAuthorGlyph,
   feedbackAuthorName,
 } from './feedback-author.js';
-import { locateAnchor, locateDraft, screenPoint, worldPoint } from './geometry.js';
+import { commentPinSize } from './feedback-layer-position.js';
+import { locateAnchor, screenPoint, worldPoint } from './geometry.js';
 
 interface FeedbackPinsProps {
   readonly threads: readonly FeedbackThread[];
   readonly selectedThreadId?: string;
-  readonly draft?: FeedbackTarget;
+  readonly draftPoint?: FeedbackPoint;
+  readonly selectedThreadPoint?: FeedbackPoint;
+  readonly viewerActorId?: string;
   readonly objects: ReadonlyMap<string, FeedbackCanvasObject>;
   readonly contentPoints?: ReadonlyMap<string, FeedbackPoint>;
   readonly contentLocations?: WhiteboardFeedbackSurfaceProps['contentLocations'];
   readonly focusedObjectId?: string;
   readonly viewport: FeedbackViewport;
+  readonly viewportSize?: WhiteboardFeedbackSurfaceProps['viewportSize'];
   readonly picking: boolean;
   readonly onThread: (thread: FeedbackThread, trigger: HTMLButtonElement) => void;
   readonly onPick: (point: FeedbackPoint) => void;
@@ -35,22 +41,40 @@ function pinLabel(thread: FeedbackThread) {
   return author + status + '：' + thread.first.text.slice(0, 80);
 }
 
+function pinIntersects(
+  { left, top }: ReturnType<typeof screenPoint>,
+  size: FeedbackPinsProps['viewportSize'],
+) {
+  return (
+    !size ||
+    (left < size.width &&
+      left + commentPinSize > 0 &&
+      top > 0 &&
+      top - commentPinSize < size.height)
+  );
+}
+
 export function FeedbackPins({
   threads,
   selectedThreadId,
-  draft,
+  draftPoint,
+  selectedThreadPoint,
+  viewerActorId,
   objects,
   contentPoints,
   contentLocations,
   focusedObjectId,
   viewport,
+  viewportSize,
   picking,
   onThread,
   onPick,
   onCancelPicking,
 }: FeedbackPinsProps) {
-  const draftPoint = draft && locateDraft(draft, objects);
-  const visibleThreads = threads.filter(({ id, anchor: { target, targetMissing } }) => {
+  const colorFor = useContext(FeedbackAuthorColor);
+  const visibleThreads = threads.flatMap((thread) => {
+    const { id, anchor } = thread;
+    const { target, targetMissing } = anchor;
     const inView =
       !focusedObjectId || (target.kind !== 'board' && target.objectId === focusedObjectId);
     const clipped =
@@ -59,8 +83,18 @@ export function FeedbackPins({
       objects.has(target.objectId) &&
       contentLocations?.get(id)?.point === null;
 
-    return inView && !clipped;
+    if (!inView || clipped) {
+      return [];
+    }
+
+    const point =
+      (id === selectedThreadId ? selectedThreadPoint : undefined) ??
+      locateAnchor(anchor, objects, contentLocations?.get(id)?.point ?? contentPoints?.get(id));
+    const position = screenPoint(point, viewport);
+
+    return pinIntersects(position, viewportSize) ? [{ thread, position }] : [];
   });
+  const draftPosition = draftPoint && screenPoint(draftPoint, viewport);
 
   function handlePickPoint(event: MouseEvent<HTMLButtonElement>) {
     if (event.detail === 0) {
@@ -72,8 +106,8 @@ export function FeedbackPins({
   }
 
   return (
-    <>
-      {visibleThreads.map((thread) => (
+    <div className="whiteboard-feedback__pin-layer">
+      {visibleThreads.map(({ thread, position }) => (
         <button
           type="button"
           className="whiteboard-feedback__pin"
@@ -84,17 +118,7 @@ export function FeedbackPins({
           key={thread.id}
           aria-label={'备注 ' + pinLabel(thread)}
           title={pinLabel(thread)}
-          style={{
-            ...screenPoint(
-              locateAnchor(
-                thread.anchor,
-                objects,
-                contentLocations?.get(thread.id)?.point ?? contentPoints?.get(thread.id),
-              ),
-              viewport,
-            ),
-            ...feedbackAuthorColors(thread.first),
-          }}
+          style={{ ...position, ...feedbackAuthorColors(colorFor, thread.first.authorId) }}
           onPointerDown={(event) => event.stopPropagation()}
           onDoubleClick={(event) => event.stopPropagation()}
           onClick={(event) => onThread(thread, event.currentTarget)}
@@ -107,10 +131,10 @@ export function FeedbackPins({
           )}
         </button>
       ))}
-      {draftPoint && (
+      {draftPosition && pinIntersects(draftPosition, viewportSize) && (
         <span
           className="whiteboard-feedback__pin whiteboard-feedback__draft-pin"
-          style={{ ...screenPoint(draftPoint, viewport), ...feedbackAuthorColors() }}
+          style={{ ...draftPosition, ...feedbackAuthorColors(colorFor, viewerActorId) }}
           aria-hidden="true"
         >
           <FeedbackAuthorGlyph />
@@ -130,6 +154,6 @@ export function FeedbackPins({
           }}
         />
       )}
-    </>
+    </div>
   );
 }

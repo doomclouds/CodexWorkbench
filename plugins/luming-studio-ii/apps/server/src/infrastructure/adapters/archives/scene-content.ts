@@ -226,6 +226,7 @@ export function payloadFor(
     case 'note':
     case 'shape':
     case 'section':
+    case 'connector':
       return { bodyKind: 'text', data: textPayload(element, label) };
     case 'document':
       return {

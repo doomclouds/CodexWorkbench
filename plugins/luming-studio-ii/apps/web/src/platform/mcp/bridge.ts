@@ -8,6 +8,7 @@ import { OpenAIExtensions } from '@openai/mcp-extensions/app';
 import { createMcpAssets } from './assets.js';
 import { createViewPublisher, readMcpBoardView, type McpViewContext } from './context.js';
 import { reportMcpWarning } from './diagnostics.js';
+import { createMcpDownload } from './download.js';
 import { createMcpNavigation } from './navigation.js';
 import { decodeSession, isIdentifier, record, StudioMcpRequestError } from './protocol.js';
 import type { HostExchange } from './protocol.js';
@@ -20,8 +21,18 @@ type HostContext = ReturnType<App['getHostContext']>;
 
 interface ReviewSourceReference {
   readonly boardId: string;
+  readonly feedbackThreadId: string;
+  readonly comment: string;
+  readonly excerpt?: string;
   readonly sourceId: string;
   readonly capturedBoardRevision: bigint;
+  readonly targetsBoardRevision: bigint;
+  readonly targets: readonly {
+    readonly objectId: string;
+    readonly kind: string;
+    readonly geometryVersion: bigint;
+    readonly payloadVersion?: bigint;
+  }[];
 }
 
 const appToolName = 'studio_app_request';
@@ -119,38 +130,55 @@ function createReviewAttachment(
   app: App,
   extensions: OpenAIExtensions,
   navigation: ReturnType<typeof createMcpNavigation>,
-  signal: AbortSignal,
+  lifetime: AbortSignal,
 ) {
   const message = extensions.message;
-  if (!message || !app.getHostCapabilities()?.message) {
+  if (!message || !app.getHostCapabilities()?.message?.text) {
     return undefined;
   }
 
-  return async ({ boardId, sourceId, capturedBoardRevision }: ReviewSourceReference) => {
+  return async (reference: ReviewSourceReference, attachSignal?: AbortSignal) => {
+    const signal = attachSignal ? AbortSignal.any([lifetime, attachSignal]) : lifetime;
     signal.throwIfAborted();
+    const { boardId, feedbackThreadId, sourceId, comment, excerpt } = reference;
     const location = navigation.read();
     const sameBoard = location.kind === 'whiteboard' && location.boardId === boardId;
-    if (!sameBoard || !isIdentifier(boardId) || !isIdentifier(sourceId)) {
-      throw new Error('请在当前白板中选择要附加的来源。');
+    const validReference = [boardId, feedbackThreadId, sourceId].every(isIdentifier);
+    if (!sameBoard || !validReference) {
+      throw new Error('请从当前白板附加具体备注。');
     }
 
     const text = [
-      '鹿鸣白板来源',
-      '白板 ' + boardId,
-      '来源 ' + sourceId,
-      '冻结版次 ' + capturedBoardRevision,
+      '鹿鸣白板备注',
+      JSON.stringify({
+        boardId,
+        feedbackThreadId,
+        sourceId,
+        comment,
+        excerpt,
+        capturedBoardRevision: reference.capturedBoardRevision.toString(),
+        targetsBoardRevision: reference.targetsBoardRevision.toString(),
+        targets: reference.targets.map(({ objectId, kind, geometryVersion, payloadVersion }) => ({
+          objectId,
+          kind,
+          geometryVersion: geometryVersion.toString(),
+          payloadVersion: payloadVersion?.toString(),
+        })),
+      }),
+      '以用户在当前对话中发送的任务为准。',
     ].join('\n');
     const response = await message.send(
       {
         role: 'user',
-        content: [{ type: 'text', text }],
+        content: [{ type: 'text', text, _meta: { 'openai/title': '白板备注' } }],
         _meta: { 'openai/message': { target: 'active', send: false } },
       },
       { signal },
     );
 
+    signal.throwIfAborted();
     if (response.isError) {
-      throw new Error('宿主尚未确认已附加来源，请检查对话输入框后重试。');
+      throw new Error('宿主尚未确认已附加备注，请检查对话输入框后重试。');
     }
   };
 }
@@ -276,6 +304,7 @@ export async function connectMcpApp(onClosed: () => void) {
     assets,
     postProtobuf: transport.postProtobuf,
     postArchive: transport.postArchive,
+    downloadFile: createMcpDownload(app, signal),
     attachReviewSource: createReviewAttachment(app, extensions, navigation, signal),
     handleBoardLoadFailure(boardId: string, error: unknown) {
       const unavailable =

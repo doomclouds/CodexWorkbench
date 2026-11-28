@@ -49,9 +49,10 @@ const note = {
   id: 'owner-note',
   status: 'open',
   anchor: {
-    target: { kind: 'board', point: notePoint },
+    target: { kind: 'object', objectId: 'rectangle', u: 0.1, v: 0.1, geometryVersion: 0n },
     sourceRevision: 0n,
     frozenPoint: notePoint,
+    frozenExcerpt: '用户选中的原文摘录',
     targetMissing: false,
   },
   first: {
@@ -119,8 +120,7 @@ function createSuggestionRpc() {
       expect(query).toMatchObject({
         boardId: sampleBoardId,
         commandId: boardCommandId,
-        expectedBoardRevision: 0n,
-        origin: { case: 'selection', value: { objectIds: ['rectangle'] } },
+        origin: { case: 'feedbackThreadId', value: note.id },
       });
 
       return reply(createBoardReviewSource.output, {
@@ -131,6 +131,7 @@ function createSuggestionRpc() {
           targetsBoardRevision: 0n,
           objectIds: ['rectangle'],
           targets: [frozenTarget],
+          feedbackThreadId: note.id,
         },
       });
     }
@@ -192,7 +193,12 @@ test('opens suggestions inside the notes panel, filters by author, previews and 
   const rpc = createSuggestionRpc();
   const editService = createWhiteboardEditService(rpc.post);
   const suggestions = createSuggestionService(rpc.post, editService);
-  type Attachment = AttachedReviewSource & { readonly boardId: string };
+  type Attachment = AttachedReviewSource & {
+    readonly boardId: string;
+    readonly feedbackThreadId: string;
+    readonly comment: string;
+    readonly excerpt?: string;
+  };
   const attached: Attachment[] = [];
   const app = createAppMock(rpc.post, {
     feedbackService,
@@ -212,6 +218,7 @@ test('opens suggestions inside the notes panel, filters by author, previews and 
     const panel = app.host.querySelector('[aria-label="所有备注"]');
     expect(panel?.querySelector('article[aria-label="私人建议"]')).not.toBeNull();
     expect(panel?.textContent).toContain(note.first.text);
+    expect(panel?.textContent).not.toMatch(/复制选区引用|附加选区/u);
     expect(rpc.calls).not.toContain(route(createBoardReviewSource));
 
     await app.click('我发起');
@@ -236,10 +243,15 @@ test('opens suggestions inside the notes panel, filters by author, previews and 
     await act(async () => showResolved?.click());
     expect(panel?.querySelector('article[aria-label="私人建议"]')).not.toBeNull();
 
-    await app.click('附加选区');
+    await app.click('展开备注 · ' + note.first.text);
+    await app.click('备注操作');
+    await app.click('附加到 Codex 对话');
     expect(attached).toEqual([
       {
         boardId: sampleBoardId,
+        feedbackThreadId: note.id,
+        comment: note.first.text,
+        excerpt: note.anchor.frozenExcerpt,
         sourceId: suggestion.sourceId,
         capturedBoardRevision: 0n,
         targetsBoardRevision: 0n,

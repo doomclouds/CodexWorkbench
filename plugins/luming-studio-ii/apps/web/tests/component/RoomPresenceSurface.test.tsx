@@ -223,6 +223,26 @@ test('updates the remote pointer without rendering the whiteboard slot again', (
   expect(surface.onViewportRequest).not.toHaveBeenCalled();
 });
 
+test('publishes only current editing object IDs, including during focused document editing', () => {
+  const room = mockRoom();
+  room.update({ canEdit: true });
+  const surface = mount(room);
+  const current = () => room.publishPresence.mock.lastCall?.[0];
+
+  surface.render({ editingObjectIds: ['editing-document'], paused: true });
+  expect(current()?.editingObjectIds).toEqual(['editing-document']);
+  expect(current()?.cursor).toBeUndefined();
+  expect(current()?.viewport).toBeUndefined();
+
+  surface.render({ editingObjectIds: [] });
+  expect(current()?.editingObjectIds).toBeUndefined();
+
+  surface.render({ editingObjectIds: ['editing-text'] });
+  expect(current()?.editingObjectIds).toEqual(['editing-text']);
+  room.update({ canEdit: false });
+  expect(current()?.editingObjectIds).toBeUndefined();
+});
+
 test('shares gesture geometry across windows and expires unsaved previews without redrawing on cursor samples', () => {
   const room = mockRoom();
   const surface = mount(room);
@@ -387,6 +407,48 @@ test('retains the chosen actor while reconnecting without adopting a different p
   room.update({ status: 'online', participants: [self, { ...peer, actorId: 'different-actor' }] });
   expect(fixture.host.textContent).not.toContain('正在跟随');
   expect(surface.onViewportRequest).toHaveBeenCalledTimes(2);
+});
+
+test('keeps one edit outline per remote person and object inside the active viewport', () => {
+  const room = mockRoom();
+  const geometry = { x: 90, y: 45, width: 80, height: 50, rotation: 30 };
+  const objectGeometry = new Map([
+    ['editing-shape', geometry],
+    ['offscreen', { ...geometry, x: 1000 }],
+    ['self-shape', geometry],
+  ]);
+  const surface = mount(room);
+  surface.render({ objectGeometry });
+  const targets = () => fixture.host.querySelectorAll<HTMLElement>('[data-peer-state="editing"]');
+  expect(targets()).toHaveLength(0);
+
+  const remote = { ...peer, editingObjectIds: ['editing-shape', 'offscreen', 'missing'] };
+  const writers = [
+    { ...self, editingObjectIds: ['self-shape'] },
+    remote,
+    { ...remote, viewId: 'duplicate-author-view' },
+  ];
+  room.update({ participants: writers });
+  expect(targets()).toHaveLength(1);
+  const target = targets()[0];
+  expect(target?.dataset.peerTarget).toBe('editing-shape');
+  expect(target?.getAttribute('aria-label')).toBe('作者 · 正在编辑');
+  expect(target?.style.left).toBe('80px');
+  expect(target?.style.top).toBe('90px');
+  expect(target?.style.width).toBe('160px');
+  const outline = target?.querySelector<HTMLElement>('.room-peer-editing__outline');
+  const cursorLabel = fixture.host.querySelector<HTMLElement>('.room-presence-cursor > span');
+  expect(outline?.style.transform).toBe('rotate(30deg)');
+  expect(outline?.style.borderColor).toBe(cursorLabel?.style.backgroundColor);
+
+  surface.render({ objectGeometry, paused: true });
+  expect(targets()).toHaveLength(0);
+  surface.render({ objectGeometry });
+  expect(targets()).toHaveLength(1);
+  room.update({ status: 'reconnecting' });
+  expect(targets()).toHaveLength(0);
+  room.update({ status: 'online', participants: [self, peer] });
+  expect(targets()).toHaveLength(0);
 });
 
 test('stops follow loops and forwards content changes and access-loss signals through the session', () => {

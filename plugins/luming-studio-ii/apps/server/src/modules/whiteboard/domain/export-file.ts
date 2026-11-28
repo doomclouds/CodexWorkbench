@@ -132,21 +132,22 @@ function renderVectorFile(snapshot: BoardExportSnapshot, format: 'svg' | 'png'):
 
 export function renderExportFile(
   snapshot: BoardExportSnapshot,
-  { format, scope }: Pick<ExportRenderCommand, 'format' | 'scope'>,
+  { format }: Pick<ExportRenderCommand, 'format' | 'scope'>,
 ): ExportBoardResult {
   switch (format) {
     case 'svg':
     case 'png':
       return renderVectorFile(snapshot, format);
-    case 'html': {
-      const selected = scope.kind === 'selection';
-      const html = selected ? renderExportHtmlSource(snapshot) : renderExportHtml(snapshot);
-      const title = selected
-        ? snapshot.objects[0]?.label || snapshot.board.title
-        : snapshot.board.title;
-
-      return encodeFile(snapshot, html, 'html', 'text/html', title);
-    }
+    case 'html':
+      return encodeFile(snapshot, renderExportHtml(snapshot), 'html', 'text/html');
+    case 'html-source':
+      return encodeFile(
+        snapshot,
+        renderExportHtmlSource(snapshot),
+        'html',
+        'text/html',
+        snapshot.objects[0]?.label || snapshot.board.title,
+      );
     case 'json':
       return encodeFile(snapshot, jsonExport(snapshot), 'json', 'application/json');
   }

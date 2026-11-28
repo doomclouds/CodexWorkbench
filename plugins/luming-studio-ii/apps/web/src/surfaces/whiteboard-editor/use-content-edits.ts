@@ -383,24 +383,30 @@ export function useContentEdits({
     return handleObjectIntent(draft.intent, draft.id);
   }
 
-  const waiting = unknownReceipts.find(
-    ({ pending: request }) => request.service === service && request.command.boardId === boardId,
-  );
+  function getNotice(isCovered: (objectId: string) => boolean) {
+    const waiting = unknownReceipts.find(
+      ({ pending: request }) =>
+        request.service === service &&
+        request.command.boardId === boardId &&
+        !isCovered(request.command.objectId),
+    );
 
-  function retry() {
-    if (waiting) {
+    if (!waiting || !canEdit) {
+      return undefined;
+    }
+
+    const retry = () => {
       run(waiting.pending, true).catch((error: unknown) =>
         publishUnknown(waiting.pending, errorMessage(error)),
       );
-    }
-  }
+    };
 
-  const notice =
-    waiting && canEdit ? { kind: 'unknown' as const, message: waiting.message, retry } : undefined;
+    return { message: waiting.message, retry };
+  }
 
   const draftAccess: BoardDraftAccess | undefined = vault.access
     ? { ...vault.access, restore: restoreDraft }
     : undefined;
 
-  return { canWriteObject, handleObjectIntent, notice, draftAccess };
+  return { canWriteObject, handleObjectIntent, getNotice, draftAccess };
 }

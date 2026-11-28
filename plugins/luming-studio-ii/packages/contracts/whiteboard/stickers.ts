@@ -373,3 +373,26 @@ export const stickerCatalog: readonly StickerPreset[] = definitions.map(
 export function stickerDefinition(id: string | undefined): StickerDefinition | undefined {
   return id === undefined ? undefined : byId.get(id);
 }
+
+function svgPrimitive(graphic: StickerPrimitive) {
+  const { fill } = graphic;
+  switch (graphic.kind) {
+    case 'path':
+      return `<path d="${graphic.d}" fill="${fill}"/>`;
+    case 'circle':
+      return `<circle cx="${graphic.cx}" cy="${graphic.cy}" r="${graphic.r}" fill="${fill}"/>`;
+    case 'rect':
+      return `<rect x="${graphic.x}" y="${graphic.y}" width="${graphic.width}" height="${graphic.height}" rx="${graphic.rx}" fill="${fill}"/>`;
+  }
+}
+
+export function stickerSvgContent(id: string | undefined): string | undefined {
+  const definition = stickerDefinition(id);
+  if (!definition) {
+    return undefined;
+  }
+
+  const graphics = definition.graphics.map(svgPrimitive).join('');
+
+  return `<g stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="4">${graphics}</g><g stroke="#273443" stroke-width="1.3">${graphics}</g></g>`;
+}

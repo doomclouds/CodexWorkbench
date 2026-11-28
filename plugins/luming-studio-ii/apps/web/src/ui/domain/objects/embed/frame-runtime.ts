@@ -301,8 +301,8 @@ export function selectionRuntime(
       position: 'fixed',
       pointerEvents: 'none',
       zIndex: '2147483647',
-      border: '2px solid #eb6c36',
-      background: 'rgba(235,108,54,.08)',
+      border: '2px solid #389cff',
+      background: '#389cff14',
       borderRadius: '3px',
       boxSizing: 'border-box',
       display: 'none',
@@ -342,6 +342,8 @@ export function selectionRuntime(
     });
   };
   const cursorDocument = document;
+  const shadowCursorStyles = new Map<ShadowRoot, HTMLStyleElement>();
+  let hoveredShadowRoots: readonly ShadowRoot[] = [];
   const cursorOverrides = new Map<
     CSSStyleDeclaration,
     {
@@ -376,7 +378,7 @@ export function selectionRuntime(
       previous.appliedStyle = element.getAttribute('style');
     }
   };
-  const syncCursorRules = () => {
+  const syncCursorRules = (root: Document | ShadowRoot) => {
     const rules = (list: CSSRuleList) => {
       for (const rule of list) {
         const style = (rule as CSSStyleRule).style;
@@ -390,7 +392,8 @@ export function selectionRuntime(
       }
     };
 
-    for (const sheet of cursorDocument.styleSheets) {
+    const sheets = [...(root.styleSheets ?? []), ...(root.adoptedStyleSheets ?? [])];
+    for (const sheet of sheets) {
       rules(sheet.cssRules);
     }
   };
@@ -427,7 +430,10 @@ export function selectionRuntime(
       }
     }
     if (changedRules) {
-      syncCursorRules();
+      syncCursorRules(cursorDocument);
+      for (const root of shadowCursorStyles.keys()) {
+        syncCursorRules(root);
+      }
     }
   });
   window.addEventListener('pagehide', () => cursorObserver.disconnect());
@@ -453,6 +459,48 @@ export function selectionRuntime(
     }
     cursorOverrides.clear();
   };
+  const writeCursorStyle = (style: HTMLStyleElement, shadow: boolean) => {
+    const selector = shadow ? '*' : ':root, :root *';
+    const pseudo = shadow
+      ? '*::before, *::after, *::marker'
+      : ':root::before, :root::after, :root *::before, :root *::after, :root *::marker';
+    const cursor = `cursor: ${forcedCursor} !important;`;
+    const rule = `${selector} { ${cursor} } ${pseudo} { ${cursor} }`;
+    style.textContent = forcedCursor ? `${rule} @layer ${config.cursorLayer} { ${rule} }` : '';
+  };
+  const watchCursorRoot = (root: Document | ShadowRoot) => {
+    syncCursorRules(root);
+    root.querySelectorAll<HTMLElement | SVGElement>('[style]').forEach(syncInlineCursor);
+    cursorObserver.observe(root instanceof Document ? root.documentElement : root, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ['style'],
+    });
+  };
+  const ensureShadowCursor = (root: ShadowRoot) => {
+    if (!root.host.isConnected || shadowCursorStyles.has(root)) {
+      return;
+    }
+
+    const style = cursorDocument.createElement('style');
+    style.setAttribute('data-studio-runtime', 'annotation-cursor');
+    shadowCursorStyles.set(root, style);
+    writeCursorStyle(style, true);
+    root.prepend(style);
+    watchCursorRoot(root);
+  };
+  const syncShadowCursor = (event: PointerEvent) => {
+    const target = event.target;
+    hoveredShadowRoots =
+      target instanceof Element && target.shadowRoot
+        ? event.composedPath().filter((node) => node instanceof ShadowRoot)
+        : [];
+
+    if (forcedCursor) {
+      hoveredShadowRoots.forEach(ensureShadowCursor);
+    }
+  };
   const updateCursor = () => {
     restoreCursors();
     if (navigationPan) {
@@ -462,24 +510,23 @@ export function selectionRuntime(
     } else {
       forcedCursor = enabled ? config.commentCursor : '';
     }
-    const cursor = `cursor: ${forcedCursor} !important;`;
-
     if (cursorStyle) {
-      cursorStyle.textContent = forcedCursor
-        ? `:root, :root * { ${cursor} } :root::before, :root::after, :root *::before, :root *::after { ${cursor} } @layer ${config.cursorLayer} { :root, :root *, :root::before, :root::after, :root *::before, :root *::after, :root *::marker { ${cursor} } }`
-        : '';
+      writeCursorStyle(cursorStyle, false);
     }
     if (forcedCursor) {
-      syncCursorRules();
-      cursorDocument
-        .querySelectorAll<HTMLElement | SVGElement>('[style]')
-        .forEach(syncInlineCursor);
-      cursorObserver.observe(cursorDocument.documentElement, {
-        subtree: true,
-        childList: true,
-        attributes: true,
-        attributeFilter: ['style'],
-      });
+      watchCursorRoot(cursorDocument);
+    }
+    for (const [root, style] of shadowCursorStyles) {
+      if (forcedCursor && root.host.isConnected) {
+        writeCursorStyle(style, true);
+        watchCursorRoot(root);
+      } else {
+        style.remove();
+        shadowCursorStyles.delete(root);
+      }
+    }
+    if (forcedCursor) {
+      hoveredShadowRoots.forEach(ensureShadowCursor);
     }
   };
   const clearAnnotation = () => {
@@ -722,6 +769,7 @@ export function selectionRuntime(
       '*',
     );
   const clearPointer = () => {
+    hoveredShadowRoots = [];
     if (pointerTimer !== undefined) {
       window.clearTimeout(pointerTimer);
       pointerTimer = undefined;
@@ -1132,6 +1180,7 @@ export function selectionRuntime(
   window.addEventListener(
     'pointermove',
     (event: PointerEvent) => {
+      syncShadowCursor(event);
       reportPointer(event);
       if (!enabled) {
         return;

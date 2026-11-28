@@ -237,6 +237,56 @@ test('coalesces temporary geometry with cursor samples and drops it before recon
   room.close();
 });
 
+test('publishes and clears canonical editing targets without waiting for the room heartbeat', async () => {
+  const room = createRoomRig();
+  room.stream().onEvent(snapshot(0n));
+  await room.advance(0);
+
+  room.session.publishPresence({ following: false, editingObjectIds: ['b', 'a', 'b'] });
+  await room.advance(50);
+  expect(room.updates.at(-1)).toEqual({
+    sequence: 2n,
+    presence: { following: false, editingObjectIds: ['a', 'b'] },
+  });
+
+  room.session.publishPresence({ following: false, editingObjectIds: ['b', 'a'] });
+  await room.advance(50);
+  expect(room.updates).toHaveLength(2);
+
+  room.session.publishPresence({ following: false, editingObjectIds: [] });
+  await room.advance(0);
+  expect(room.updates.at(-1)).toEqual({
+    sequence: 3n,
+    presence: { following: false, editingObjectIds: [] },
+  });
+
+  room.close();
+});
+
+test('drops old editing presence on a read-only reconnect and preserves the ordinary cursor', async () => {
+  const room = createRoomRig();
+  const first = room.stream();
+  const cursor = { x: 12, y: 30 };
+  first.onEvent(snapshot(0n));
+  await room.advance(0);
+  room.session.publishPresence({ cursor, following: false, editingObjectIds: ['card'] });
+  await room.advance(50);
+  expect(room.updates.at(-1)?.presence.editingObjectIds).toEqual(['card']);
+
+  first.onDisconnect();
+  await room.advance(500);
+  room.stream(1).onEvent(snapshot(0n, 0n, false));
+  await room.advance(0);
+  expect(room.updates.at(-1)?.presence).toMatchObject({ cursor, editingObjectIds: undefined });
+
+  const writes = room.updates.length;
+  room.session.publishPresence({ cursor, following: false, editingObjectIds: ['card'] });
+  await room.advance(50);
+  expect(room.updates).toHaveLength(writes);
+
+  room.close();
+});
+
 test('ignores repeats and reconnects on an event gap with only a changed revision of content', async () => {
   const room = createRoomRig();
   const original = room.stream();

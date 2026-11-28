@@ -259,7 +259,7 @@ test('pages versions and previews the chosen saved scene without changing the li
   const surface = await mount(service);
   expect(document.activeElement).toBe(button('关闭版本历史'));
 
-  await selectButton('加载更多版本');
+  await selectButton('加载更早版本');
   expect(service.listVersions).toHaveBeenLastCalledWith(
     boardId,
     latestRevision,
@@ -302,6 +302,45 @@ test('returns focus to the history entry when the preview source is no longer mo
   expect(document.activeElement).toBe(anchor);
 });
 
+test('retries the same older page, leaves the loaded records visible and advances focus', async () => {
+  const service = historyMock();
+  const older = deferred<Awaited<ReturnType<BoardHistoryService['listVersions']>>>();
+  service.listVersions
+    .mockResolvedValueOnce({
+      currentRevision: latestRevision,
+      versions: [version(latestRevision)],
+      nextBeforeRevision: latestRevision,
+    })
+    .mockRejectedValueOnce(new Error('版本列表暂时不可用。'))
+    .mockReturnValueOnce(older.promise);
+  await mount(service);
+
+  const footer = button('加载更早版本');
+  await act(async () => footer.focus());
+  await selectButton('加载更早版本');
+  expect(button('重试加载更早版本')).toBe(footer);
+  expect(button('展开版本 3')).toBeDefined();
+  expect(fixture.host.textContent).toContain('版本列表暂时不可用。');
+
+  await selectButton('重试加载更早版本');
+  expect(button('正在加载更早版本…')).toBe(footer);
+  expect(footer.getAttribute('aria-busy')).toBe('true');
+  expect(document.activeElement).toBe(footer);
+  await selectButton('正在加载更早版本…');
+  expect(service.listVersions.mock.calls.map(([, before]) => before)).toEqual([
+    undefined,
+    latestRevision,
+    latestRevision,
+  ]);
+
+  await act(async () =>
+    older.resolve({ currentRevision: latestRevision, versions: [version(1n)] }),
+  );
+  expect(button('展开版本 3')).toBeDefined();
+  expect(document.activeElement).toBe(button('展开版本 1'));
+  expect(footer.isConnected).toBe(false);
+});
+
 test('refreshes through the already loaded history while preserving an expanded record and focus', async () => {
   const service = historyMock();
   service.listVersions
@@ -315,7 +354,7 @@ test('refreshes through the already loaded history while preserving an expanded 
       versions: [version(sourceRevision), version(0n)],
     });
   const surface = await mount(service);
-  await selectButton('加载更多版本');
+  await selectButton('加载更早版本');
   await selectButton('展开版本 1');
   const previewTrigger = button('预览版本');
   await act(async () => previewTrigger.focus());
@@ -504,8 +543,8 @@ test('freezes the selected restore range and expected current revision at confir
   const surface = await mount(service);
   await openPreview();
   await selectButton('选择历史对象');
-  act(chooseSelection);
   await selectButton('恢复此版本');
+  await selectButton('恢复所选对象 (1)');
   expect(fixture.host.textContent).toContain('将所选 1 个对象恢复到版本 1。');
   expect(service.restoreVersion).not.toHaveBeenCalled();
 
@@ -530,8 +569,12 @@ test('exports a historical PNG selection and always uses the whole revision for 
   await mount(service);
   await openPreview();
   await selectButton('选择历史对象');
+  expect(fixture.host.querySelector('select')).toBeNull();
+  await selectButton('导出历史版本');
   act(chooseSelection);
   await selectButton('导出 PNG');
+  expect(fixture.host.querySelector('select')).toBeNull();
+  await selectButton('导出历史版本');
   await selectButton('导出整板 HTML');
 
   const commands = service.exportVersion.mock.calls.map(([request]) => request);
@@ -711,6 +754,7 @@ test('allows read-only version export and cancels late downloads on preview exit
   const surface = await mount(service, { canEdit: false });
   await openPreview();
   expect(fixture.host.textContent).not.toContain('恢复此版本');
+  await selectButton('导出历史版本');
   await selectButton('导出 SVG');
   expect(service.exportVersion).toHaveBeenCalledExactlyOnceWith(
     { boardId, revision: sourceRevision, scope: { kind: 'whole' }, format: 'svg' },

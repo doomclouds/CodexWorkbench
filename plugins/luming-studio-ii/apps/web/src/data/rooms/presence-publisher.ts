@@ -33,6 +33,17 @@ function sameView(
   return sameCenter && sameSize && next.zoom === prior.zoom;
 }
 
+function sameEditingObjects(
+  next: BoardRoomPresence['editingObjectIds'],
+  previous: BoardRoomPresence['editingObjectIds'],
+): boolean {
+  const nextIds = next ?? [];
+  const previousIds = previous ?? [];
+  return (
+    nextIds.length === previousIds.length && nextIds.every((id, index) => id === previousIds[index])
+  );
+}
+
 function differs(next: BoardRoomPresence, previous: BoardRoomPresence | undefined): boolean {
   if (!previous) {
     return true;
@@ -43,7 +54,9 @@ function differs(next: BoardRoomPresence, previous: BoardRoomPresence | undefine
   const viewChanged = !sameView(next.viewport, previous.viewport);
 
   const activityChanged =
-    next.following !== previous.following || next.gesture !== previous.gesture;
+    next.following !== previous.following ||
+    next.gesture !== previous.gesture ||
+    !sameEditingObjects(next.editingObjectIds, previous.editingObjectIds);
 
   return cursorChanged || viewChanged || activityChanged;
 }
@@ -113,13 +126,21 @@ export function createPresencePublisher(clock: BoardRoomClock, port: PresencePor
   }
 
   function publish(presence: BoardRoomPresence) {
-    if (differs(presence, current)) {
-      current = presence;
+    const { editingObjectIds } = presence;
+    const next = editingObjectIds
+      ? { ...presence, editingObjectIds: [...new Set(editingObjectIds)].sort() }
+      : presence;
+
+    if (differs(next, current)) {
+      current = next;
       schedule();
     }
   }
 
-  function resume() {
+  function resume(canEdit: boolean) {
+    if (!canEdit) {
+      publish({ ...current, editingObjectIds: undefined, gesture: undefined });
+    }
     if (!controller) {
       controller = new AbortController();
       sent = undefined;

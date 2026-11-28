@@ -163,6 +163,7 @@ function TableCanvasView({
   formatRequest,
   content,
   onRetentionChange,
+  onEditingChange,
   request,
 }: CanvasObjectViewProps) {
   const source = payload?.value;
@@ -201,10 +202,17 @@ function TableCanvasView({
     return false as const;
   }
 
-  function handleActivityChange({ editing, dirty, saving, resizing }: TableObjectActivity) {
+  function handleActivityChange({
+    editing,
+    editingCell,
+    dirty,
+    saving,
+    resizing,
+  }: TableObjectActivity) {
     const localWork = dirty || saving;
     const interacting = editing || resizing;
     onRetentionChange?.(localWork || interacting);
+    onEditingChange?.(Boolean(editingCell || resizing));
   }
 
   return (

@@ -71,12 +71,16 @@ interface HostOptions {
   readonly modelContext?: Message;
   readonly hostCapabilities?: Message;
   readonly responseStatus?: number;
+  readonly downloadError?: boolean;
+  readonly messageError?: boolean;
 }
 
 function withHost({
   modelContext = { updateId: 'prior-state', structuredContent: savedView },
   hostCapabilities = capabilities,
   responseStatus = 200,
+  downloadError = false,
+  messageError = false,
 }: HostOptions = {}) {
   const recorder: Message[] = [];
   const iframe = document.createElement('iframe');
@@ -113,6 +117,18 @@ function withHost({
     if (request.method === 'ui/update-model-context') {
       recorder.push(request);
       respond(request, {});
+
+      return;
+    }
+    if (request.method === 'ui/download-file') {
+      recorder.push(request);
+      respond(request, { isError: downloadError });
+
+      return;
+    }
+    if (request.method === 'ui/message') {
+      recorder.push(request);
+      respond(request, { isError: messageError });
 
       return;
     }
@@ -162,6 +178,141 @@ async function withBridge(
     host.dispose();
   }
 }
+
+const downloadFile = {
+  filename: '发布白板.svg',
+  mimeType: 'image/svg+xml',
+  content: new TextEncoder().encode('<svg/>'),
+};
+
+const feedbackReference = {
+  boardId,
+  feedbackThreadId: 'notation-1',
+  sourceId: 'source-1',
+  comment: '把节点移到标题下方',
+  excerpt: '节点原文',
+  capturedBoardRevision: 2n,
+  targetsBoardRevision: 5n,
+  targets: [{ objectId: cardId, kind: 'shape', geometryVersion: 3n, payloadVersion: 4n }],
+};
+
+const draftCapabilities = {
+  ...capabilities,
+  message: { text: {} },
+  experimental: { ...capabilities.experimental, 'openai/message': {} },
+};
+
+test('attaches only the chosen note as an unsent draft in the active Codex conversation', async () => {
+  await withBridge(
+    async (bridge, host) => {
+      const attach = bridge.attachReviewSource;
+      if (!attach) {
+        throw new Error('The Studio panel did not detect the draft capability.');
+      }
+
+      expect(host.recorder).toHaveLength(0);
+      await attach(feedbackReference);
+
+      const context = {
+        ...feedbackReference,
+        capturedBoardRevision: '2',
+        targetsBoardRevision: '5',
+        targets: [{ objectId: cardId, kind: 'shape', geometryVersion: '3', payloadVersion: '4' }],
+      };
+      expect(host.recorder).toMatchObject([
+        {
+          method: 'ui/message',
+          params: {
+            role: 'user',
+            _meta: { 'openai/message': { target: 'active', send: false } },
+            content: [
+              {
+                type: 'text',
+                text: [
+                  '鹿鸣白板备注',
+                  JSON.stringify(context),
+                  '以用户在当前对话中发送的任务为准。',
+                ].join('\n'),
+                _meta: { 'openai/title': '白板备注' },
+              },
+            ],
+          },
+        },
+      ]);
+    },
+    { hostCapabilities: draftCapabilities },
+  );
+});
+
+test('requires the draft capability and rejects a stale board, aborted action or failed host acknowledgement', async () => {
+  await withBridge(async (bridge, host) => {
+    expect(bridge.attachReviewSource).toBeUndefined();
+    expect(host.recorder).toHaveLength(0);
+  });
+
+  await withBridge(
+    async (bridge, host) => {
+      const attach = bridge.attachReviewSource;
+      if (!attach) {
+        throw new Error('The Studio panel did not detect the draft capability.');
+      }
+
+      await expect(attach({ ...feedbackReference, boardId: 'another-board' })).rejects.toThrow(
+        '请从当前白板附加具体备注',
+      );
+      await expect(
+        attach(feedbackReference, AbortSignal.abort(new Error('备注窗口已关闭'))),
+      ).rejects.toThrow('备注窗口已关闭');
+      expect(host.recorder).toHaveLength(0);
+      await expect(attach(feedbackReference)).rejects.toThrow('宿主尚未确认已附加备注');
+      expect(host.recorder[0]?.method).toBe('ui/message');
+    },
+    { hostCapabilities: draftCapabilities, messageError: true },
+  );
+});
+
+test('hands board bytes to the declared host download capability and reports acceptance', async () => {
+  await withBridge(
+    async (bridge, host) => {
+      const mark = await bridge.downloadFile(downloadFile);
+
+      expect(host.recorder.at(-1)).toMatchObject({
+        method: 'ui/download-file',
+        params: {
+          contents: [
+            {
+              type: 'resource',
+              resource: {
+                uri: 'file:///' + encodeURIComponent(downloadFile.filename),
+                mimeType: downloadFile.mimeType,
+                blob: 'PHN2Zy8+',
+              },
+            },
+          ],
+        },
+      });
+      expect(mark).toEqual({
+        kind: 'requested',
+        message: '宿主已接受下载「发布白板.svg」。请留意宿主的下载提示。',
+      });
+    },
+    { hostCapabilities: { ...capabilities, downloadFile: {} } },
+  );
+});
+
+test('reports unavailable host downloads and propagates a cancelled or rejected request', async () => {
+  await withBridge(async (bridge, host) => {
+    await expect(bridge.downloadFile(downloadFile)).resolves.toMatchObject({ kind: 'unavailable' });
+    expect(host.recorder).toHaveLength(0);
+  });
+
+  await withBridge(
+    async (bridge) => {
+      await expect(bridge.downloadFile(downloadFile)).rejects.toThrow('宿主未完成下载');
+    },
+    { hostCapabilities: { ...capabilities, downloadFile: {} }, downloadError: true },
+  );
+});
 
 test('restores a permitted board, current selection, camera and object focus after reattachment', async () => {
   await withBridge(async (bridge, host) => {

@@ -28,7 +28,7 @@ import {
 import { agentPrincipalPrefix, useSharingTestServer } from './sharing-test-server.js';
 
 const server = useSharingTestServer();
-const { updateBoardPresence, leaveBoardPresence } = BoardRoomService.method;
+const { getBoardRoom, updateBoardPresence, leaveBoardPresence } = BoardRoomService.method;
 const share = BoardSharingService.method;
 const scope = { boardId: mainBoardId, viewId: 'stream-observer' };
 const peer = { boardId: mainBoardId, viewId: 'stream-peer' };
@@ -99,15 +99,31 @@ test('delivers a snapshot and live events over the same binary gRPC-Web HTTP req
       sequence: 0n,
       payload: { case: 'snapshot', value: { actorId: editorId } },
     });
-    await callWhiteboard(server.owner, teammateId, updateBoardPresence, { ...peer, sequence: 1n });
+    const editingObjectIds = ['shape-1'];
+    await callWhiteboard(server.owner, teammateId, updateBoardPresence, {
+      ...peer,
+      sequence: 1n,
+      editingObjectIds,
+    });
     expect(await readEvent(stream)).toMatchObject({
       roomInstanceId: first.roomInstanceId,
       sequence: 1n,
       payload: {
         case: 'participants',
-        value: { upserts: [{ key: { actorId: teammateId, viewId: peer.viewId } }] },
+        value: {
+          upserts: [{ key: { actorId: teammateId, viewId: peer.viewId }, editingObjectIds }],
+        },
       },
     });
+
+    const current = await callWhiteboard(server.owner, editorId, getBoardRoom, {
+      boardId: mainBoardId,
+    });
+    expect(current.event?.payload).toMatchObject({
+      case: 'snapshot',
+      value: { participants: [{ editingObjectIds }] },
+    });
+
     await callWhiteboard(server.owner, teammateId, leaveBoardPresence, { ...peer, sequence: 2n });
     expect(await readEvent(stream)).toMatchObject({
       roomInstanceId: first.roomInstanceId,

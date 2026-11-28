@@ -290,13 +290,18 @@
   cursor: grab;
 }
 
-.studio-object-todo__row:focus-within,
-.studio-object-todo[data-todo-annotating] .studio-object-todo__row:hover {
+.studio-object-todo__row:focus-within {
   background: var(--todo-highlight);
 }
 
 .studio-object-todo[data-todo-annotating] .studio-object-todo__row {
-  cursor: var(--canvas-comment-cursor, crosshair);
+  cursor: var(--canvas-comment-cursor, pointer);
+}
+
+.studio-object-todo[data-todo-annotating] .studio-object-todo__row:is(:hover, :focus-within) {
+  outline: 2px solid var(--canvas-annotation-ink, #389cff);
+  outline-offset: -2px;
+  background: var(--canvas-annotation-fill, #389cff14);
 }
 
 .studio-object-todo__remove {

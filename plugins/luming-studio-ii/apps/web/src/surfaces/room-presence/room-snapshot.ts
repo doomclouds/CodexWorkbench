@@ -44,6 +44,17 @@ function sameCursorMember(current: BoardRoomParticipant, next: BoardRoomParticip
   return samePoint && samePublishedCursor && sameMember(current, next);
 }
 
+function sameEditorMember(current: BoardRoomParticipant, next: BoardRoomParticipant) {
+  const previous = current.editingObjectIds ?? [];
+  const incoming = next.editingObjectIds ?? [];
+
+  return (
+    sameMember(current, next) &&
+    previous.length === incoming.length &&
+    previous.every((id, index) => id === incoming[index])
+  );
+}
+
 function sameMembers(current: BoardRoomState, next: BoardRoomState, match: MatchParticipant) {
   const previous = current.participants;
   const incoming = next.participants;
@@ -128,6 +139,14 @@ function sameCursors(current: BoardRoomState, next: BoardRoomState) {
   return sameViewer(current, next) && sameMembers(current, next, sameCursorMember);
 }
 
+function sameEditors(current: BoardRoomState, next: BoardRoomState) {
+  return (
+    current.status === next.status &&
+    sameViewer(current, next) &&
+    sameMembers(current, next, sameEditorMember)
+  );
+}
+
 function roomReader(session: BoardRoomSession, matches: MatchRoom) {
   let current: BoardRoomState | undefined;
   return () => {
@@ -152,4 +171,8 @@ export function useRoomChromeSnapshot(session: BoardRoomSession) {
 
 export function useRoomCursorSnapshot(session: BoardRoomSession) {
   return useRoomSnapshot(session, sameCursors);
+}
+
+export function useRoomEditingSnapshot(session: BoardRoomSession) {
+  return useRoomSnapshot(session, sameEditors);
 }

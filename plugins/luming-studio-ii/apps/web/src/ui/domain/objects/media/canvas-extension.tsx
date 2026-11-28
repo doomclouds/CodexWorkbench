@@ -1,3 +1,4 @@
+import { useCallback } from 'react';
 import type { CanvasObjectExtension, CanvasObjectViewProps } from '../../canvas/index.js';
 import type { ImageCrop, ImageCropPatch, MediaObjectStatus, MediaSize } from './contracts.js';
 import { LinkView } from './link-view.js';
@@ -101,11 +102,19 @@ function ImageView({
   editRequest,
   request,
   onRetentionChange,
+  onEditingChange,
 }: CanvasObjectViewProps) {
   const { src, href, crop, naturalSize, status } = imageValue(payload?.value);
   const canReadControls =
     geometry.width * zoom >= minimumControlSize.width &&
     geometry.height * zoom >= minimumControlSize.height;
+  const handleCropActivity = useCallback(
+    (active: boolean) => {
+      onRetentionChange?.(active);
+      onEditingChange?.(active && !readOnly);
+    },
+    [onRetentionChange, onEditingChange, readOnly],
+  );
 
   async function saveCrop(patch: ImageCropPatch) {
     if (!payload) {
@@ -140,7 +149,7 @@ function ImageView({
       editRequest={editRequest}
       showCropControl={false}
       showLinkControl={Boolean(expanded || focusedReading || canReadControls)}
-      onCropActivityChange={onRetentionChange}
+      onCropActivityChange={handleCropActivity}
       onSaveCrop={payload ? saveCrop : undefined}
     />
   );

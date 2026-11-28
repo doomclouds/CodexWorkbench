@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import type {
   CanvasContentLocation,
   CanvasContentLocationRequest,
+  CanvasViewportSize,
 } from '../../ui/domain/canvas/index.js';
 import type {
   BoardFeedbackService,
@@ -11,6 +12,7 @@ import type {
 
 export interface FeedbackCanvasObject {
   readonly id: string;
+  readonly kind?: string;
   readonly label: string;
   readonly geometry: FeedbackPoint & {
     readonly width: number;
@@ -43,9 +45,12 @@ type ContentLocationRequests = ReadonlyMap<string, readonly CanvasContentLocatio
 export interface WhiteboardFeedbackSurfaceProps {
   readonly boardId: string;
   readonly updateKey?: string;
+  readonly viewerActorId?: string;
+  readonly colorForAuthor?: (actorId: string) => string;
   readonly canEdit: boolean;
   readonly viewing: boolean;
   readonly viewport: FeedbackViewport;
+  readonly viewportSize?: CanvasViewportSize;
   readonly objects: readonly FeedbackCanvasObject[];
   readonly selectedIds: readonly string[];
   readonly service: BoardFeedbackService;
@@ -61,9 +66,7 @@ export interface WhiteboardFeedbackSurfaceProps {
   readonly singleKeys?: boolean;
   readonly onAnnotationActiveChange?: (active: boolean) => void;
   readonly onUnresolvedChange?: (unresolved: boolean) => void;
-  readonly onReviewThread?: (threadId: string) => void;
   readonly onAttachThread?: (request: FeedbackAttachmentRequest) => Promise<void>;
-  readonly attachmentMode?: 'context' | 'copy';
   readonly annotationRequest?: {
     readonly objectId: string;
     readonly sequence: number;
@@ -76,6 +79,7 @@ export interface WhiteboardFeedbackSurfaceProps {
   readonly contentAnnotationRequest?: {
     readonly sequence: number;
     readonly target: FeedbackContentTarget;
+    readonly excerpt?: string;
   };
   readonly contentPoints?: ReadonlyMap<string, FeedbackPoint>;
   readonly renderSuggestions?: (frame: FeedbackSuggestionsFrame) => ReactNode;

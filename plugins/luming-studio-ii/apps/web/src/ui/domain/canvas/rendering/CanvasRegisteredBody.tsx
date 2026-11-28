@@ -18,6 +18,7 @@ interface CanvasRegisteredBodyProps extends Omit<
   | 'request'
   | 'onNavigation'
   | 'onRetentionChange'
+  | 'onEditingChange'
   | 'onOpenPresentation'
   | 'onAnnotateContent'
   | 'uploadDocumentImage'
@@ -26,6 +27,7 @@ interface CanvasRegisteredBodyProps extends Omit<
   readonly onObjectIntent?: SubmitObjectIntent;
   readonly onObjectNavigation?: NavigateObject;
   readonly onObjectRetentionChange?: RetainObject;
+  readonly onObjectEditingChange?: CanvasProps['onObjectEditingChange'];
   readonly onOpenPresentation?: CanvasProps['onOpenPresentation'];
   readonly onAnnotateContent?: CanvasProps['onAnnotateContent'];
   readonly uploadDocumentImage?: CanvasProps['uploadDocumentImage'];
@@ -55,6 +57,7 @@ export function CanvasRegisteredBody({
   onObjectIntent,
   onObjectNavigation,
   onObjectRetentionChange,
+  onObjectEditingChange,
   onOpenPresentation,
   onAnnotateContent,
   uploadDocumentImage,
@@ -67,6 +70,21 @@ export function CanvasRegisteredBody({
   const explicitRetention = useRef(false);
   const pending = useRef(0);
   const reportedRetention = useRef(false);
+  const reportedEditing = useRef(false);
+
+  const reportEditing = useCallback(
+    (editing: boolean) => {
+      if (id === undefined || reportedEditing.current === editing) {
+        return;
+      }
+
+      reportedEditing.current = editing;
+      onObjectEditingChange?.(id, editing);
+    },
+    [id, onObjectEditingChange],
+  );
+
+  useLayoutEffect(() => () => reportEditing(false), [reportEditing, target]);
 
   const publishRetention = useCallback(() => {
     const retain = explicitRetention.current || pending.current > 0;
@@ -194,6 +212,7 @@ export function CanvasRegisteredBody({
       request={request}
       onNavigation={id !== undefined && onObjectNavigation ? navigate : undefined}
       onRetentionChange={id !== undefined && onObjectRetentionChange ? retain : undefined}
+      onEditingChange={id !== undefined && onObjectEditingChange ? reportEditing : undefined}
       onOpenPresentation={onOpenPresentation && id !== undefined ? openPresentation : undefined}
       onAnnotateContent={onAnnotateContent && id !== undefined ? annotate : undefined}
       uploadDocumentImage={

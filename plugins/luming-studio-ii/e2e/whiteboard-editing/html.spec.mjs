@@ -431,3 +431,134 @@ test("[EDIT-HTML-07] 只读访客能看图解及操作控件，不能保存互�
     await probe.close();
   }
 });
+
+const annotationCursor = /url\("data:image\/svg\+xml,/u;
+const shadowCounter =
+  counterSource +
+  `
+<div id="widget" data-studio-id="custom-widget"></div>
+<script>
+  const shadow = document.getElementById('widget').attachShadow({ mode: 'open' });
+  shadow.innerHTML = '<style>button { cursor: crosshair !important; }</style><button type="button">嵌入按钮</button>';
+  shadow.querySelector('button').addEventListener('click', () => document.getElementById('increment').click());
+</script>`;
+
+test("[EDIT-HTML-08] 备注光标穿过嵌入内容，退出后恢复内部互动", async ({
+  page,
+  studio,
+}, testInfo) => {
+  const html = {
+    id: "cursor-html",
+    kind: "html",
+    label: "备注 HTML",
+    x: 80,
+    y: 100,
+    width: 365,
+    height: 340,
+    html: shadowCounter,
+  };
+  const diagram = { ...html, id: "cursor-diagram", kind: "diagram", label: "备注图解", x: 485 };
+  const chart = { ...html, id: "cursor-chart", kind: "chart", label: "备注图表", x: 890 };
+  const board = await openOriginal(page, studio, "备注光标定位", [
+    html,
+    diagram,
+    chart,
+    {
+      id: "cursor-shape",
+      kind: "shape",
+      label: "标注形状",
+      x: 90,
+      y: 490,
+      width: 160,
+      height: 100,
+    },
+    {
+      id: "cursor-document",
+      kind: "document",
+      label: "标注文档",
+      x: 315,
+      y: 490,
+      width: 410,
+      height: 230,
+      document: {
+        schemaVersion: 1,
+        blocks: [
+          {
+            id: "cursor-block",
+            type: "paragraph",
+            content: [{ type: "text", text: "标注正文", styles: {} }],
+            children: [],
+          },
+        ],
+      },
+    },
+    {
+      id: "cursor-todo",
+      kind: "todo",
+      label: "标注待办",
+      x: 795,
+      y: 490,
+      width: 385,
+      height: 230,
+      items: [{ id: "cursor-task", text: "标注任务", checked: false }],
+    },
+  ]);
+  await selectOriginal(page, studio, html.id);
+  const frame = embedFrame(page, html.label);
+  const target = button(frame, "嵌入按钮");
+  await expect(target).toHaveCSS("cursor", "crosshair");
+  await target.click();
+  await expect(frame.getByText("次数：1", { exact: true })).toBeVisible();
+  await expect.poll(() => savedEmbed(studio, board, html)).toMatchObject({ state: { clicks: 1 } });
+
+  const notes = button(page, "备注");
+  await notes.click();
+  await expect(notes).toHaveAttribute("aria-pressed", "true");
+  const isCurrent = studio.edition === "ii";
+  const frames = isCurrent ? [html, diagram, chart] : [html, diagram];
+  for (const object of frames) {
+    const field = embedFrame(page, object.label);
+    const embedded = button(field, "嵌入按钮");
+    await embedded.hover();
+    await expect(button(field, "增加次数")).toHaveCSS("cursor", annotationCursor);
+    await expect(embedded).toHaveCSS("cursor", isCurrent ? annotationCursor : "crosshair");
+  }
+  const shape = page.getByText("标注形状", { exact: true });
+  await shape.hover();
+  await expect(shape).toHaveCSS("cursor", annotationCursor);
+  await expect(button(page, "展开文档")).toHaveCSS("cursor", annotationCursor);
+  await expect(button(page, "备注任务：标注任务")).toHaveCSS("cursor", annotationCursor);
+  if (isCurrent) {
+    const canvas = page.getByRole("region", { name: board.title, exact: true });
+    await canvas.hover({ position: { x: 45, y: 45 } });
+    await expect(canvas).toHaveCSS("cursor", annotationCursor);
+    await expect(button(page, "展开任务清单")).toHaveCSS("cursor", annotationCursor);
+  }
+  await target.hover();
+  await screenshot(page, testInfo, "embed-annotation-hover");
+  await target.click();
+  const draft = page.getByRole("textbox", { name: "批注内容", exact: true });
+  await expect(draft).toBeVisible();
+  await expect(frame.getByText("次数：1", { exact: true })).toBeVisible();
+  await draft.press("Escape");
+  await expect(draft).toHaveCount(0);
+  await notes.click();
+  await expect(notes).toHaveAttribute("aria-pressed", "false");
+
+  await selectOriginal(page, studio, html.id);
+  await expect(target).toHaveCSS("cursor", "crosshair");
+  await target.click();
+  await expect(frame.getByText("次数：2", { exact: true })).toBeVisible();
+  const scroller = frame.getByRole("region", { name: "内部滚动内容", exact: true });
+  const camera = await readCanvas(page, studio);
+  await scroller.hover();
+  await page.mouse.wheel(0, 700);
+  await expect(frame.getByText("已内部滚动", { exact: true })).toBeVisible();
+  expect(await readCanvas(page, studio)).toMatchObject({ pan: camera.pan, zoom: camera.zoom });
+  await observe(testInfo, "annotation-embed-cursor", {
+    ordinaryCursor: true,
+    shadowCursor: isCurrent,
+    openedDraft: true,
+    frameInteractionRestored: true,
+  });
+});

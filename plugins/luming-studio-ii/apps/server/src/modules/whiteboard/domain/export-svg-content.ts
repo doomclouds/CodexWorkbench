@@ -1,3 +1,9 @@
+import {
+  parseRichText,
+  type RichTextLine,
+  type RichTextSegment,
+} from '@codexworkbench/luming-studio-ii-contracts/whiteboard/rich-text';
+import { stickerSvgContent } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/stickers';
 import type { BoardExportAsset } from './export-types.js';
 import type { BoardObject, JsonObject, JsonValue, PayloadRecord } from './model.js';
 import { svgColor, svgStrokeWidth } from './export-svg-shapes.js';
@@ -42,66 +48,6 @@ function bounded(value: JsonValue | undefined, minimum: number, maximum: number,
     : fallback;
 }
 
-function lineText(value: JsonValue | undefined): string {
-  if (typeof value === 'string') {
-    return value;
-  }
-  if (!Array.isArray(value)) {
-    return stringValue(record(value)?.text);
-  }
-
-  return value.map((run) => stringValue(record(run)?.text) || stringValue(run)).join('');
-}
-
-function documentRows(data: JsonObject, count: number): string[] {
-  const queue = Array.isArray(data.blocks) ? [...data.blocks] : [];
-  const rows: string[] = [];
-
-  for (let cursor = 0; cursor < queue.length && rows.length < count; cursor += 1) {
-    const block = record(queue[cursor]);
-    if (!block) {
-      continue;
-    }
-
-    const text = lineText(block.content) || stringValue(record(block.props)?.caption);
-    if (text) {
-      rows.push(text);
-    }
-    if (Array.isArray(block.children)) {
-      for (const child of block.children) {
-        queue.push(child);
-      }
-    }
-  }
-
-  return rows;
-}
-
-function cellValue(cell: JsonValue): string {
-  const data = record(cell);
-  if (typeof data?.number === 'number') {
-    return String(data.number);
-  }
-  if (typeof data?.boolValue === 'boolean') {
-    return String(data.boolValue);
-  }
-
-  return stringValue(data?.text);
-}
-
-function tableRows(data: JsonObject, count: number): string[] {
-  const rows = record(data.grid)?.rows;
-  if (!Array.isArray(rows)) {
-    return [];
-  }
-
-  return rows.slice(0, count).map((row) => {
-    const cells = record(row)?.cells;
-
-    return Array.isArray(cells) ? cells.map(cellValue).join('  |  ') : '';
-  });
-}
-
 function compactLines(label: string, width: number, fontSize: number, count: number) {
   const columns = Math.max(1, Math.floor(width / (fontSize * 0.67)));
 
@@ -111,17 +57,61 @@ function compactLines(label: string, width: number, fontSize: number, count: num
     .map((line) => (line.length > columns ? line.slice(0, columns) + '…' : line));
 }
 
+function svgTextRun(segment: RichTextSegment, text: string) {
+  const bold = segment.bold || segment.type === 'bold' ? ' font-weight="700"' : '';
+  const italic = segment.italic || segment.type === 'italic' ? ' font-style="italic"' : '';
+  const code = segment.code || segment.type === 'code' ? ' font-family="monospace"' : '';
+  const link = segment.href ? ' fill="#385f9d" text-decoration="underline"' : '';
+  const style = bold + italic + code + link;
+  const value = escapeXml(text);
+
+  return style ? `<tspan${style}>${value}</tspan>` : value;
+}
+
+function svgTextLine(line: RichTextLine, width: number, fontSize: number) {
+  const marker = line.marker ? line.marker + ' ' : '';
+  const columns = Math.max(1, Math.floor(width / (fontSize * 0.67)));
+  const indent = Math.min(line.indent ?? 0, Math.floor(columns / 4));
+  let remaining = Math.max(1, columns - marker.length - indent * 2);
+  let output = escapeXml(' '.repeat(indent * 2) + marker);
+  for (const segment of line.segments) {
+    const text = Array.from(segment.text);
+    if (text.length > remaining) {
+      const part = remaining ? svgTextRun(segment, text.slice(0, remaining).join('')) : '';
+
+      return output + part + '…';
+    }
+
+    output += svgTextRun(segment, segment.text);
+    remaining -= text.length;
+  }
+
+  return output;
+}
+
+export function svgCaption(value: string, width: number, fontSize: number) {
+  const [line] = parseRichText(value.split(/\r?\n/u, 1)[0] ?? '');
+
+  return line ? svgTextLine(line, width, fontSize) : '';
+}
+
 export function svgLabel(
   label: string,
   width: number,
   height: number,
   data: JsonObject,
   centered: boolean,
+  mode: 'rich' | 'literal' = 'rich',
 ): string {
   const fontSize = bounded(data.fontSize, 8, 72, 14);
   const fill = svgColor(stringValue(data.color), '#2d3142');
   const count = Math.max(1, Math.min(maxRows, Math.floor(height / rowHeight)));
-  const lines = compactLines(label, width, fontSize, count);
+  const lines =
+    mode === 'rich'
+      ? parseRichText(label)
+          .slice(0, count)
+          .map((line) => svgTextLine(line, width, fontSize))
+      : compactLines(label, width, fontSize, count).map(escapeXml);
   const right = data.align === 'TEXT_ALIGNMENT_RIGHT';
   const center = centered || data.align === 'TEXT_ALIGNMENT_CENTER';
   const alignedX = center ? width / 2 : 0;
@@ -131,11 +121,14 @@ export function svgLabel(
     : fontSize;
   const alignedAnchor = center ? 'middle' : 'start';
   const anchor = right ? 'end' : alignedAnchor;
-  const body = lines
-    .map((line) => `<tspan x="${x}" dy="${rowHeight}">${escapeXml(line)}</tspan>`)
-    .join('');
+  const body = lines.map((line) => `<tspan x="${x}" dy="${rowHeight}">${line}</tspan>`).join('');
 
-  return `<text y="${y - rowHeight}" font-size="${fontSize}" text-anchor="${anchor}" fill="${fill}">${body}</text>`;
+  const fontFamily =
+    typeof data.fontFamily === 'string' ? ` font-family="${escapeXml(data.fontFamily)}"` : '';
+  const weight = data.bold === true ? ' font-weight="700"' : '';
+  const italic = data.italic === true ? ' font-style="italic"' : '';
+
+  return `<text y="${y - rowHeight}" font-size="${fontSize}" text-anchor="${anchor}" fill="${fill}" xml:space="preserve"${fontFamily}${weight}${italic}>${body}</text>`;
 }
 
 function todoSourceAttribute(source: JsonObject | undefined): string {
@@ -179,35 +172,66 @@ function todoCard(object: BoardObject, data: JsonObject): string {
       ? `<path d="M17 16l3 3 5-6" fill="none" stroke="${paper}" stroke-width="1.5"/>`
       : '';
     const text = stringValue(row.text).replace(/\s+/gu, ' ');
-    const [caption] = compactLines(text, Math.max(0, width - (source ? 72 : 48)), 14, 1);
+    const caption = svgCaption(text, Math.max(0, width - (source ? 72 : 48)), 14);
     const sourceIcon = source
       ? `<g transform="translate(${width - 24} 10)" fill="none" stroke="${accent}" stroke-width="1.4" stroke-linecap="round"><title>任务来源</title><path d="M5 8l4-4M4 5l-2 2a2.8 2.8 0 0 0 4 4l2-2M6 4l2-2a2.8 2.8 0 0 1 4 4l-2 2"/></g>`
       : '';
 
-    return `<g transform="translate(0 ${40 + index * 32})" data-studio-task-id="${taskId}" data-checked="${checked}"${source}><title>${escapeXml(text)}</title><path d="M0 0H${width}" stroke="${line}"/><rect x="14" y="9" width="14" height="14" rx="3" fill="${checked ? accent : paper}" stroke="${checked ? accent : line}"/>${check}<text x="38" y="21" fill="${checked ? muted : ink}" font-size="14">${escapeXml(caption ?? '')}</text>${sourceIcon}</g>`;
+    return `<g transform="translate(0 ${40 + index * 32})" data-studio-task-id="${taskId}" data-checked="${checked}"${source}><title>${escapeXml(text)}</title><path d="M0 0H${width}" stroke="${line}"/><rect x="14" y="9" width="14" height="14" rx="3" fill="${checked ? accent : paper}" stroke="${checked ? accent : line}"/>${check}<text x="38" y="21" fill="${checked ? muted : ink}" font-size="14">${caption}</text>${sourceIcon}</g>`;
   });
 
   return `<rect width="${width}" height="${height}" rx="7" fill="${paper}" stroke="${line}"/>${heading}${bar}${content.join('')}`;
 }
 
-function nativeCard(object: BoardObject, payload: PayloadRecord | undefined): string {
+function svgNote(object: BoardObject, data: JsonObject): string {
   const { width, height } = object.geometry;
-  const data = payload?.data ?? {};
-  const count = Math.max(0, Math.min(maxRows, Math.floor((height - 40) / rowHeight)));
-  let rows: string[] = [];
-
-  if (object.kind === 'document') {
-    rows = documentRows(data, count);
-  } else if (object.kind === 'table') {
-    rows = tableRows(data, count);
-  }
-
-  const text = [stringValue(data.title) || object.label, ...rows].join('\n');
-  const fill = svgColor(object.appearance?.fill, object.kind === 'note' ? '#f6e39c' : '#ffffff');
+  const text = stringValue(data.text ?? data.title) || object.label;
+  const fill = svgColor(object.appearance?.fill, '#f6e39c');
   const stroke = svgColor(object.appearance?.stroke, '#bfc0c0');
   const caption = svgLabel(text, Math.max(0, width - 20), height, data, false);
 
   return `<rect width="${width}" height="${height}" rx="4" fill="${fill}" stroke="${stroke}"/><g transform="translate(10 8)">${caption}</g>`;
+}
+
+function svgSticker(object: BoardObject, data: JsonObject) {
+  const { width, height } = object.geometry;
+  const graphic = stickerSvgContent(stringValue(data.stickerId));
+  if (graphic) {
+    return `<svg width="${width}" height="${height}" viewBox="0 0 24 24" overflow="visible">${graphic}</svg>`;
+  }
+
+  const fallback = stringValue(data.fallback) || object.label;
+
+  return svgLabel(
+    fallback,
+    width,
+    height,
+    { fontSize: Math.min(width, height) * 0.8 },
+    true,
+    'literal',
+  );
+}
+
+function svgLink(object: BoardObject, data: JsonObject) {
+  const { width, height } = object.geometry;
+  const textWidth = Math.max(0, width - 54);
+  const title = svgLabel(object.label, textWidth, 22, { bold: true }, false, 'literal');
+  const address = stringValue(data.href);
+  const href = svgLabel(
+    address,
+    textWidth,
+    20,
+    { fontSize: 12, color: '#526179' },
+    false,
+    'literal',
+  );
+  const centerY = Math.max(0, (height - 42) / 2);
+  const icon =
+    '<path d="m10 13 4-4m-6 7-1 1a3.5 3.5 0 1 1-5-5l4-4a3.5 3.5 0 0 1 5 0m2 7a3.5 3.5 0 0 0 5 0l4-4a3.5 3.5 0 1 0-5-5l-1 1" fill="none" stroke="#526179" stroke-width="2" stroke-linecap="round"/>';
+  const fill = svgColor(object.appearance?.fill, '#ffffff');
+  const stroke = svgColor(object.appearance?.stroke, '#bfc0c0');
+
+  return `<title>${escapeXml(address || object.label)}</title><rect width="${width}" height="${height}" rx="7" fill="${fill}" stroke="${stroke}"/><g transform="translate(12 ${centerY + 8})">${icon}</g><g transform="translate(43 ${centerY})">${title}<g transform="translate(0 22)">${href}</g></g>`;
 }
 
 function imageUri(source: JsonValue | undefined, assets: ReadonlyMap<string, BoardExportAsset>) {
@@ -270,7 +294,7 @@ function svgImage(
 ) {
   const source = object.kind === 'video' ? data.poster : data.src;
   if (!source) {
-    return object.kind === 'video' ? nativeCard(object, undefined) : undefined;
+    return undefined;
   }
 
   const uri = imageUri(source, assets);
@@ -325,13 +349,13 @@ export function svgContent(
     case 'ink':
       return svgInk(object, data);
     case 'text':
-    case 'sticker':
       return svgLabel(stringValue(data.text) || object.label, width, height, data, false);
-    case 'document':
-    case 'table':
-    case 'note':
+    case 'sticker':
+      return svgSticker(object, data);
     case 'link':
-      return nativeCard(object, payload);
+      return svgLink(object, data);
+    case 'note':
+      return svgNote(object, data);
     case 'todo':
       return todoCard(object, data);
     default:

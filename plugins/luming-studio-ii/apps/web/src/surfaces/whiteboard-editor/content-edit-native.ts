@@ -89,7 +89,7 @@ function readEmbedEdit(intent: CanvasObjectIntent): EditObjectContentOperation |
   if (name === 'embed.save-state' && isJson(value.state)) {
     return { kind: 'embedState', value: value.state };
   }
-  if (name !== 'embed.save-source') {
+  if (name !== 'embed.save-source' || intent.kind === 'chart') {
     return undefined;
   }
 
@@ -107,6 +107,18 @@ function readEmbedEdit(intent: CanvasObjectIntent): EditObjectContentOperation |
     kind: 'embedSource',
     value: { title, html, expectedSourceRevision: BigInt(expectedSourceRevision) },
   };
+}
+
+function readLinkEdit(intent: CanvasObjectIntent): EditObjectContentOperation | undefined {
+  const { name, value } = intent;
+  if (name !== 'link.commit' || !record(value)) {
+    return undefined;
+  }
+
+  const { title, href } = value;
+  if (typeof title === 'string' && typeof href === 'string') {
+    return { kind: 'link', value: { title, href } };
+  }
 }
 
 function readStickerEdit(intent: CanvasObjectIntent): EditObjectContentOperation | undefined {
@@ -162,6 +174,8 @@ const nativeReaders = new Map<
   ['table', readTableEdit],
   ['html', readEmbedEdit],
   ['diagram', readEmbedEdit],
+  ['chart', readEmbedEdit],
+  ['link', readLinkEdit],
   ['sticker', readStickerEdit],
   ['image', readCropEdit],
 ]);

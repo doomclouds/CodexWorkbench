@@ -420,6 +420,7 @@ function CanvasSession(props: CanvasProps) {
           onClosePresentation={props.onClosePresentation}
           onObjectNavigation={input.handleObjectNavigation}
           onObjectRetentionChange={handleRetention}
+          onObjectEditingChange={props.onObjectEditingChange}
         />
       </div>
       <CanvasOverlays

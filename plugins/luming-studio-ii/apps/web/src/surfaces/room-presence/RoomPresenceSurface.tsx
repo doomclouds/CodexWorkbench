@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import type {
   BoardRoomAgentWorkspace,
   BoardRoomContentChange,
+  BoardRoomGestureGeometry,
   BoardRoomGesturePreview,
   BoardRoomParticipant,
   BoardRoomPoint,
@@ -22,6 +23,7 @@ import {
 } from './follow.js';
 import { ParticipantControl } from './ParticipantControl.js';
 import { PeerCursorOverlay } from './PeerCursorOverlay.js';
+import { PeerEditingOverlay } from './PeerEditingOverlay.js';
 import { useRoomChromeSnapshot } from './room-snapshot.js';
 import { useAgentWorkspaceCamera } from './use-agent-workspace-camera.js';
 import { usePeerGestures } from './use-peer-gestures.js';
@@ -33,6 +35,7 @@ export interface RoomPresenceSlot {
   readonly overlay: ReactNode;
   readonly accessLost: boolean;
   readonly feedbackUpdateKey?: string;
+  readonly viewerActorId?: string;
   readonly suggestionsUpdateKey?: string;
   readonly onCursorChange: (point: BoardRoomPoint | undefined) => void;
   readonly onGesturePreviewChange: (gesture: BoardRoomGesturePreview | undefined) => void;
@@ -43,6 +46,8 @@ export interface RoomPresenceSurfaceProps {
   readonly session: BoardRoomSession;
   readonly viewport?: RoomPresenceViewport;
   readonly cursor?: BoardRoomPoint;
+  readonly editingObjectIds?: readonly string[];
+  readonly objectGeometry?: ReadonlyMap<string, BoardRoomGestureGeometry>;
   readonly paused: boolean;
   readonly detachSequence: number;
   readonly onViewportRequest: (viewport: RoomPresenceCamera) => void;
@@ -125,6 +130,7 @@ function usePublishPresence(
   cursor: BoardRoomPoint | undefined,
   following: boolean,
   paused: boolean,
+  editingObjectIds: readonly string[] | undefined,
 ) {
   const pointer = useRef<BoardRoomPoint | undefined>(cursor);
   const gesture = useRef<PublishedGesture | undefined>(undefined);
@@ -152,6 +158,7 @@ function usePublishPresence(
       cursor: pointer.current,
       following,
       gesture: currentGesture(),
+      ...(editingObjectIds?.length ? { editingObjectIds } : {}),
     });
   }
 
@@ -182,6 +189,7 @@ function usePublishPresence(
     following,
     paused,
     canPublishGesture,
+    editingObjectIds,
   ]);
 
   return {
@@ -331,7 +339,7 @@ function useFollowSelection(
 }
 
 function useRoomFollow(props: RoomPresenceSurfaceProps, snapshot: BoardRoomState) {
-  const { session, viewport, cursor, paused, onViewportRequest } = props;
+  const { session, viewport, cursor, paused, onViewportRequest, editingObjectIds } = props;
   const { status, actorId } = snapshot;
   const participants = presenceMembers(snapshot.participants, actorId);
   const workspaces = snapshot.agentWorkspaces ?? emptyWorkspaces;
@@ -357,13 +365,14 @@ function useRoomFollow(props: RoomPresenceSurfaceProps, snapshot: BoardRoomState
     cursor,
     Boolean(target),
     paused,
+    status === 'online' && snapshot.canEdit ? editingObjectIds : undefined,
   );
 
   return { ...follow, participants, workspaces, canStartFollow, publish };
 }
 
 export function RoomPresenceSurface(props: RoomPresenceSurfaceProps) {
-  const { paused, viewport, render, session } = props;
+  const { paused, viewport, render, session, objectGeometry } = props;
   const snapshot = useRoomSession(props);
   const { status } = snapshot;
   const follow = useRoomFollow(props, snapshot);
@@ -372,6 +381,7 @@ export function RoomPresenceSurface(props: RoomPresenceSurfaceProps) {
   return render({
     accessLost: status === 'accessLost',
     feedbackUpdateKey: snapshot.feedbackUpdateKey,
+    viewerActorId: snapshot.actorId,
     suggestionsUpdateKey: snapshot.suggestionsUpdateKey,
     ...follow.publish,
     remoteGesturePreviews: paused ? undefined : remoteGestures,
@@ -405,7 +415,10 @@ export function RoomPresenceSurface(props: RoomPresenceSurfaceProps) {
       />
     ),
     overlay: status === 'online' && !paused && viewport && (
-      <PeerCursorOverlay session={session} viewport={viewport} />
+      <>
+        <PeerEditingOverlay session={session} viewport={viewport} objectGeometry={objectGeometry} />
+        <PeerCursorOverlay session={session} viewport={viewport} />
+      </>
     ),
   });
 }

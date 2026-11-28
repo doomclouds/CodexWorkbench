@@ -137,6 +137,7 @@ function StickerView({
   editRequest,
   request,
   onRetentionChange,
+  onEditingChange,
 }: CanvasObjectViewProps) {
   const { id: storedId, fallback } = stickerValue(payload?.value);
   const id = payload ? storedId : readText(object.metadata?.stickerId);
@@ -145,6 +146,17 @@ function StickerView({
   const canOpenLegacy = !graphic && !readOnly;
   const [seen, setSeen] = useState<number>();
   const [draft, setDraft] = useState<StickerDraft>();
+  const editing = draft !== undefined && canOpenLegacy;
+  const reportEditing = useEffectEvent(() => {
+    onEditingChange?.(true);
+
+    return () => onEditingChange?.(false);
+  });
+  useLayoutEffect(() => {
+    if (editing) {
+      return reportEditing();
+    }
+  }, [editing]);
 
   if (seen !== editRequest) {
     setSeen(editRequest);

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type {
   BoardHistoryExportResult,
+  ExportBoardFile,
   ExportBoardRejection,
   ExportBoardScope,
   ExportBoardVersionCommand,
@@ -15,8 +16,9 @@ interface VersionExportOptions extends Pick<
 }
 
 interface ExportNotice {
-  readonly tone: 'error' | 'success';
+  readonly tone: 'error' | 'success' | 'warning';
   readonly message: string;
+  readonly retry?: { readonly label: string; readonly onActivate: () => void };
 }
 
 const exportMessages: Readonly<Record<ExportBoardRejection, string>> = {
@@ -42,7 +44,11 @@ export function useVersionExport({
 
   useEffect(() => () => active.current?.abort(), []);
 
-  function handleExport(format: ExportBoardVersionCommand['format'], scope: ExportBoardScope) {
+  function handleExport(
+    format: ExportBoardVersionCommand['format'],
+    scope: ExportBoardScope,
+    retainedFile?: ExportBoardFile,
+  ) {
     if (active.current) {
       return;
     }
@@ -52,25 +58,43 @@ export function useVersionExport({
     active.current = controller;
     setPending(true);
     setNotice(undefined);
+    let file = retainedFile;
 
     Promise.resolve()
-      .then(() => {
+      .then(async () => {
         signal.throwIfAborted();
-        return service.exportVersion({ boardId, revision: sourceRevision, format, scope }, signal);
-      })
-      .then((result) => {
-        signal.throwIfAborted();
-        if (result.kind === 'file') {
-          download(result.file);
-          setNotice({ tone: 'success', message: '历史版本已导出。' });
-        } else {
-          setNotice({ tone: 'error', message: exportError(result) });
+        if (!file) {
+          const result = await service.exportVersion(
+            { boardId, revision: sourceRevision, format, scope },
+            signal,
+          );
+          signal.throwIfAborted();
+          if (result.kind !== 'file') {
+            setNotice({ tone: 'error', message: exportError(result) });
+            return;
+          }
+
+          file = result.file;
         }
+
+        const delivery = await download(file, signal);
+        signal.throwIfAborted();
+        setNotice({
+          tone: delivery?.kind === 'unavailable' ? 'warning' : 'success',
+          message: delivery?.message ?? `已发起下载「${file.filename}」。`,
+        });
       })
       .catch((error: unknown) => {
         if (!signal.aborted) {
           const message = error instanceof Error ? error.message : '所选版本未能导出。';
-          setNotice({ tone: 'error', message });
+          setNotice({
+            tone: 'error',
+            message,
+            retry: {
+              label: file ? '重试下载' : '重试导出',
+              onActivate: () => handleExport(format, scope, file),
+            },
+          });
         }
       })
       .finally(() => {

@@ -222,6 +222,14 @@ test('opens local invitation copying and uses the same panel for the existing re
         expect.any(AbortSignal),
       ],
     ]);
+    const downloadDialog = app.host.querySelector('dialog[open]');
+    expect(downloadDialog?.textContent).toContain('board.svg');
+    expect(app.downloads).toEqual([]);
+    if (!downloadDialog) {
+      throw new Error('Missing export download dialog');
+    }
+
+    await click(button(downloadDialog, '下载'));
     expect(app.downloads).toHaveLength(1);
 
     await click(button(app.host, '关闭分享'));

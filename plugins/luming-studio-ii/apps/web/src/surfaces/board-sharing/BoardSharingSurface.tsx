@@ -1,4 +1,4 @@
-import { Moon, Sun, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import { useRef, useState, type ReactNode } from 'react';
 
 import type { BoardSharingService, InvitationRole } from '../../data/sharing/index.js';
@@ -16,11 +16,8 @@ export interface BoardSharingSurfaceProps {
   readonly createCommandId: () => string;
   readonly copyLink: (url: string) => Promise<void>;
   readonly exportContent?: ReactNode;
-  readonly theme?: {
-    readonly resolvedTheme: 'light' | 'dark';
-    readonly onThemeChange: (theme: 'light' | 'dark') => void;
-  };
   readonly onLanSharingChange?: (active: boolean) => void;
+  readonly subscribeMemberPresence?: (listener: () => void) => () => void;
   readonly onRequestClose: () => void;
   readonly restoreFocus: () => void;
 }
@@ -42,6 +39,7 @@ function ShareBody({
     busy,
     pending,
     notice,
+    copiedUrl,
     readSharing,
     requestUpdate,
     copyInvitation,
@@ -73,8 +71,8 @@ function ShareBody({
   return (
     <div className="board-sharing__scroll">
       {notice && !confirming ? (
-        <p className="board-sharing__notice" role={notice.error ? 'alert' : 'status'}>
-          {notice.text}
+        <p className="board-sharing__notice" role="alert">
+          {notice}
         </p>
       ) : null}
       {pending && !confirming ? (
@@ -99,6 +97,7 @@ function ShareBody({
           <SharingInvitations
             state={snapshot}
             actions={{ ...actions, onCopy: handleCopy }}
+            copiedUrl={copiedUrl}
             onCopyMember={copyInvitation}
           />
         </>
@@ -155,9 +154,9 @@ function ConfirmSharing({
         }
       }}
     >
-      {sharing.notice?.error && (
+      {sharing.notice && (
         <p className="board-sharing__notice" role="alert">
-          {sharing.notice.text}
+          {sharing.notice}
         </p>
       )}
       <div className="board-sharing__confirmation">
@@ -182,10 +181,12 @@ function ConfirmSharing({
 
 function ManualLink({
   url,
+  description,
   close,
   restoreFocus,
 }: {
   url: string;
+  description: string;
   close: () => void;
   restoreFocus: () => void;
 }) {
@@ -199,7 +200,7 @@ function ManualLink({
     <Dialog
       open
       title="复制链接"
-      description="浏览器未能自动复制，请复制下面的邀请链接。"
+      description={description}
       closeLabel="关闭"
       initialFocus={focusLink}
       restoreFocus={restoreFocus}
@@ -224,8 +225,8 @@ export function BoardSharingSurface({
   createCommandId,
   copyLink,
   exportContent,
-  theme,
   onLanSharingChange,
+  subscribeMemberPresence,
   onRequestClose,
   restoreFocus,
 }: BoardSharingSurfaceProps) {
@@ -240,9 +241,9 @@ export function BoardSharingSurface({
     createCommandId,
     copyLink,
     onLanSharingChange,
+    subscribeMemberPresence,
   });
   const showExport = sharing.snapshot?.role === 'owner' && exportContent;
-  const dark = theme?.resolvedTheme === 'dark';
   const shareBody = (
     <ShareBody
       sharing={sharing}
@@ -298,16 +299,6 @@ export function BoardSharingSurface({
         ) : (
           shareBody
         )}
-        {theme && (
-          <footer className="board-sharing__footer">
-            <Button
-              label={dark ? '切换为明亮主题' : '切换为暗色主题'}
-              icon={dark ? <Sun size={17} /> : <Moon size={17} />}
-              variant="ghost"
-              onActivate={() => theme.onThemeChange(dark ? 'light' : 'dark')}
-            />
-          </footer>
-        )}
         {confirmation ? (
           <ConfirmSharing
             current={confirmation}
@@ -319,6 +310,7 @@ export function BoardSharingSurface({
         {sharing.manualLink && (
           <ManualLink
             url={sharing.manualLink.url}
+            description={sharing.manualLink.description}
             close={sharing.dismissManualLink}
             restoreFocus={() => {
               const trigger = sharing.manualLink?.trigger;

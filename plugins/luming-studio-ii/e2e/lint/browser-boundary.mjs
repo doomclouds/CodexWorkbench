@@ -26,9 +26,26 @@ const whiteboardFixtureSpecs = new Set(
     "whiteboard-editing/zoom-visibility",
     "whiteboard-editing/canvas-extras",
     "whiteboard-editing/inline-editing",
+    "whiteboard-topbar/chrome",
+    "whiteboard-topbar/history",
+    "whiteboard-topbar/export",
+    "whiteboard-topbar/sharing-feedback",
+    "whiteboard-topbar/overlays",
+    "whiteboard-topbar/export-fidelity",
+    "whiteboard-topbar/scripted-export",
+    "whiteboard-collaboration/presence",
+    "whiteboard-collaboration/geometry",
+    "whiteboard-collaboration/content",
   ].map(pathOfSpec),
 );
-const whiteboardFixtureMethods = new Set(["readBoard", "seedBasicBoard"]);
+const scopedFixtureMethods = new Map([
+  ["seedVersionMoves", pathOfSpec("whiteboard-topbar/history")],
+]);
+const whiteboardFixtureMethods = new Set([
+  "readBoard",
+  "seedBasicBoard",
+  ...scopedFixtureMethods.keys(),
+]);
 const boardSeedMethods = new Set(["seedBoards", "seedBasicBoard"]);
 const scopedFixtureImports = new Map(
   [
@@ -65,6 +82,33 @@ const scopedFixtureImports = new Map(
     [
       "whiteboard-editing/canvas-extras",
       ["workbenchLinkProbe", "readPeerCursors", "readPlacementPreview", "controlNextTextSave"],
+    ],
+    ["whiteboard-topbar/chrome", ["controlNextCanvasSave"]],
+    ["whiteboard-topbar/history", ["failNextOlderVersions", "readBoardDownload"]],
+    [
+      "whiteboard-topbar/export",
+      ["downloadBoardExport", "readBoardDownload", "failNextBoardExport"],
+    ],
+    ["whiteboard-topbar/sharing-feedback", ["workbenchLinkProbe"]],
+    ["whiteboard-topbar/overlays", ["seedTopbarSuggestion", "seedTopbarAgentWorkspace"]],
+    ["whiteboard-topbar/export-fidelity", ["downloadBoardExport", "inspectBoardExport"]],
+    ["whiteboard-topbar/scripted-export", ["downloadBoardExport", "inspectBoardExport"]],
+    [
+      "whiteboard-collaboration/presence",
+      ["workbenchLinkProbe", "readPeerCursors", "readPlacementPreview", "setRoomConnectionOffline"],
+    ],
+    ["whiteboard-collaboration/geometry", ["workbenchLinkProbe"]],
+    [
+      "whiteboard-collaboration/content",
+      [
+        "workbenchLinkProbe",
+        "embedFrame",
+        "chooseHtmlFile",
+        "chooseBoardMedia",
+        "mediaDisplaySize",
+        "mediaPlaying",
+        "holdNextInlineTextWrite",
+      ],
     ],
   ].map(([spec, helpers]) => [pathOfSpec(spec), new Set(helpers)]),
 );
@@ -446,8 +490,11 @@ const userFlowBoundary = {
     const source = context.sourceCode;
     const whiteboardScenario = whiteboardFixtureSpecs.has(context.physicalFilename);
 
-    function inspectFixtureMethod(node, receiver, directCall) {
-      if (!whiteboardScenario || !directCall || !isFixtureReference(source, receiver, "studio")) {
+    function inspectFixtureMethod(node, receiver, directCall, name) {
+      const assignedScenario = scopedFixtureMethods.get(name);
+      const assignedHere = !assignedScenario || assignedScenario === context.physicalFilename;
+      const directStudioCall = directCall && isFixtureReference(source, receiver, "studio");
+      if (!whiteboardScenario || !assignedHere || !directStudioCall) {
         context.report({ node, messageId: "fixtureMethod" });
       }
     }
@@ -463,7 +510,7 @@ const userFlowBoundary = {
       const call = node.parent;
       const directCall = call.type === "CallExpression" && call.callee === node;
       if (whiteboardFixtureMethods.has(name)) {
-        inspectFixtureMethod(node, receiver, directCall);
+        inspectFixtureMethod(node, receiver, directCall, name);
         return;
       }
       if (name === "goto") {

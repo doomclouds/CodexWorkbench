@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import type {
   BoardEditReceipt,
   BoardHistoryService,
-  ExportBoardFile,
+  RequestBoardDownload,
   WhiteboardPayloadResult,
   WhiteboardScene,
 } from '../../data/whiteboard/index.js';
@@ -27,7 +27,7 @@ export interface WhiteboardHistorySurfaceProps {
   readonly createCommandId: () => string;
   readonly onClose: () => void;
   readonly onRestored: (receipt: BoardEditReceipt) => void;
-  readonly download: (file: ExportBoardFile) => void;
+  readonly download: RequestBoardDownload;
   readonly renderPreview: (frame: BoardHistoryPreviewFrame) => ReactNode;
   readonly onPreviewChange?: (active: boolean) => void;
 }

@@ -1,0 +1,31 @@
+.room-peer-editing {
+  position: absolute;
+  z-index: 20;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.room-peer-editing__target,
+.room-peer-editing__outline,
+.room-peer-editing__label {
+  position: absolute;
+  box-sizing: border-box;
+}
+
+.room-peer-editing__outline {
+  border: 1.5px solid;
+  border-radius: 4px;
+}
+
+.room-peer-editing__label {
+  padding: 2px 5px;
+  overflow: hidden;
+  border-radius: 4px;
+  font:
+    11px/14px Arial,
+    'Microsoft YaHei',
+    sans-serif;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -17,6 +17,7 @@ import {
   type ButtonHandle,
 } from '../../ui/base/index.js';
 import { FeedbackComposer } from './FeedbackComposer.js';
+import { FeedbackPager } from './FeedbackPager.js';
 import { FeedbackAvatar, feedbackAuthorName } from './feedback-author.js';
 import { hasDraftChanges, type ThreadDraft } from './thread-draft.js';
 import type { FeedbackAttachment } from './use-feedback-attachment.js';
@@ -30,6 +31,7 @@ interface FeedbackThreadViewProps {
   readonly blocked: boolean;
   readonly pending: boolean;
   readonly error?: string;
+  readonly targetLabel?: string;
   readonly targetMissing: boolean;
   readonly contentAnchor?: FeedbackAnchor;
   readonly hasMore: boolean;
@@ -176,7 +178,7 @@ function ThreadComposer({
         attachment.available
           ? {
               checked: draft?.attach === true,
-              label: attachment.mode === 'copy' ? '复制批注引用' : '附加到对话',
+              label: '附加到 Codex 对话',
               disabled: Boolean(attachment.pending),
               onChange: toggleAttachment,
             }
@@ -212,10 +214,9 @@ function threadMenu(
 
   menu.push({ id: 'locate', label: '定位备注', run: onLocate });
   if (attachment.available && canWrite) {
-    const label = attachment.mode === 'copy' ? '复制批注引用' : '附加到对话';
     menu.push({
       id: 'attach',
-      label,
+      label: '附加到 Codex 对话',
       run: () => attachment.request({ threadId: thread.id, threadVersion: thread.version }),
     });
   }
@@ -231,9 +232,7 @@ function attachedStatus(thread: FeedbackThread, attachment: FeedbackAttachment) 
     return null;
   }
 
-  const label = attachment.mode === 'copy' ? '已复制批注引用' : '已附加到对话';
-
-  return <StatusText message={label} announcement="polite" />;
+  return <StatusText message="已附加到 Codex 对话" announcement="polite" />;
 }
 
 function ThreadContents(props: ThreadContentsProps) {
@@ -404,7 +403,7 @@ function ThreadContents(props: ThreadContentsProps) {
           </li>
         ))}
       </ul>
-      {hasMore && <Button label="更多回复" disabled={pending} onActivate={loadMore} />}
+      {hasMore && <FeedbackPager label="更多回复" pending={pending} onActivate={loadMore} />}
       {!editingLoadedMessage && (canEdit || draft) && composer()}
     </>
   );
@@ -444,6 +443,7 @@ export function FeedbackThreadView({
   blocked,
   pending,
   error,
+  targetLabel,
   targetMissing,
   contentAnchor,
   hasMore,
@@ -495,6 +495,13 @@ export function FeedbackThreadView({
         <div className="whiteboard-feedback__actions">
           <StatusText message={error} tone="error" announcement="assertive" />
           <Button label="重新加载" onActivate={onRefresh} />
+        </div>
+      )}
+      {targetLabel && (
+        <div className="whiteboard-feedback__target whiteboard-feedback__thread-target">
+          <span className="whiteboard-feedback__target-label" title={targetLabel}>
+            {targetLabel}
+          </span>
         </div>
       )}
       {targetMissing && (

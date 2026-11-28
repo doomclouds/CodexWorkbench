@@ -191,7 +191,7 @@ export function createBoardRoomSession({
       });
     }
 
-    presence.resume();
+    presence.resume(event.canEdit);
   }
 
   function acceptObservedSnapshot(
@@ -383,8 +383,10 @@ export function createBoardRoomSession({
     },
     getSnapshot: () => state,
     publishPresence(sample) {
-      const mayPreview = state.status === 'online' && state.canEdit;
-      presence.publish(mayPreview ? sample : { ...sample, gesture: undefined });
+      const mayEdit = state.status === 'online' && state.canEdit;
+      presence.publish(
+        mayEdit ? sample : { ...sample, editingObjectIds: undefined, gesture: undefined },
+      );
     },
     async changeTimer(command, signal) {
       if (!state.canEdit) {

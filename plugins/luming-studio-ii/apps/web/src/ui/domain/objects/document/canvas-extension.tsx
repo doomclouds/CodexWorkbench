@@ -73,6 +73,7 @@ function DocumentCanvasView({
   onOpenPresentation,
   onClosePresentation,
   onRetentionChange,
+  onEditingChange,
   onAnnotateContent,
   annotationActive,
   nativeSourceRequest,
@@ -137,6 +138,7 @@ function DocumentCanvasView({
   function handleActivity({ mode, dirty, saving, composing }: DocumentActivity) {
     const busy = dirty || saving || composing;
     onRetentionChange?.(busy || mode !== 'inline');
+    onEditingChange?.(mode === 'edit' && !readOnly);
   }
 
   async function handleExport(
@@ -155,8 +157,8 @@ function DocumentCanvasView({
     }
   }
 
-  function handleAnnotate({ blockIds, u, v }: DocumentNoteSource) {
-    onAnnotateContent?.({ target: { kind: 'document', blockIds }, u, v });
+  function handleAnnotate({ blockIds, quote, u, v }: DocumentNoteSource) {
+    onAnnotateContent?.({ target: { kind: 'document', blockIds }, excerpt: quote, u, v });
   }
 
   return (

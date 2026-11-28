@@ -35,7 +35,11 @@ import {
 import { studioObjectExtensions } from '../../ui/domain/objects/index.js';
 import { documentExtension } from '../../ui/domain/objects/document/index.js';
 import { LinkDialog } from '../../ui/domain/objects/media/index.js';
-import { textExtension } from '../../ui/domain/objects/text/index.js';
+import {
+  textExtension,
+  TextSaveNoticePublisher,
+  type TextSaveIssue,
+} from '../../ui/domain/objects/text/index.js';
 import { isTodoOverview } from '../../ui/domain/objects/todo/index.js';
 import { canvasOwnsClipboard } from './board-clipboard.js';
 import type { BoardTool } from './BoardChrome.js';
@@ -145,21 +149,18 @@ function useBoardPanels() {
   const [feedbackAnchor, setFeedbackAnchor] = useState<HTMLButtonElement | null>(null);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [suggestionAnchor, setSuggestionAnchor] = useState<HTMLButtonElement | null>(null);
-  const [suggestionThreadId, setSuggestionThreadId] = useState<string>();
   const [suggestionPreview, setSuggestionPreview] = useState(false);
 
   function closeSuggestions() {
     setSuggestionAnchor(null);
-    setSuggestionThreadId(undefined);
     setSuggestionPreview(false);
   }
 
-  function openSuggestions(anchor: HTMLButtonElement, threadId?: string) {
+  function openSuggestions(anchor: HTMLButtonElement) {
     setExportAnchor(undefined);
     setHistoryAnchor(null);
     setFeedbackOpen(false);
-    setSuggestionThreadId(threadId);
-    setSuggestionAnchor((current) => (current === anchor && !threadId ? null : anchor));
+    setSuggestionAnchor((current) => (current === anchor ? null : anchor));
   }
 
   function openHistory(anchor: HTMLButtonElement) {
@@ -199,7 +200,6 @@ function useBoardPanels() {
     feedbackAnchor,
     feedbackOpen,
     suggestionAnchor,
-    suggestionThreadId,
     suggestionPreview,
     openSuggestions,
     closeSuggestions,
@@ -427,6 +427,41 @@ function BoardWorkspace({
   }, []);
   const suggestionTrigger = useRef<HTMLButtonElement>(null);
   const [canvasArea, setCanvasArea] = useState<HTMLDivElement | null>(null);
+  const [editingObjects, setEditingObjects] = useState<ReadonlySet<string>>(() => new Set());
+  const handleObjectEditing = useCallback((id: string, editing: boolean) => {
+    setEditingObjects((current) => {
+      if (current.has(id) === editing) {
+        return current;
+      }
+
+      const next = new Set(current);
+      if (editing) {
+        next.add(id);
+      } else {
+        next.delete(id);
+      }
+
+      return next;
+    });
+  }, []);
+  const [textSaveIssues, setTextSaveIssues] = useState<ReadonlyMap<string, TextSaveIssue>>(
+    () => new Map(),
+  );
+  const publishTextSaveIssue = useCallback((issue: TextSaveIssue) => {
+    setTextSaveIssues((current) => new Map(current).set(issue.objectId, issue));
+
+    return () => {
+      setTextSaveIssues((current) => {
+        if (current.get(issue.objectId) !== issue) {
+          return current;
+        }
+
+        const next = new Map(current);
+        next.delete(issue.objectId);
+        return next;
+      });
+    };
+  }, []);
   const [selected, setSelected] = useState<readonly string[]>(initial.selectedIds);
   const [tool, setTool] = useState<BoardTool>('select');
   const [showGrid, setShowGrid] = useState(true);
@@ -603,6 +638,20 @@ function BoardWorkspace({
     focusWorldPoint({ x: geometry.x + geometry.width / 2, y: geometry.y + geometry.height / 2 });
   }
   const previewing = panels.historyPreview || panels.suggestionPreview;
+  const expandedObjectId = scope?.expandedObjectId;
+  const editingObjectIds = useMemo(() => {
+    if (!mayEdit || previewing || editingObjects.size === 0) {
+      return undefined;
+    }
+
+    return [...editingObjects].filter(
+      (id) => projection.objectsById.has(id) && (!watching || expandedObjectId === id),
+    );
+  }, [mayEdit, previewing, editingObjects, projection.objectsById, watching, expandedObjectId]);
+  const objectGeometry = useMemo(
+    () => new Map(board.objects.map(({ id, geometry }) => [id, geometry])),
+    [board.objects],
+  );
   const { viewOnly, online, canComment, canEditExpanded } = availableEditAccess(
     mayEdit,
     features.commentAccess,
@@ -942,7 +991,7 @@ function BoardWorkspace({
       return;
     }
 
-    const { u, v, target: content } = request;
+    const { u, v, target: content, excerpt } = request;
     if (content.kind === 'object') {
       setAnnotationRequest((current) => ({
         objectId: id,
@@ -956,6 +1005,7 @@ function BoardWorkspace({
 
     setContentAnnotationRequest((current) => ({
       sequence: (current?.sequence ?? 0) + 1,
+      excerpt,
       target: {
         kind: 'content',
         objectId: id,
@@ -1148,6 +1198,7 @@ function BoardWorkspace({
           onViewportNavigation: viewOnly ? undefined : detachFollow,
           onWorldPointerChange: viewOnly ? undefined : room?.onCursorChange,
           onGesturePreviewChange: room?.onGesturePreviewChange,
+          onObjectEditingChange: room ? handleObjectEditing : undefined,
           remoteGesturePreviews: room?.remoteGesturePreviews,
           onVisibleObjectsChange: session.observeVisible,
         }}
@@ -1155,12 +1206,6 @@ function BoardWorkspace({
     );
   }
   const exportAnchor = panels.exportAnchor;
-
-  function handleReviewThread(threadId: string) {
-    if (suggestionTrigger.current) {
-      panels.openSuggestions(suggestionTrigger.current, threadId);
-    }
-  }
 
   function restoreSuggestionsFocus() {
     suggestionTrigger.current?.focus({ preventScroll: true });
@@ -1176,6 +1221,19 @@ function BoardWorkspace({
           unsafePayloadVersion={projected.unsafePayloadVersion}
           renameFailure={boardTitle.failure}
         />
+        {[...textSaveIssues.values()].map(({ objectId, message, retry, discard }) => (
+          <OperationNotice
+            key={objectId}
+            id={'whiteboard-text-save-' + objectId}
+            level="error"
+            message={message}
+            presentation="banner"
+            actions={[
+              ...(retry ? [{ id: 'retry', label: '重试保存文字', onActivate: retry }] : []),
+              ...(discard ? [{ id: 'discard', label: '放弃文字修改', onActivate: discard }] : []),
+            ]}
+          />
+        ))}
         {sourceIssue && (
           <OperationNotice
             id="native-source-unavailable"
@@ -1262,10 +1320,11 @@ function BoardWorkspace({
           moving={moving}
           move={move}
           geometry={geometry}
-          notice={content.notice}
+          notice={content.getNotice((objectId) => textSaveIssues.has(objectId))}
           participants={room?.participants}
           onBack={onBack}
           titleEditor={boardTitle.editor}
+          theme={features.theme}
           {...boardPanelActions(features, panels)}
           onToggleAnnotation={annotation.onToggleAnnotation}
           readNotices={renderEditNotices()}
@@ -1304,7 +1363,9 @@ function BoardWorkspace({
               onExit={exit}
               onCanvasFocus={focusCanvas}
             >
-              {renderCanvas(room)}
+              <TextSaveNoticePublisher.Provider value={publishTextSaveIssue}>
+                {renderCanvas(room)}
+              </TextSaveNoticePublisher.Provider>
             </Viewing>
             {room?.overlay}
             <div hidden={watching}>
@@ -1355,10 +1416,12 @@ function BoardWorkspace({
             features={features}
             feedback={{
               updateKey: room?.feedbackUpdateKey,
+              viewerActorId: room?.viewerActorId,
               boardId: board.boardId,
               canEdit: canComment,
               viewing: feedbackView.hidingFeedback,
               viewport: feedbackViewport,
+              viewportSize,
               objects: board.objects,
               selectedIds: selection,
               panelOpen: panels.feedbackOpen,
@@ -1377,7 +1440,6 @@ function BoardWorkspace({
               hostPicking: true,
               focusedObjectId: feedbackView.focusedObjectId,
               singleKeys,
-              onReviewThread: features.renderSuggestions ? handleReviewThread : undefined,
             }}
             history={{
               boardId: board.boardId,
@@ -1393,9 +1455,6 @@ function BoardWorkspace({
             suggestions={{
               updateKey: room?.suggestionsUpdateKey,
               boardId: board.boardId,
-              revision: board.revision,
-              selection,
-              feedbackThreadId: panels.suggestionThreadId,
               previewHost: canvasArea,
               anchor: panels.suggestionAnchor,
               onClose: panels.closeSuggestions,
@@ -1456,6 +1515,8 @@ function BoardWorkspace({
   return features.renderPresence
     ? features.renderPresence({
         viewport: viewportSize && { ...viewport, ...viewportSize },
+        editingObjectIds,
+        objectGeometry,
         paused: viewOnly,
         detachSequence,
         onViewportRequest: restoreViewport,
@@ -1548,6 +1609,7 @@ function LoadedBoard({
         Viewing: features.Viewing,
         fitOnMount: features.fitOnMount,
         initialBoardView: features.initialBoardView,
+        theme: features.theme,
         readDocumentAsset: features.readDocumentAsset,
         clipboard: features.clipboard,
       }

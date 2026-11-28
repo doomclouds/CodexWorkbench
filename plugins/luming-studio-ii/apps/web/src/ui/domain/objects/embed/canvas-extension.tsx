@@ -134,6 +134,7 @@ function CanvasEmbedView(props: CanvasObjectViewProps) {
     request,
     onNavigation,
     onRetentionChange,
+    onEditingChange,
     annotationActive,
     onAnnotateContent,
     contentTracking,
@@ -225,6 +226,7 @@ function CanvasEmbedView(props: CanvasObjectViewProps) {
         : { kind: 'object' as const };
     onAnnotateContent({
       target,
+      ...(target.kind === 'html' ? { excerpt: selection.quote } : {}),
       u,
       v,
     });
@@ -246,6 +248,7 @@ function CanvasEmbedView(props: CanvasObjectViewProps) {
         onSelection={onAnnotateContent ? handleContentSelection : undefined}
         annotationLocations={annotationLocations}
         onRetentionChange={onRetentionChange}
+        onSourceEditingChange={onEditingChange}
         onSaveState={readOnly ? undefined : saveState}
         onSaveSource={readOnly ? undefined : saveSource}
       />

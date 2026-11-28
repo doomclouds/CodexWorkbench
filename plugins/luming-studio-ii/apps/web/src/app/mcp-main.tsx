@@ -305,7 +305,7 @@ function mount(bridge: Bridge) {
       sharingService={createBoardSharingService(postProtobuf)}
       copyShareLink={copyShareLink}
       exportBoard={createWhiteboardExportService(postProtobuf, renderBrowserVectorExport)}
-      downloadExport={downloadBoardFile}
+      downloadExport={bridge.downloadFile}
       downloadObjectFile={downloadBoardFile}
       clipboard={{ writeText: copyShareLink, readText: readCanvasClipboard }}
       localDrafts={{ actorId: 'mcp-owner', storage: createBoardDraftStorage(createMcpCommandId) }}

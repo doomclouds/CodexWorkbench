@@ -12,7 +12,7 @@ export function readPeerCursors(page, studio) {
   return page.locator(selector).evaluateAll((nodes) =>
     nodes.map((marker) => {
       const { x, y } = marker.getBoundingClientRect();
-      return { x, y };
+      return { x, y, name: marker.querySelector("span")?.textContent?.trim() ?? "" };
     }),
   );
 }

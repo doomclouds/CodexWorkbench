@@ -91,7 +91,7 @@ function readGesture(wire: UpdateBoardPresenceRequest['gesture']): GesturePrevie
 }
 
 function readPresence(request: UpdateBoardPresenceRequest) {
-  const { viewId, sequence, cursor, viewport, following, gesture } = request;
+  const { viewId, sequence, cursor, viewport, following, gesture, editingObjectIds } = request;
 
   return {
     viewId: roomId(viewId),
@@ -106,6 +106,7 @@ function readPresence(request: UpdateBoardPresenceRequest) {
     },
     following,
     gesture: readGesture(gesture),
+    editingObjectIds,
   };
 }
 

@@ -115,20 +115,6 @@
   pointer-events: auto;
 }
 
-[data-canvas-root] > .studio-ui-canvas-text-failure {
-  position: absolute;
-  z-index: 4;
-  inset-inline-start: 1rem;
-  inset-block-end: 5rem;
-  max-inline-size: calc(100% - 2rem);
-  box-sizing: border-box;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid var(--studio-ui-border);
-  border-radius: var(--studio-ui-radius, 0.75rem);
-  background: var(--studio-ui-surface);
-  color: var(--studio-ui-text);
-}
-
 .studio-ui-canvas-text-body[data-canvas-label-state='concealed'] {
   visibility: hidden;
 }

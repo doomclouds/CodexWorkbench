@@ -9,6 +9,7 @@ import type {
 } from '../../data/whiteboard/index.js';
 import type {
   CanvasGesturePreview,
+  CanvasGeometry,
   CanvasPoint,
   CanvasContentAnnotationRequest,
   CanvasContentLocation,
@@ -39,6 +40,7 @@ export interface BoardPresenceSlot {
   readonly overlay: ReactNode;
   readonly accessLost: boolean;
   readonly feedbackUpdateKey?: string;
+  readonly viewerActorId?: string;
   readonly suggestionsUpdateKey?: string;
   readonly onCursorChange: (point: CanvasPoint | undefined) => void;
   readonly onGesturePreviewChange: (preview: CanvasGesturePreview | undefined) => void;
@@ -47,6 +49,8 @@ export interface BoardPresenceSlot {
 
 interface BoardPresenceFrame {
   readonly viewport?: CanvasViewport & CanvasViewportSize;
+  readonly editingObjectIds?: readonly string[];
+  readonly objectGeometry?: ReadonlyMap<string, CanvasGeometry>;
   readonly paused: boolean;
   readonly detachSequence: number;
   readonly onViewportRequest: (viewport: CanvasViewport) => void;
@@ -110,9 +114,11 @@ type ContentLocationRequests = ReadonlyMap<string, readonly CanvasContentLocatio
 export interface BoardFeedbackFrame {
   readonly boardId: string;
   readonly updateKey?: string;
+  readonly viewerActorId?: string;
   readonly canEdit: boolean;
   readonly viewing: boolean;
   readonly viewport: CanvasViewport & { readonly zoomY?: number };
+  readonly viewportSize?: CanvasViewportSize;
   readonly objects: readonly WhiteboardObject[];
   readonly selectedIds: readonly string[];
   readonly panelOpen: boolean;
@@ -137,9 +143,9 @@ export interface BoardFeedbackFrame {
   readonly contentAnnotationRequest?: {
     readonly sequence: number;
     readonly target: BoardContentAnnotation;
+    readonly excerpt?: string;
   };
   readonly singleKeys?: boolean;
-  readonly onReviewThread?: (threadId: string) => void;
   readonly renderSuggestions?: (frame: BoardSuggestionListFrame) => ReactNode;
 }
 
@@ -168,9 +174,6 @@ export interface BoardSuggestionFrame {
   readonly anchor: HTMLButtonElement | null;
   readonly boardId: string;
   readonly updateKey?: string;
-  readonly revision: bigint;
-  readonly selection: readonly string[];
-  readonly feedbackThreadId?: string;
   readonly previewHost?: HTMLElement | null;
   readonly inline?: BoardSuggestionListFrame & { readonly previewHost: HTMLElement | null };
   readonly onClose: () => void;
@@ -203,6 +206,10 @@ interface BoardMediaFrame {
 export interface WhiteboardEditorFeatures {
   readonly fitOnMount?: boolean;
   readonly initialBoardView?: InitialBoardView;
+  readonly theme?: {
+    readonly resolvedTheme: 'light' | 'dark';
+    readonly onThemeChange: (theme: 'light' | 'dark') => void;
+  };
   readonly Viewing: ComponentType<BoardViewingFrame>;
   readonly editService?: WhiteboardEditService;
   readonly readHtmlSource?: (file: File) => Promise<string>;

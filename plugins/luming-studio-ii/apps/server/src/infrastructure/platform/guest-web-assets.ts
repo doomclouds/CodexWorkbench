@@ -1,4 +1,4 @@
-import { lstat, readFile, readdir, realpath } from 'node:fs/promises';
+import { lstat, readFile, realpath } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 
 interface WebAsset {
@@ -18,6 +18,20 @@ const assetTypes = new Map([
   ['.woff2', 'font/woff2'],
 ]);
 
+const assetPath = /^\/assets\/([\w.-]+)$/u;
+
+async function readRegularFile(path: string) {
+  try {
+    if ((await lstat(path)).isFile()) {
+      return await readFile(path);
+    }
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) {
+      throw error;
+    }
+  }
+}
+
 export async function loadGuestWebAssets(directory: string): Promise<GuestWebAssets> {
   const root = await realpath(directory);
   const index = join(root, 'index.html');
@@ -30,30 +44,28 @@ export async function loadGuestWebAssets(directory: string): Promise<GuestWebAss
     throw new Error('The Studio Web asset directory must be a regular directory.');
   }
 
-  const files = new Map([['/', { path: index, contentType: 'text/html; charset=utf-8' }]]);
-  for (const file of await readdir(bundled, { withFileTypes: true })) {
-    const contentType = assetTypes.get(extname(file.name));
-    if (file.isFile() && contentType) {
-      files.set('/assets/' + file.name, { path: join(bundled, file.name), contentType });
-    }
-  }
-
   return async (pathname) => {
-    const file = files.get(pathname);
-    if (!file || !(await lstat(file.path)).isFile()) {
-      return undefined;
-    }
-
-    const bytes = await readFile(file.path);
-    const body =
-      pathname === '/'
-        ? Buffer.from(
+    if (pathname === '/') {
+      const bytes = await readRegularFile(index);
+      return (
+        bytes && {
+          contentType: 'text/html; charset=utf-8',
+          bytes: Buffer.from(
             bytes
               .toString('utf8')
               .replace(/<html(?=[\s>])/iu, '<html data-studio-guest-entry="true"'),
-          )
-        : bytes;
+          ),
+        }
+      );
+    }
 
-    return { contentType: file.contentType, bytes: body };
+    const filename = assetPath.exec(pathname)?.[1];
+    const contentType = filename && assetTypes.get(extname(filename));
+    if (!filename || !contentType) {
+      return undefined;
+    }
+
+    const bytes = await readRegularFile(join(bundled, filename));
+    return bytes && { contentType, bytes };
   };
 }

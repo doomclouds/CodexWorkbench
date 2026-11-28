@@ -189,8 +189,16 @@ const permitted = [
   ['src/infrastructure/adapters/feedback/content-source.ts', "import { parse } from 'parse5';"],
   [catalogAdapter + 'thumbnail-html.ts', "import { parse } from 'parse5';"],
   [
+    whiteboard + 'domain/export-html-content.ts',
+    "import { parseRichText } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/rich-text';",
+  ],
+  [
     catalog + 'domain/thumbnail-sticker.ts',
     "import { stickerDefinition } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/stickers';",
+  ],
+  [
+    whiteboard + 'domain/export-svg-content.ts',
+    "import { stickerSvgContent } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/stickers';",
   ],
   [
     'src/entrypoints/mcp/index.ts',
@@ -598,6 +606,11 @@ const rejected = [
     'the catalogue application cannot import sticker artwork',
     catalog + 'application/catalog-thumbnail.ts',
     "import { stickerDefinition } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/stickers';",
+  ],
+  [
+    'the catalogue application cannot import the whiteboard rich text format',
+    catalog + 'application/catalog-thumbnail.ts',
+    "import { parseRichText } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/rich-text';",
   ],
   [
     'MCP entrypoint calls the whiteboard application instead of injected operations',

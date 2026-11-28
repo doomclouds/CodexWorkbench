@@ -5,6 +5,7 @@ interface FeedbackShortcutOptions {
   readonly anchor?: HTMLElement | null;
   readonly enabled: boolean;
   readonly singleKeys: boolean;
+  readonly cancelOutsideCanvas: boolean;
   readonly onBegin: () => void;
   readonly onCancel: () => boolean;
 }
@@ -23,6 +24,7 @@ export function useFeedbackShortcut({
   anchor,
   enabled,
   singleKeys,
+  cancelOutsideCanvas,
   onBegin,
   onCancel,
 }: FeedbackShortcutOptions) {
@@ -57,14 +59,24 @@ export function useFeedbackShortcut({
       handleShortcut(event);
     }
 
+    function handleDocumentEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape' && !inputConsumesShortcut(event)) {
+        handleShortcut(event);
+      }
+    }
+
     viewport.addEventListener('keydown', handle);
     if (anchor && !viewport.contains(anchor)) {
       anchor.addEventListener('keydown', handle);
+    }
+    if (cancelOutsideCanvas) {
+      viewport.ownerDocument.addEventListener('keydown', handleDocumentEscape);
     }
 
     return () => {
       viewport.removeEventListener('keydown', handle);
       anchor?.removeEventListener('keydown', handle);
+      viewport.ownerDocument.removeEventListener('keydown', handleDocumentEscape);
     };
-  }, [anchor, enabled, stage]);
+  }, [anchor, cancelOutsideCanvas, enabled, stage]);
 }

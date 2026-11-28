@@ -2,6 +2,7 @@ import { useEffect, useEffectEvent, useLayoutEffect, useRef } from 'react';
 import type { KeyboardEvent, ReactNode, RefObject } from 'react';
 import type { FeedbackPoint } from '../../data/feedback/index.js';
 import {
+  commentPopupGutter,
   commentPopupWidth,
   commentsPanelWidth,
   placeComment,
@@ -41,6 +42,22 @@ function listAnchor(
   return new DOMRect(canvas.right || viewportWidth - 12, canvas.top + 2, 0, 0);
 }
 
+function visibleCanvas(bounds: DOMRectReadOnly, viewport: { width: number; height: number }) {
+  if (!(bounds.width > 0 && bounds.height > 0)) {
+    return { left: 0, top: 0, ...viewport };
+  }
+
+  const left = Math.max(0, bounds.left);
+  const top = Math.max(0, bounds.top);
+
+  return {
+    left,
+    top,
+    width: Math.max(0, Math.min(viewport.width, bounds.right) - left),
+    height: Math.max(0, Math.min(viewport.height, bounds.bottom) - top),
+  };
+}
+
 function positionPopup(
   layer: HTMLElement,
   canvas: HTMLDivElement,
@@ -55,10 +72,16 @@ function positionPopup(
 
   const viewport = { width: view.innerWidth, height: view.innerHeight };
   const bounds = canvas.getBoundingClientRect();
+  const canvasViewport = visibleCanvas(bounds, viewport);
+  if (kind !== 'list') {
+    layer.style.maxWidth = Math.max(0, canvasViewport.width - commentPopupGutter * 2) + 'px';
+  }
   const frame = layer.getBoundingClientRect();
   const contentHeight = layer.firstElementChild?.scrollHeight || frame.height;
   const kindWidth = kind === 'list' ? commentsPanelWidth : commentPopupWidth;
-  const width = frame.width || Math.min(kindWidth, viewport.width - 24);
+  const availableWidth =
+    kind === 'list' ? viewport.width - 24 : canvasViewport.width - commentPopupGutter * 2;
+  const width = frame.width || Math.max(0, Math.min(kindWidth, availableWidth));
   const size = { width, height: contentHeight + 2 };
   if (kind === 'list') {
     const position = placeCommentsList(listAnchor(anchor, bounds, viewport.width), size, viewport);
@@ -69,8 +92,16 @@ function positionPopup(
   }
 
   if (point) {
-    const screen = { x: bounds.left + point.x, y: bounds.top + point.y };
-    addPixelPosition(layer, placeComment(screen, size, viewport));
+    const local = {
+      x: Math.max(0, Math.min(canvasViewport.width, bounds.left + point.x - canvasViewport.left)),
+      y: Math.max(0, Math.min(canvasViewport.height, bounds.top + point.y - canvasViewport.top)),
+    };
+    const position = placeComment(local, size, canvasViewport);
+    addPixelPosition(layer, {
+      left: position.left + canvasViewport.left,
+      top: position.top + canvasViewport.top,
+      maxHeight: position.maxHeight,
+    });
   }
 }
 
@@ -150,6 +181,9 @@ export function FeedbackPopup({
     if (anchor) {
       observer?.observe(anchor);
     }
+    if (canvas.current && kind !== 'list') {
+      observer?.observe(canvas.current);
+    }
 
     view.addEventListener('resize', handlePlacement);
     ownerDocument.addEventListener('scroll', handlePlacement, true);
@@ -163,7 +197,7 @@ export function FeedbackPopup({
       ownerDocument.removeEventListener('scroll', handlePlacement, true);
       ownerDocument.removeEventListener('pointerdown', handleOutside, true);
     };
-  }, [anchor, kind]);
+  }, [anchor, canvas, kind]);
 
   function handleKeys(event: KeyboardEvent<HTMLDivElement>) {
     const nested =

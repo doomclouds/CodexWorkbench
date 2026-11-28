@@ -356,10 +356,20 @@ describe('TodoObject', () => {
       );
     });
     const target = { kind: 'todo', itemId: 'limits' };
-    expect(annotate).toHaveBeenNthCalledWith(1, { target, u: 0.25, v: 0.75 });
+    expect(annotate).toHaveBeenNthCalledWith(1, {
+      target,
+      excerpt: '核对读取上限',
+      u: 0.25,
+      v: 0.75,
+    });
 
     await click(text);
-    expect(annotate).toHaveBeenNthCalledWith(2, { target, u: 192 / 200, v: 40 / 44 });
+    expect(annotate).toHaveBeenNthCalledWith(2, {
+      target,
+      excerpt: '核对读取上限',
+      u: 192 / 200,
+      v: 40 / 44,
+    });
 
     measure.mockReturnValue(new DOMRect());
     await click(text);
@@ -614,6 +624,7 @@ describe('todoExtension', () => {
     await click('备注任务：核对读取上限');
     expect(onAnnotateContent).toHaveBeenCalledExactlyOnceWith({
       target: { kind: 'todo', itemId: 'limits' },
+      excerpt: '核对读取上限',
       u: 0.96,
       v: 0.9,
     });

@@ -150,7 +150,7 @@ test('preserves ordinary document paths and rewrites exact declared archive asse
   expect((await loadArchiveAsset(assetPath, ownerId)).status).toBe(200);
 });
 
-test('exports the complete imported whiteboard and its archived SVG as SVG and PNG', async () => {
+test('preserves the imported document, native layers and archived image in SVG and PNG exports', async () => {
   const receipt = await importReceipt(await upload(currentArchive, 'import-vector-image'));
   assert.equal(receipt.outcome.case, 'imported');
   const { boardId } = receipt.outcome.value;
@@ -159,9 +159,34 @@ test('exports the complete imported whiteboard and its archived SVG as SVG and P
     ...input,
     format: BoardExportFormat.SVG,
   });
-  assert.equal(vector.result.case, 'file');
-  assert.equal(vector.result.value.mimeType, 'image/svg+xml');
-  const markup = new TextDecoder().decode(vector.result.value.content);
+  assert.equal(vector.result.case, 'browserPng');
+  const plan = vector.result.value;
+  const { svgTemplate: markup, regions } = plan;
+  expect(plan).toMatchObject({
+    filename: '产品发布工作台.svg',
+    revision: 0n,
+    width: 918,
+    height: 654,
+  });
+  expect(markup).toContain('viewBox="18 3 918 654"');
+  expect(markup).toContain('translate(76 104)');
+  expect(markup).toContain('data-studio-task-id="scope" data-checked="true"');
+  expect(markup).toContain('data-studio-task-id="move" data-checked="false"');
+  expect(regions).toHaveLength(1);
+  const [document] = regions;
+  assert.ok(document);
+  expect(document).toMatchObject({ width: 505, height: 302 });
+  expect(document.scripted).toBeUndefined();
+  expect(document.html).toContain('<header>发布方案</header>');
+  expect(document.html).toContain('<h2>试一试</h2>');
+  expect(document.html).toContain('刷新页面，确认卡片保留在拖动后的位置。');
+  expect(markup).toContain(
+    `<g transform="translate(52 205) rotate(0 252.5 151)"><clipPath id="board-object-${document.index}">`,
+  );
+  expect(markup).toContain(
+    `<foreignObject width="505" height="302"><div xmlns="http://www.w3.org/1999/xhtml" data-studio-png-region="${document.index}"></div></foreignObject>`,
+  );
+  expect(markup).toContain('translate(52 537)');
   const embedded = /data:image\/svg\+xml;base64,([^"]+)/u.exec(markup)?.[1];
   assert.ok(embedded);
   assert.match(Buffer.from(embedded, 'base64').toString('utf8'), /<path d="M22 57l29-23/u);
@@ -170,12 +195,22 @@ test('exports the complete imported whiteboard and its archived SVG as SVG and P
     ...input,
     format: BoardExportFormat.PNG,
   });
-  assert.equal(raster.result.case, 'file');
-  assert.equal(raster.result.value.mimeType, 'image/png');
+  assert.equal(raster.result.case, 'browserPng');
+  expect(raster.result.value).toEqual({ ...plan, filename: '产品发布工作台.png' });
+
+  const imageOnly = await callProtobuf(server.address, ownerId, exportBoard, {
+    ...input,
+    scope: { case: 'selection', value: { objectIds: ['release-image'] } },
+    format: BoardExportFormat.PNG,
+  });
+  assert.equal(imageOnly.result.case, 'file');
+  assert.equal(imageOnly.result.value.mimeType, 'image/png');
   assert.deepEqual(
-    raster.result.value.content.subarray(0, 8),
+    imageOnly.result.value.content.subarray(0, 8),
     new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]),
   );
+  const pngHeader = Buffer.from(imageOnly.result.value.content.subarray(0, 24));
+  expect([pngHeader.readUInt32BE(16), pngHeader.readUInt32BE(20)]).toEqual([240, 152]);
 });
 
 test('rejects older backup formats and exposes the same rejection through receipt lookup', async () => {

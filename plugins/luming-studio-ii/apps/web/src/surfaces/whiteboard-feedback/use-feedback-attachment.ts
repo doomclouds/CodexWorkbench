@@ -13,19 +13,14 @@ interface PendingAttachment extends AttachmentTarget {
 
 type AttachOptions = Pick<
   WhiteboardFeedbackSurfaceProps,
-  'boardId' | 'createCommandId' | 'onAttachThread' | 'attachmentMode'
+  'boardId' | 'createCommandId' | 'onAttachThread'
 >;
 
 function failureMessage(error: unknown) {
   return error instanceof Error ? error.message : '未收到附加确认。';
 }
 
-export function useFeedbackAttachment({
-  boardId,
-  createCommandId,
-  onAttachThread,
-  attachmentMode = 'context',
-}: AttachOptions) {
+export function useFeedbackAttachment({ boardId, createCommandId, onAttachThread }: AttachOptions) {
   const [pending, setPending] = useState<PendingAttachment>();
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string>();
@@ -78,8 +73,7 @@ export function useFeedbackAttachment({
   function request(target: AttachmentTarget, saved = false) {
     const attached = complete.get(target.threadId) === target.threadVersion;
     const unavailable = !onAttachThread || active.current !== undefined;
-    const alreadyAttached = attached && attachmentMode === 'context';
-    if (unavailable || pending || alreadyAttached) {
+    if (unavailable || pending || attached) {
       return;
     }
 
@@ -105,7 +99,6 @@ export function useFeedbackAttachment({
 
   return {
     available: onAttachThread !== undefined,
-    mode: attachmentMode,
     busy,
     failure,
     pending,

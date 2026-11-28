@@ -17,7 +17,7 @@ type CapturedExport = BoardExportSnapshot | BoardExportRejection | BoardExportSt
 const maxExportObjects = 10000;
 const maxSnapshotObjects = 20000;
 
-function captureHtmlSelection(
+function captureHtmlSource(
   reader: WhiteboardReader,
   board: BoardExportSnapshot['board'],
   objectIds: readonly string[],
@@ -31,7 +31,7 @@ function captureHtmlSelection(
   if (!object) {
     return { kind: 'rejected', reason: 'invalidSelection' };
   }
-  if (object.kind !== 'html' && object.kind !== 'diagram') {
+  if (object.kind !== 'html' && object.kind !== 'diagram' && object.kind !== 'chart') {
     return { kind: 'rejected', reason: 'unsupported' };
   }
 
@@ -52,8 +52,10 @@ function captureSnapshot(
   if (board.revision !== command.expectedRevision) {
     return { kind: 'stale', revision: board.revision };
   }
-  if (command.format === 'html' && command.scope.kind === 'selection') {
-    return captureHtmlSelection(reader, board, command.scope.objectIds);
+  if (command.format === 'html-source') {
+    return command.scope.kind === 'selection'
+      ? captureHtmlSource(reader, board, command.scope.objectIds)
+      : { kind: 'rejected', reason: 'invalidSelection' };
   }
 
   const objects = reader.listObjects(command.boardId, maxSnapshotObjects + 1);

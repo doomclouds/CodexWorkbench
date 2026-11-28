@@ -96,6 +96,7 @@ interface FeedbackPageRequest {
 export interface FeedbackListRequest extends FeedbackPageRequest {
   readonly status?: FeedbackStatus;
   readonly authorId?: string;
+  readonly authoredByViewer?: boolean;
 }
 
 export interface FeedbackThreadRequest extends FeedbackPageRequest {

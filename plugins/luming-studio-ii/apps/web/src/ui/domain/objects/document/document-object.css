@@ -407,7 +407,15 @@
 }
 
 .studio-document-reading [data-document-annotation-target] {
-  cursor: crosshair;
+  cursor: var(--canvas-comment-cursor, pointer);
+}
+
+.studio-document-reading
+  [data-document-annotation-target]:is(:hover, :focus-visible):not(
+    :has([data-document-annotation-target]:hover)
+  ) {
+  outline: 2px solid var(--canvas-annotation-ink, #389cff);
+  outline-offset: 2px;
 }
 
 .studio-document-surface[data-document-focused-reading] {

@@ -236,7 +236,7 @@ test('exports complete native documents plus isolated embedded content, and prep
   const source = await callWhiteboard(server.address, viewerId, exportBoard, {
     ...current,
     scope: { case: 'selection', value: { objectIds: ['html-card'] } },
-    format: BoardExportFormat.HTML,
+    format: BoardExportFormat.HTML_SOURCE,
   });
   assert.equal(source.result.case, 'file');
   expect(source.result.value).toMatchObject({
@@ -245,25 +245,35 @@ test('exports complete native documents plus isolated embedded content, and prep
     content: new TextEncoder().encode(html),
   });
 
+  const selection = await callWhiteboard(server.address, viewerId, exportBoard, {
+    ...current,
+    scope: { case: 'selection', value: { objectIds: ['html-card'] } },
+    format: BoardExportFormat.HTML,
+  });
+  assert.equal(selection.result.case, 'file');
+  const selected = new TextDecoder().decode(selection.result.value.content);
+  expect(selected).toContain('sandbox="allow-scripts"');
+  expect(selected).toContain('Offline diagram');
+  expect(selected).not.toContain(documentContent);
+
   const png = await callWhiteboard(server.address, viewerId, exportBoard, {
     ...current,
     format: BoardExportFormat.PNG,
   });
   assert.equal(png.result.case, 'browserPng');
   const plan = png.result.value;
-  const region = plan.regions[0];
+  const region = plan.regions.find((item) => item.html.includes('Offline diagram'));
   assert.ok(region);
   expect(plan).toMatchObject({ filename: 'Architecture.png', revision: 1n });
-  expect(plan.svgTemplate).toContain(
-    `<foreignObject width="200" height="120"><div xmlns="http://www.w3.org/1999/xhtml" data-studio-png-region="${region.index}"></div>`,
-  );
+  expect(plan.svgTemplate).toContain(`<g data-studio-png-region="${region.index}"></g>`);
   expect(plan.svgTemplate).not.toContain('<script>');
-  expect(region.html).toContain("script-src 'none'");
+  expect(region.html).toContain("script-src 'unsafe-inline'");
+  expect(region.html).toContain("connect-src 'none'");
   expect(region.html).toContain('Offline diagram');
-  expect(region.html).not.toContain('Object.defineProperty(window');
+  expect(region.html).toContain('Object.defineProperty(window');
 });
 
-test('prepares live and historical SVG from the requested rich-object selection and its own media', async () => {
+test('prepares live and historical SVG and HTML for a selection and its own media', async () => {
   const attach = await callWhiteboard(
     server.address,
     editorId,
@@ -299,6 +309,18 @@ test('prepares live and historical SVG from the requested rich-object selection 
   expect(live.result.value.svgTemplate).toContain('data-studio-png-region="0"');
   expect(live.result.value.regions[0]?.html).toContain('src="data:image/png;base64,');
 
+  const liveHtml = await callWhiteboard(server.address, viewerId, exportBoard, {
+    ...request,
+    expectedRevision: 2n,
+    scope: selection,
+    format: BoardExportFormat.HTML,
+  });
+  assert.equal(liveHtml.result.case, 'file');
+  const liveContents = new TextDecoder().decode(liveHtml.result.value.content);
+  expect(liveContents).toContain('Diagram at revision two');
+  expect(liveContents).toContain('data:image/png;base64,');
+  expect(liveContents).not.toContain(documentContent);
+
   const changed = await callWhiteboard(
     server.address,
     editorId,
@@ -325,6 +347,14 @@ test('prepares live and historical SVG from the requested rich-object selection 
   assert.equal(archived.result.case, 'browserPng');
   expect(archived.result.value.regions[0]?.html).toContain('Diagram at revision two');
   expect(archived.result.value.regions[0]?.html).not.toContain('Later diagram');
+
+  const archivedHtml = await callWhiteboard(server.address, viewerId, exportBoardVersion, {
+    boardId: mainBoardId,
+    revision: 2n,
+    scope: selection,
+    format: BoardExportFormat.HTML,
+  });
+  expect(archivedHtml.result).toEqual(liveHtml.result);
 });
 
 test('returns the newer revision without a file after a concurrent saved move', async () => {

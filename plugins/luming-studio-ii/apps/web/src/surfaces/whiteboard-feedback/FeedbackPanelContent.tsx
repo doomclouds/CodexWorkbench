@@ -5,15 +5,18 @@ import type {
 } from '../../data/feedback/index.js';
 import type { FeedbackCanvasObject } from './contracts.js';
 import { FeedbackThreadView } from './FeedbackThreadView.js';
+import { describeFeedbackTarget } from './target-description.js';
 import type { ThreadDraft } from './thread-draft.js';
 import type { FeedbackAttachment } from './use-feedback-attachment.js';
 import type { useFeedbackQueries } from './use-feedback-queries.js';
 
 export interface CreateDraft {
+  readonly locationId: string;
   readonly target: FeedbackTarget;
   readonly text: string;
   readonly frozenPoint?: FeedbackPoint;
   readonly label: string;
+  readonly excerpt?: string;
   readonly attach?: boolean;
 }
 
@@ -47,10 +50,9 @@ export function FeedbackDetails({
   const { detail, refresh } = queries;
   const anchor = detail.page?.thread.anchor;
   const target = anchor?.target;
+  const object = target && target.kind !== 'board' ? objects.get(target.objectId) : undefined;
   const missing =
-    target && target.kind !== 'board'
-      ? anchor?.targetMissing === true || !objects.has(target.objectId)
-      : false;
+    target && target.kind !== 'board' ? anchor?.targetMissing === true || !object : false;
 
   return (
     <FeedbackThreadView
@@ -63,6 +65,7 @@ export function FeedbackDetails({
       blocked={blocked}
       pending={detail.pending}
       error={detail.error}
+      targetLabel={anchor && describeFeedbackTarget(anchor.target, anchor.frozenObject ?? object)}
       targetMissing={missing}
       contentAnchor={target?.kind === 'content' ? anchor : undefined}
       hasMore={Boolean(detail.page?.nextCursor)}

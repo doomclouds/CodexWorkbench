@@ -122,6 +122,16 @@ test('opens discussion through the assembled Studio board and transfers focus to
 
   try {
     await act(async () => fixture.render(<StudioApp {...props} />));
+    const canvas = fixture.host.querySelector('[data-canvas-root]');
+    if (!canvas) {
+      throw new Error('The assembled board did not mount a canvas.');
+    }
+
+    Object.defineProperty(canvas, 'getBoundingClientRect', {
+      value: () => new DOMRect(0, 48, 900, 600),
+    });
+    await act(async () => window.dispatchEvent(new Event('resize')));
+
     const notes = findButton(fixture.host, notesLabel);
     expect(notes.disabled).toBe(false);
     Object.defineProperty(notes, 'getBoundingClientRect', {

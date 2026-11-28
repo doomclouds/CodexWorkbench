@@ -17,6 +17,12 @@
   pointer-events: auto;
 }
 
+.whiteboard-feedback__pin-layer {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+}
+
 .whiteboard-feedback__pin {
   position: absolute;
   z-index: 40;
@@ -166,12 +172,16 @@
   font-size: 12px;
 }
 
-.whiteboard-feedback__target > span {
+.whiteboard-feedback__target-label {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.whiteboard-feedback__thread-target {
+  padding: 0 2px;
 }
 
 .whiteboard-feedback__target .whiteboard-feedback__icon {
@@ -483,6 +493,21 @@
 
 .whiteboard-feedback__messages > li + li {
   margin-top: 12px;
+}
+
+.whiteboard-feedback__pager {
+  display: flex;
+  justify-content: center;
+  border-top: 1px solid var(--feedback-border);
+  padding: 5px 8px;
+}
+
+.whiteboard-feedback__pager > .studio-ui-button {
+  min-block-size: 28px;
+  gap: 4px;
+  padding: 2px 8px;
+  color: var(--feedback-muted);
+  font-size: 12px;
 }
 
 .whiteboard-feedback__actions {

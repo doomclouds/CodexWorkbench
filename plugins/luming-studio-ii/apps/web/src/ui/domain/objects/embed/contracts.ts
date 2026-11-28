@@ -87,6 +87,7 @@ export interface EmbedObjectProps {
   readonly onPointerPosition?: (point: EmbedPoint | null) => void;
   readonly onNavigation?: (event: EmbedNavigationEvent) => void;
   readonly onRetentionChange?: (retain: boolean) => void;
+  readonly onSourceEditingChange?: (editing: boolean) => void;
   readonly onSaveState?: (state: EmbedJson, expectedVersion: number) => Promise<EmbedStateVersion>;
   readonly onAdoptSharedState?: () => void;
   readonly onSaveSource?: (

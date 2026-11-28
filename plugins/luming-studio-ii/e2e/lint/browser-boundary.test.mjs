@@ -194,6 +194,30 @@ const whiteboardScopedFixtures = [
     "whiteboard-editing/canvas-extras",
     ["workbenchLinkProbe", "readPeerCursors", "readPlacementPreview", "controlNextTextSave"],
   ],
+  ["whiteboard-topbar/chrome", ["controlNextCanvasSave"]],
+  ["whiteboard-topbar/history", ["failNextOlderVersions", "readBoardDownload"]],
+  ["whiteboard-topbar/export", ["downloadBoardExport", "readBoardDownload", "failNextBoardExport"]],
+  ["whiteboard-topbar/sharing-feedback", ["workbenchLinkProbe"]],
+  ["whiteboard-topbar/overlays", ["seedTopbarSuggestion", "seedTopbarAgentWorkspace"]],
+  ["whiteboard-topbar/export-fidelity", ["downloadBoardExport", "inspectBoardExport"]],
+  ["whiteboard-topbar/scripted-export", ["downloadBoardExport", "inspectBoardExport"]],
+  [
+    "whiteboard-collaboration/presence",
+    ["workbenchLinkProbe", "readPeerCursors", "readPlacementPreview", "setRoomConnectionOffline"],
+  ],
+  ["whiteboard-collaboration/geometry", ["workbenchLinkProbe"]],
+  [
+    "whiteboard-collaboration/content",
+    [
+      "workbenchLinkProbe",
+      "embedFrame",
+      "chooseHtmlFile",
+      "chooseBoardMedia",
+      "mediaDisplaySize",
+      "mediaPlaying",
+      "holdNextInlineTextWrite",
+    ],
+  ],
 ];
 
 for (const [name, helpers] of whiteboardScopedFixtures) {
@@ -258,6 +282,16 @@ const whiteboardFiles = [
   "whiteboard-editing/zoom-visibility",
   "whiteboard-editing/canvas-extras",
   "whiteboard-editing/inline-editing",
+  "whiteboard-topbar/chrome",
+  "whiteboard-topbar/history",
+  "whiteboard-topbar/export",
+  "whiteboard-topbar/sharing-feedback",
+  "whiteboard-topbar/overlays",
+  "whiteboard-topbar/export-fidelity",
+  "whiteboard-topbar/scripted-export",
+  "whiteboard-collaboration/presence",
+  "whiteboard-collaboration/geometry",
+  "whiteboard-collaboration/content",
 ];
 
 for (const name of whiteboardFiles) {
@@ -286,6 +320,22 @@ test("rejects the whiteboard capabilities in an unrelated feature", async () => 
       ["fixture", "fixtureMethod", "fixtureMethod", "computed"],
     );
   }
+});
+
+test("limits a versioned fixture to direct calls from the history scenario", async () => {
+  const text = scenario("  await studio.seedVersionMoves(board, 21);");
+  assert.deepEqual(await messages(text, "whiteboard-topbar/history.spec.mjs"), []);
+  assert.deepEqual(
+    (await messages(text, "whiteboard-topbar/chrome.spec.mjs")).map(({ messageId }) => messageId),
+    ["fixtureMethod"],
+  );
+  const aliased = scenario("  const seed = studio.seedVersionMoves; await seed(board, 21);");
+  assert.deepEqual(
+    (await messages(aliased, "whiteboard-topbar/history.spec.mjs")).map(
+      ({ messageId }) => messageId,
+    ),
+    ["fixtureMethod"],
+  );
 });
 
 test("blocks canvas implementation and storage inspection inside a whiteboard scenario", async () => {

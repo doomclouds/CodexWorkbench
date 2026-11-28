@@ -273,13 +273,13 @@ export function TodoRows(props: TodoRowsProps) {
     }
   }
 
-  function annotate(event: MouseEvent<HTMLLIElement>, id: string) {
+  function annotate(event: MouseEvent<HTMLLIElement>, { id, text }: TodoObjectItem) {
     event.stopPropagation();
     const point = event.detail ? { x: event.clientX, y: event.clientY } : undefined;
     if (onAnnotateContent) {
       const position = rowPosition(event.currentTarget.getBoundingClientRect(), point);
       if (position) {
-        onAnnotateContent({ target: { kind: 'todo', itemId: id }, ...position });
+        onAnnotateContent({ target: { kind: 'todo', itemId: id }, excerpt: text, ...position });
       }
 
       return;
@@ -302,7 +302,7 @@ export function TodoRows(props: TodoRowsProps) {
         onDragOver={(event) => handleDragOver(event, id)}
         onDrop={(event) => handleDrop(event, id)}
         onPointerDown={annotating ? handleAnnotationPointerDown : undefined}
-        onClick={annotating ? (event) => annotate(event, id) : undefined}
+        onClick={annotating ? (event) => annotate(event, item) : undefined}
       >
         {showsEditControls && (
           <button

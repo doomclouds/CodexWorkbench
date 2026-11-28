@@ -84,7 +84,6 @@ function render(service: SuggestionService, options: Partial<BoardSuggestionsSur
   const defaultProps = {
     anchor,
     boardId,
-    revision: 5n,
     service,
     createCommandId: () => commandId,
     onApplied,
@@ -259,37 +258,11 @@ it('reports a conflicting preview and updates the list without making an edit', 
   expect(onApplied).not.toHaveBeenCalled();
 });
 
-it('sends only the frozen reference after an explicit attachment action', async () => {
+it('shows private suggestions without a global attachment action', async () => {
   const service = suggestionService();
-  const onAttachSource = vi.fn<NonNullable<BoardSuggestionsSurfaceProps['onAttachSource']>>();
-  render(service, { selection: ['selected-one'], feedbackThreadId: 'from-thread', onAttachSource });
+  render(service);
   await settle();
+  expect(view.host.textContent).toContain(proposal.observation);
+  expect(view.host.textContent).not.toMatch(/附加选区|复制选区引用|附加批注/u);
   expect(service.createReviewSource).not.toHaveBeenCalled();
-  expect(onAttachSource).not.toHaveBeenCalled();
-
-  await click('附加选区');
-  expect(service.createReviewSource.mock.calls[0]?.[0]).toEqual({
-    boardId,
-    commandId,
-    origin: { kind: 'selection', objectIds: ['selected-one'] },
-    expectedBoardRevision: 5n,
-  });
-  expect(onAttachSource).toHaveBeenCalledExactlyOnceWith(attachedReference);
-});
-
-it('reuses the frozen reference if the host attachment failed after capture', async () => {
-  const service = suggestionService();
-  const onAttachSource = vi.fn<NonNullable<BoardSuggestionsSurfaceProps['onAttachSource']>>();
-  onAttachSource.mockRejectedValueOnce(new Error('宿主不可用'));
-  render(service, { feedbackThreadId: 'from-thread', onAttachSource });
-  await settle();
-  await click('附加批注');
-  expect(service.createReviewSource.mock.calls[0]?.[0]).toMatchObject({
-    origin: { kind: 'feedback', threadId: 'from-thread' },
-  });
-  expect(view.host.textContent).toContain('附加未确认');
-
-  await click('重试附加');
-  expect(service.createReviewSource).toHaveBeenCalledOnce();
-  expect(onAttachSource.mock.calls).toEqual([[attachedReference], [attachedReference]]);
 });

@@ -233,6 +233,9 @@ export class RoomMemory {
     }
 
     const prior = previous?.participant;
+    const editingObjectIds = input.editingObjectIds?.length
+      ? [...new Set(input.editingObjectIds)].sort()
+      : undefined;
     const participant = {
       key,
       displayName: access.displayName,
@@ -245,6 +248,7 @@ export class RoomMemory {
       following: input.following,
       gesture: input.gesture,
       gestureExpiresAtUnixMs: input.gesture && now + gestureTtlMs,
+      editingObjectIds,
     };
     this.slots.set(id, {
       key,

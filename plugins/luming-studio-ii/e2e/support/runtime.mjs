@@ -111,12 +111,13 @@ async function stopChild(service) {
   }
 }
 
-async function startChild(edition, directory) {
+async function startChild(edition, directory, agentSuggestions) {
   const legacy = edition === "initial";
   const entry = legacy ? initialEntry : iiEntry;
   await access(entry);
   const recordPath = join(directory, "service.json");
   const token = randomBytes(32).toString("base64url");
+  const agentToken = !legacy && agentSuggestions ? randomBytes(32).toString("base64url") : "";
   if (legacy) {
     await rm(recordPath, { force: true });
   }
@@ -128,7 +129,7 @@ async function startChild(edition, directory) {
         LUMING_STUDIO_II_DB: join(directory, "studio.sqlite"),
         LUMING_STUDIO_II_ACTOR: "e2e-owner",
         LUMING_STUDIO_II_TOKEN: token,
-        LUMING_STUDIO_II_AGENT_TOKEN: "",
+        LUMING_STUDIO_II_AGENT_TOKEN: agentToken,
         LUMING_STUDIO_II_PORT: "0",
         LUMING_STUDIO_II_LAN_HOST: loopback,
         LUMING_STUDIO_II_LAN_PORT: "0",
@@ -165,7 +166,7 @@ async function startChild(edition, directory) {
 
       const record = legacy ? await legacyRecord(recordPath, child.pid) : iiRecord(output, token);
       if (record) {
-        return { child, closed, ...record };
+        return { child, closed, ...record, agentToken };
       }
 
       await delay(50);
@@ -536,7 +537,7 @@ function privateRequest(service, path, init) {
   });
 }
 
-export async function launchStudio(edition) {
+export async function launchStudio(edition, { agentSuggestions = false } = {}) {
   if (edition !== "initial" && edition !== "ii") {
     throw new Error("Unknown Studio test edition: " + edition);
   }
@@ -548,7 +549,7 @@ export async function launchStudio(edition) {
   let restarting;
   let closing;
   try {
-    service = await startChild(edition, directory);
+    service = await startChild(edition, directory, agentSuggestions);
     proxy = await openProxy(edition, () => service);
   } catch (error) {
     await stopChild(service);
@@ -559,7 +560,7 @@ export async function launchStudio(edition) {
   async function replaceChild() {
     await stopChild(service);
     service = undefined;
-    service = await startChild(edition, directory);
+    service = await startChild(edition, directory, agentSuggestions);
   }
 
   async function shutdown() {
@@ -574,6 +575,18 @@ export async function launchStudio(edition) {
     }
   }
 
+  function postAgent(path, body) {
+    if (!service?.agentToken || closing || restarting) {
+      throw new Error("The isolated Agent fixture is unavailable.");
+    }
+
+    return privateRequest({ ...service, token: service.agentToken }, path, {
+      method: "POST",
+      headers: { "content-type": "application/protobuf" },
+      body,
+    });
+  }
+
   return {
     url: `http://${loopback}:${proxy.address().port}/`,
     async request(path, init = {}) {
@@ -582,6 +595,12 @@ export async function launchStudio(edition) {
       }
 
       return privateRequest(service, path, init);
+    },
+    submitAgentSuggestion(body) {
+      return postAgent("/luming.studio.v1.BoardSuggestionService/SubmitBoardSuggestion", body);
+    },
+    openAgentWorkspace(body) {
+      return postAgent("/luming.studio.v1.BoardRoomService/ChangeAgentActivity", body);
     },
     restart() {
       if (closing) {

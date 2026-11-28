@@ -106,6 +106,7 @@ message ListThreadsRequest {
   optional string cursor = 3;
   FeedbackThreadStatus status = 4;
   optional string author_actor_id = 5;
+  bool authored_by_viewer = 6;
 }
 
 message ListThreadsResponse {

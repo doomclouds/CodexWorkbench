@@ -1,4 +1,4 @@
-import { Clock3, Loader2, RefreshCw, X } from 'lucide-react';
+import { ChevronDown, Clock3, Loader2, RefreshCw, X } from 'lucide-react';
 import {
   useEffect,
   useEffectEvent,
@@ -56,6 +56,11 @@ type ChangesState =
   | { readonly kind: 'error'; readonly message: string }
   | ({ readonly kind: 'ready' } & RetainedChanges);
 
+type VersionListState =
+  | { readonly kind: 'ready' }
+  | { readonly kind: 'loading'; readonly before?: bigint }
+  | { readonly kind: 'error'; readonly before?: bigint; readonly message: string };
+
 interface Inspection {
   readonly entry: BoardHistoryVersion;
   readonly previousRevision: bigint;
@@ -77,6 +82,13 @@ async function refreshVersions(
   signal: AbortSignal,
 ): Promise<BoardHistoryPage> {
   const first = await service.listVersions(boardId, before, signal);
+  if (
+    before !== undefined &&
+    first.nextBeforeRevision !== undefined &&
+    first.nextBeforeRevision >= before
+  ) {
+    throw new Error('版本历史未能继续加载。');
+  }
   if (before !== undefined || oldestLoaded === undefined) {
     return first;
   }
@@ -255,6 +267,92 @@ function HistoryPanelHeading({
   );
 }
 
+function VersionListStatus({
+  state,
+  empty,
+  previewError,
+  loadingRevision,
+}: {
+  readonly state: VersionListState;
+  readonly empty: boolean;
+  readonly previewError?: string;
+  readonly loadingRevision?: bigint;
+}) {
+  return (
+    <>
+      {state.kind === 'error' && state.before === undefined && (
+        <StatusText message={state.message} tone="error" announcement="polite" />
+      )}
+      {previewError && <StatusText message={previewError} tone="error" announcement="polite" />}
+      {loadingRevision !== undefined && (
+        <StatusText message={'正在打开版本 ' + loadingRevision + '…'} announcement="polite" busy />
+      )}
+      {empty && state.kind === 'loading' && (
+        <div className="whiteboard-history__empty" role="status">
+          <Loader2 size={22} className="whiteboard-history__spin" />
+          <span>正在加载历史记录…</span>
+        </div>
+      )}
+      {empty && state.kind === 'ready' && (
+        <div className="whiteboard-history__empty">
+          <Clock3 size={25} />
+          <span>还没有历史记录</span>
+        </div>
+      )}
+    </>
+  );
+}
+
+function OlderVersionsFooter({
+  state,
+  cursor,
+  busy,
+  buttonRef,
+  onLoad,
+}: {
+  readonly state: VersionListState;
+  readonly cursor?: bigint;
+  readonly busy: boolean;
+  readonly buttonRef: Ref<HTMLButtonElement>;
+  readonly onLoad: (before: bigint) => void;
+}) {
+  if (cursor === undefined) {
+    return null;
+  }
+
+  const unavailable = busy || state.kind === 'loading';
+  const loadingOlder = state.kind === 'loading' && state.before !== undefined;
+  const error = state.kind === 'error' && state.before !== undefined ? state.message : undefined;
+  const action = error ? '重试加载更早版本' : '加载更早版本';
+
+  function handleLoad() {
+    if (!unavailable && cursor !== undefined) {
+      onLoad(cursor);
+    }
+  }
+
+  return (
+    <footer className="whiteboard-history__footer">
+      {error && <StatusText message={error} tone="error" announcement="polite" />}
+      <button
+        type="button"
+        ref={buttonRef}
+        className="whiteboard-history__older"
+        aria-busy={loadingOlder || undefined}
+        aria-disabled={unavailable || undefined}
+        onClick={handleLoad}
+      >
+        {loadingOlder ? (
+          <Loader2 size={14} className="whiteboard-history__spin" aria-hidden="true" />
+        ) : (
+          <ChevronDown size={14} aria-hidden="true" />
+        )}
+        {loadingOlder ? '正在加载更早版本…' : action}
+      </button>
+    </footer>
+  );
+}
+
 export function VersionHistoryPanel({
   anchor,
   boardId,
@@ -270,22 +368,24 @@ export function VersionHistoryPanel({
   onRequestRestore,
 }: VersionHistoryPanelProps) {
   const [page, setPage] = useState<BoardHistoryPage>();
-  const [loading, setLoading] = useState(true);
+  const [versionList, setVersionList] = useState<VersionListState>({ kind: 'loading' });
   const [loadingRevision, setLoadingRevision] = useState<bigint>();
-  const [error, setError] = useState<string>();
+  const [previewError, setPreviewError] = useState<string>();
   const [expanded, setExpanded] = useState<bigint>();
   const [changes, setChanges] = useState<ChangesState>();
   const [inspection, setInspection] = useState<Inspection>();
   const [visibleChanges, setVisibleChanges] = useState(changePageSize);
   const panel = useRef<HTMLElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
+  const olderButton = useRef<HTMLButtonElement>(null);
+  const focusOlderRevision = useRef<bigint>(undefined);
   const returningChange = useRef<string>(undefined);
   const recordsScroll = useRef(0);
   const pendingList = useRef<AbortController>(undefined);
   const pendingSelection = useRef<AbortController>(undefined);
   const pendingChanges = useRef<AbortController>(undefined);
 
-  const loadInitialPage = useEffectEvent(() => loadPage());
+  const loadInitialPage = useEffectEvent(() => handleLoadPage());
   useEffect(() => loadInitialPage(), [revision]);
   useEffect(
     () => () => {
@@ -296,13 +396,16 @@ export function VersionHistoryPanel({
     [],
   );
 
-  function loadPage(before?: bigint) {
+  function handleLoadPage(before?: bigint) {
+    if (before !== undefined && pendingList.current) {
+      return;
+    }
+
     pendingList.current?.abort();
     const controller = new AbortController();
     const { signal } = controller;
     pendingList.current = controller;
-    setLoading(true);
-    setError(undefined);
+    setVersionList({ kind: 'loading', before });
     const oldestLoaded = page?.versions.at(-1)?.revision;
 
     Promise.resolve()
@@ -312,21 +415,33 @@ export function VersionHistoryPanel({
       })
       .then((result) => {
         signal.throwIfAborted();
+        const footer = olderButton.current;
+        if (
+          before !== undefined &&
+          result.nextBeforeRevision === undefined &&
+          footer?.ownerDocument.activeElement === footer
+        ) {
+          focusOlderRevision.current = result.versions[0]?.revision;
+        }
         setPage((prior) =>
           before !== undefined && prior
             ? { ...result, versions: [...prior.versions, ...result.versions] }
             : result,
         );
+        setVersionList({ kind: 'ready' });
       })
       .catch((cause: unknown) => {
         if (!signal.aborted) {
-          setError(errorMessage(cause, '版本历史未能加载。'));
+          setVersionList({
+            kind: 'error',
+            before,
+            message: errorMessage(cause, '版本历史未能加载。'),
+          });
         }
       })
       .finally(() => {
         if (pendingList.current === controller && !signal.aborted) {
           pendingList.current = undefined;
-          setLoading(false);
         }
       });
   }
@@ -370,7 +485,7 @@ export function VersionHistoryPanel({
     const { signal } = controller;
     pendingSelection.current = controller;
     setLoadingRevision(revisionToOpen);
-    setError(undefined);
+    setPreviewError(undefined);
 
     Promise.resolve()
       .then(() => {
@@ -387,7 +502,7 @@ export function VersionHistoryPanel({
       })
       .catch((cause: unknown) => {
         if (!signal.aborted) {
-          setError(errorMessage(cause, '历史版本未能打开。'));
+          setPreviewError(errorMessage(cause, '历史版本未能打开。'));
         }
       })
       .finally(() => {
@@ -440,6 +555,16 @@ export function VersionHistoryPanel({
     returningChange.current = undefined;
     (trigger ?? closeButton.current)?.focus({ preventScroll: true });
   }, [inspection]);
+
+  useLayoutEffect(() => {
+    const targetRevision = focusOlderRevision.current;
+    if (targetRevision !== undefined) {
+      focusOlderRevision.current = undefined;
+      panel.current
+        ?.querySelector<HTMLButtonElement>(`[aria-label="展开版本 ${targetRevision}"]`)
+        ?.focus({ preventScroll: true });
+    }
+  }, [page]);
 
   function focusOnTrigger(trigger: HTMLElement) {
     const canFocusButton = trigger.isConnected && !trigger.matches(':disabled');
@@ -553,43 +678,33 @@ export function VersionHistoryPanel({
           <>
             <HistoryPanelHeading
               closeRef={closeButton}
-              loading={loading}
+              loading={versionList.kind === 'loading'}
               busy={busy}
               previewing={previewRevision !== undefined}
               onClose={handleClose}
-              onRefresh={() => loadPage()}
+              onRefresh={() => handleLoadPage()}
               onReturnToCurrent={handleReturnToCurrent}
             />
             {recovery}
-            {error && <StatusText message={error} tone="error" announcement="polite" />}
-            {loadingRevision !== undefined && (
-              <StatusText
-                message={'正在打开版本 ' + loadingRevision + '…'}
-                announcement="polite"
-                busy
-              />
-            )}
-            {loading && versions.length === 0 && (
-              <div className="whiteboard-history__empty" role="status">
-                <Loader2 size={22} className="whiteboard-history__spin" />
-                <span>正在加载历史记录…</span>
-              </div>
-            )}
-            {!loading && !error && versions.length === 0 && (
-              <div className="whiteboard-history__empty">
-                <Clock3 size={25} />
-                <span>还没有历史记录</span>
-              </div>
-            )}
+            <VersionListStatus
+              state={versionList}
+              empty={versions.length === 0}
+              previewError={previewError}
+              loadingRevision={loadingRevision}
+            />
             {groupHistoryByDate(versions).map(({ key, label, entries }) => (
               <section className="whiteboard-history__group" key={key} aria-label={label}>
                 <h3>{label}</h3>
                 {entries.map(renderRecord)}
               </section>
             ))}
-            {cursor !== undefined && (
-              <Button label="加载更多版本" disabled={loading} onActivate={() => loadPage(cursor)} />
-            )}
+            <OlderVersionsFooter
+              state={versionList}
+              cursor={cursor}
+              busy={busy}
+              buttonRef={olderButton}
+              onLoad={handleLoadPage}
+            />
           </>
         )}
       </section>

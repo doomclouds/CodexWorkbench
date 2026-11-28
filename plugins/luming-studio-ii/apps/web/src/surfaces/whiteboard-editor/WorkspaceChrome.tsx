@@ -41,7 +41,7 @@ import type { useContentEdits } from './use-content-edits.js';
 type BoardAnchorAction = (trigger: HTMLButtonElement) => void;
 type WorkspaceMove = ReturnType<typeof useMoveSession>;
 type WorkspaceGeometry = ReturnType<typeof useGeometryEdits>;
-type ContentNotice = ReturnType<typeof useContentEdits>['notice'];
+type ContentNotice = ReturnType<ReturnType<typeof useContentEdits>['getNotice']>;
 type AppliedEdit = Extract<BoardEditReceipt, { kind: 'applied' }>;
 
 interface WorkspaceCanvasProps {
@@ -172,6 +172,7 @@ interface WorkspaceHeaderProps {
   readonly suggestionTrigger: Ref<HTMLButtonElement>;
   readonly onBack?: () => void;
   readonly titleEditor?: BoardTitleEditor;
+  readonly theme?: WhiteboardEditorFeatures['theme'];
   readonly onOpenShare?: BoardAnchorAction;
   readonly onOpenHistory?: BoardAnchorAction;
   readonly onToggleFeedback?: BoardAnchorAction;
@@ -260,6 +261,7 @@ export function WorkspaceHeader(props: WorkspaceHeaderProps) {
         canManage={(props.trashed || props.writeAccess) && Boolean(onBack || titleEditor)}
         onBack={onBack}
         titleEditor={historyPreview ? undefined : titleEditor}
+        theme={props.theme}
         status={boardStatus(props)}
         participants={headerParticipants(props)}
         onOpenShare={historyPreview ? undefined : onOpenShare}
@@ -274,17 +276,19 @@ export function WorkspaceHeader(props: WorkspaceHeaderProps) {
         unresolvedFeedback={unresolvedFeedback}
         onToggleAnnotation={historyPreview ? undefined : onToggleAnnotation}
       />
-      <MoveNotice controls={move} />
-      <GeometryNotice controls={geometry} />
-      {notice && (
-        <OperationNotice
-          id="whiteboard-content-unknown"
-          level="warning"
-          message={notice.message}
-          actions={[{ id: 'retry-content', label: '重试原保存', onActivate: notice.retry }]}
-        />
-      )}
-      {readNotices}
+      <div className="whiteboard-editor__notices" role="region" aria-label="操作通知">
+        <MoveNotice controls={move} />
+        <GeometryNotice controls={geometry} />
+        {notice && (
+          <OperationNotice
+            id="whiteboard-content-unknown"
+            level="warning"
+            message={notice.message}
+            actions={[{ id: 'retry-content', label: '重试原保存', onActivate: notice.retry }]}
+          />
+        )}
+        {readNotices}
+      </div>
     </div>
   );
 }

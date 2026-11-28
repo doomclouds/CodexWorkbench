@@ -3,8 +3,15 @@ import {
   connectorArrowPoints,
 } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/connector-route';
 import { exportConnector, finitePoint, geometryCorners } from './export-geometry.js';
-import { embedMarkup } from './export-html-content.js';
-import { escapeXml, svgContent, svgLabel } from './export-svg-content.js';
+import {
+  boardTableCss,
+  boardTableMarkup,
+  documentAssetsAvailable,
+  documentMarkup,
+  embedMarkup,
+  offlineAsset,
+} from './export-html-content.js';
+import { escapeXml, svgCaption, svgContent, svgLabel } from './export-svg-content.js';
 import { svgColor, svgShape, svgStrokeWidth } from './export-svg-shapes.js';
 import {
   maxExportFileBytes,
@@ -103,7 +110,7 @@ function connectorMarkup(
   const dash = object.appearance?.dashed ? ' stroke-dasharray="6 5"' : '';
   const start = arrowHead(detail.startHead, points, true, stroke, width);
   const end = arrowHead(detail.endHead ?? 'arrow', points, false, stroke, width);
-  const caption = escapeXml(object.label);
+  const caption = svgCaption(object.label, 200, 13);
   const text = caption
     ? `<text x="${label.x}" y="${label.y - 4}" text-anchor="middle" font-size="13" fill="#2d3142">${caption}</text>`
     : '';
@@ -117,7 +124,7 @@ function sectionMarkup(object: BoardObject): string {
   const fill = transparent ? 'none' : svgColor(object.appearance?.fill, '#ececec');
   const stroke = svgColor(object.appearance?.stroke, '#bfc0c0');
   const { width, height } = object.geometry;
-  const caption = escapeXml(object.label);
+  const caption = svgCaption(object.label, Math.max(0, width - 16), 13);
 
   return `<rect width="${width}" height="${height}" fill="${fill}" stroke="${stroke}" stroke-dasharray="6 5"/><text x="8" y="17" font-size="13" fill="#4f5d75">${caption}</text>`;
 }
@@ -135,7 +142,9 @@ function objectMarkup(
     const { width, height } = object.geometry;
     const outline = object.detail?.kind === 'shape' ? object.detail.outline : 'rounded';
     const shape = svgShape(outline, width, height, object.appearance);
-    const text = svgLabel(object.label, width, height, payload?.data ?? {}, true);
+    const data = payload?.data ?? {};
+    const label = typeof data.text === 'string' ? data.text : object.label;
+    const text = svgLabel(label, width, height, data, true);
 
     return shape === undefined ? undefined : shape + text;
   }
@@ -206,14 +215,54 @@ function richRegion(
   snapshot: BoardExportSnapshot,
 ) {
   const { width, height } = object.geometry;
-  if (payload?.bodyKind !== 'embed' || !(width > 0 && height > 0)) {
+  if (!payload || !(width > 0 && height > 0)) {
     return undefined;
   }
 
-  return { index, width, height, html: embedMarkup(payload.data, snapshot.assets, false) };
+  const { bodyKind, data } = payload;
+  if (bodyKind === 'embed') {
+    const scripted = typeof data.html === 'string' && /<script(?:\s|>)/iu.test(data.html);
+    const html = embedMarkup(data, snapshot.assets, scripted);
+
+    return { index, width, height, html, ...(scripted && { scripted }) };
+  }
+
+  if (bodyKind === 'document') {
+    if (!documentAssetsAvailable(data.blocks, snapshot.assets)) {
+      return undefined;
+    }
+
+    const title = typeof data.title === 'string' ? data.title : object.label;
+    const content = documentMarkup(data.blocks, snapshot.assets);
+    const html =
+      '<style>body{margin:0;background:#fff;color:#2d3142;font:14px/1.5 system-ui,sans-serif}header,main{box-sizing:border-box;padding:10px 14px;overflow-wrap:anywhere}header{font-weight:600;border-bottom:1px solid #dedee3}main :first-child{margin-top:0}h1,h2,h3,p,blockquote,pre,figure{margin:.6em 0}pre{white-space:pre-wrap}blockquote{padding-left:8px;border-left:3px solid #bfc0c0}.list-item{display:list-item;margin-left:1.25em}.numbered{list-style:decimal}table{border-collapse:collapse}th,td{border:1px solid #dedee3;padding:3px 5px}img{display:block;max-width:100%;height:auto}figcaption{font-size:.85em}</style>' +
+      `<header>${escapeXml(title)}</header><main>${content}</main>`;
+
+    return { index, width, height, html };
+  }
+
+  if (bodyKind === 'table') {
+    const table = boardTableMarkup(data, object.appearance?.fill);
+    const html = `<style>body{margin:0;overflow:hidden}${boardTableCss}</style>${table}`;
+
+    return { index, width, height, html };
+  }
+
+  const source = bodyKind === 'video' && !data.poster && offlineAsset(data.src, snapshot.assets);
+  if (source && source.startsWith('data:video/')) {
+    const html =
+      '<style>body{margin:0}video,img{display:block;width:100vw;height:100vh;object-fit:contain;background:#111}</style>' +
+      `<video data-studio-export-video src="${escapeXml(source)}" preload="none" playsinline></video>`;
+
+    return { index, width, height, html };
+  }
 }
 
-function richMarkup({ index, width, height }: BoardExportPngRegion) {
+function richMarkup({ index, width, height, scripted }: BoardExportPngRegion) {
+  if (scripted) {
+    return `<g data-studio-png-region="${index}"></g>`;
+  }
+
   return `<foreignObject width="${width}" height="${height}"><div xmlns="http://www.w3.org/1999/xhtml" data-studio-png-region="${index}"></div></foreignObject>`;
 }
 

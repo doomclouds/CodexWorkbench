@@ -80,6 +80,7 @@ function EmbedHtmlBody(props: EmbedObjectProps) {
   const observeRetention = useEffectEvent((retain: boolean) => props.onRetentionChange?.(retain));
 
   function handleSourceEditing(editing: boolean) {
+    props.onSourceEditingChange?.(editing);
     const id = element.id;
     setEditingRegion((current) => {
       if (editing) {

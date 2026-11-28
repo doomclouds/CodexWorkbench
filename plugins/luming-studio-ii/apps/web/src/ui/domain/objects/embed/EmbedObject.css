@@ -16,7 +16,6 @@
 
 .studio-ui-embed[data-annotating] {
   overflow: visible;
-  border-color: var(--studio-ui-accent, Highlight);
 }
 
 .studio-ui-embed > iframe {

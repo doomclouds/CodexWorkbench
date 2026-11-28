@@ -17,6 +17,11 @@
   font-size: 11px;
 }
 
+.whiteboard-editor__notices {
+  --studio-ui-operation-notice-surface: var(--board-chrome, Canvas);
+  --studio-ui-operation-notice-error: var(--studio-ui-danger, light-dark(#be4247, #ff9397));
+}
+
 .whiteboard-editor__state {
   display: grid;
   place-items: center;

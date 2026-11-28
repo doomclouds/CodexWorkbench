@@ -6,9 +6,10 @@ import type {
   FeedbackTarget,
   FeedbackThread,
 } from '../../data/feedback/index.js';
-import type { FeedbackCanvasObject, WhiteboardFeedbackSurfaceProps } from './contracts.js';
+import type { WhiteboardFeedbackSurfaceProps } from './contracts.js';
 import type { CreateDraft } from './FeedbackPanelContent.js';
 import { locateDraft, selectionTarget, targetAt } from './geometry.js';
+import { describeFeedbackTarget, feedbackDraftExcerpt } from './target-description.js';
 import { useFeedbackDrafts } from './thread-draft.js';
 import { useFeedbackAttachment } from './use-feedback-attachment.js';
 import { useFeedbackCommand } from './use-feedback-command.js';
@@ -21,6 +22,7 @@ interface SelectedThread {
   readonly placement: 'list' | 'pin';
   readonly anchor?: FeedbackAnchor;
   readonly draftTarget?: FeedbackTarget;
+  readonly draftPoint?: FeedbackPoint;
 }
 
 type SurfaceStateOptions = Omit<WhiteboardFeedbackSurfaceProps, 'selectedIds'>;
@@ -40,19 +42,6 @@ function useFeedbackSelection(panelOpen: boolean, annotating: boolean) {
 
   return { selection, setSelection };
 }
-
-function draftLabel(target: FeedbackTarget, objects: ReadonlyMap<string, FeedbackCanvasObject>) {
-  if (target.kind === 'board') {
-    return '画板位置';
-  }
-  if (target.kind === 'object') {
-    return objects.get(target.objectId)?.label || '所选对象';
-  }
-
-  return contentLabels[target.content.kind];
-}
-
-const contentLabels = { document: '文档段落', todo: '待办事项', html: 'HTML 内部选区' };
 
 interface HostPointOptions {
   readonly request: WhiteboardFeedbackSurfaceProps['pointAnnotationRequest'];
@@ -94,7 +83,6 @@ export function useFeedbackSurface({
   onAnnotationActiveChange,
   onUnresolvedChange,
   onAttachThread,
-  attachmentMode,
   annotationRequest,
   pointAnnotationRequest,
   hostPicking,
@@ -112,6 +100,7 @@ export function useFeedbackSurface({
   const [createDraft, setCreateDraft] = useState<CreateDraft>();
   const [draftOpen, setDraftOpen] = useState(false);
   const [draftTargetConflict, setDraftTargetConflict] = useState(false);
+  const draftSequence = useRef(0);
   const stage = useRef<HTMLDivElement>(null);
   const triggerPin = useRef<HTMLButtonElement | undefined>(undefined);
   const handledAnnotation = useRef<number | undefined>(undefined);
@@ -131,6 +120,7 @@ export function useFeedbackSurface({
     service,
     threadId: activeThreadId,
   });
+  const draftShown = annotating && draftOpen && !panelOpen;
   const contentLocation = useFeedbackContentLocations({
     viewing,
     contentPoints,
@@ -143,13 +133,13 @@ export function useFeedbackSurface({
     pinnedThreads: queries.pinnedThreads,
     selection,
     detail: queries.detail.page,
+    draft: draftShown ? createDraft : undefined,
   });
   const canWrite = canEdit && queries.canWrite;
   const attachment = useFeedbackAttachment({
     boardId,
     createCommandId,
     onAttachThread,
-    attachmentMode,
   });
 
   const command = useFeedbackCommand({
@@ -159,7 +149,12 @@ export function useFeedbackSurface({
     onApplied(result, operation, attach) {
       queries.refresh();
       if (operation.kind === 'create') {
-        setSelection({ id: result.threadId, placement: 'pin', draftTarget: operation.anchor });
+        setSelection({
+          id: result.threadId,
+          placement: 'pin',
+          draftTarget: operation.anchor,
+          draftPoint: contentLocation.draftPoint ?? createDraft?.frozenPoint,
+        });
         setCreateDraft(undefined);
         setDraftOpen(false);
         setDraftTargetConflict(false);
@@ -268,11 +263,12 @@ export function useFeedbackSurface({
     anchor,
     enabled: !viewing,
     singleKeys: singleKeys && canWrite,
+    cancelOutsideCanvas: annotating,
     onBegin: handleStartPicking,
     onCancel: handleEscape,
   });
 
-  function startDraft(target: FeedbackTarget) {
+  function startDraft(target: FeedbackTarget, excerpt?: string) {
     if (!canWrite || blocked) {
       return;
     }
@@ -280,9 +276,14 @@ export function useFeedbackSurface({
     setDraftTargetConflict(composing);
     if (!composing) {
       setCreateDraft({
+        locationId: 'feedback-draft:' + ++draftSequence.current,
         target,
         text: '',
-        label: draftLabel(target, objectsById),
+        label: describeFeedbackTarget(
+          target,
+          target.kind === 'board' ? undefined : objectsById.get(target.objectId),
+        ),
+        excerpt: feedbackDraftExcerpt(excerpt),
         frozenPoint: locateDraft(target, objectsById),
       });
     }
@@ -322,7 +323,9 @@ export function useFeedbackSurface({
     requestDraft(annotationRequest);
   }, [annotationRequest, canWrite]);
 
-  const requestContent = useEffectEvent((target: FeedbackContentTarget) => startDraft(target));
+  const requestContent = useEffectEvent((target: FeedbackContentTarget, excerpt?: string) =>
+    startDraft(target, excerpt),
+  );
   useEffect(() => {
     if (
       !contentAnnotationRequest ||
@@ -336,7 +339,7 @@ export function useFeedbackSurface({
     queueMicrotask(() => {
       if (current) {
         handledContent.current = contentAnnotationRequest.sequence;
-        requestContent(contentAnnotationRequest.target);
+        requestContent(contentAnnotationRequest.target, contentAnnotationRequest.excerpt);
       }
     });
 
@@ -409,7 +412,6 @@ export function useFeedbackSurface({
     }
   }
 
-  const draftShown = annotating && draftOpen && !panelOpen;
   const selectedPin = selection?.placement === 'pin' && !panelOpen;
   const expandedId = selection?.placement === 'list' && panelOpen ? activeThreadId : undefined;
   const picking = annotating && canWrite && !blocked;
@@ -424,6 +426,8 @@ export function useFeedbackSurface({
     expandedId,
     activeThreadId,
     draftShown,
+    draftPoint: contentLocation.draftPoint,
+    awaitingPostedPoint: contentLocation.awaitingPostedPoint,
     draftTargetConflict,
     createDraft,
     threadDraft,

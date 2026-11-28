@@ -65,14 +65,12 @@ function collectSources(payloads: readonly PayloadRecord[], format: ExportRender
         break;
       case 'video':
         addAssetSource(sources, data.poster);
-        if (fullContent) {
+        if (fullContent || !data.poster) {
           addAssetSource(sources, data.src);
         }
         break;
       case 'document':
-        if (fullContent) {
-          documentAssets(sources, data.blocks);
-        }
+        documentAssets(sources, data.blocks);
         break;
       case 'embed':
         embedAssets(sources, data.html);

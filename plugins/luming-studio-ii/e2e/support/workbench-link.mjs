@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 const runtimes = new WeakMap();
 const requireServer = createRequire(new URL("../../apps/server/package.json", import.meta.url));
 const clipboardBinding = "captureStudioWorkbenchLink";
+const invitationRoles = new Set(["viewer", "commenter", "editor"]);
 
 export function registerWorkbenchLinkRuntime(studio, runtime) {
   runtimes.set(studio, runtime);
@@ -21,7 +22,7 @@ async function readInitialSharing(runtime, boardId) {
   assert.equal(result.ok, true, "Initial sharing state is available");
   const { enabled, access, links } = result.data;
 
-  return { enabled, scope: access, viewerUrl: links?.viewer };
+  return { enabled, scope: access, links };
 }
 
 async function readCurrentSharing(runtime, boardId) {
@@ -38,19 +39,29 @@ async function readCurrentSharing(runtime, boardId) {
   assert.equal(response.status, 200, "Read Studio II sharing state");
   const { sharing } = fromBinary(method.output, new Uint8Array(await response.arrayBuffer()));
   assert.ok(sharing, "Studio II sharing state is available");
-  const viewer = sharing.links.find(({ role, enabled }) => role === SharingRole.VIEWER && enabled);
+  const roles = new Map([
+    [SharingRole.VIEWER, "viewer"],
+    [SharingRole.COMMENTER, "commenter"],
+    [SharingRole.EDITOR, "editor"],
+  ]);
+  const links = Object.fromEntries(
+    sharing.links
+      .filter(({ role, enabled }) => enabled && roles.has(role))
+      .map(({ role, url }) => [roles.get(role), url]),
+  );
 
   return {
     enabled: sharing.enabled,
     scope: sharing.scope === SharingScope.LOCAL ? "local" : "lan",
-    viewerUrl: viewer?.url,
+    links,
   };
 }
 
-function verifiedViewerLink(copied, state, boardId, edition) {
+function verifiedGuestLink(copied, state, boardId, edition, role) {
+  assert.ok(invitationRoles.has(role), "Expected a supported invitation role");
   assert.ok(
-    copied && copied === state.viewerUrl,
-    "Clipboard must contain this board's viewer link",
+    copied && copied === state.links?.[role],
+    "Clipboard must contain this board's invitation link for the requested role",
   );
   const url = URL.parse(copied);
   const boardKey = edition === "initial" ? "artifactId" : "board";
@@ -97,16 +108,17 @@ export async function workbenchLinkProbe({ page, browser, studio }) {
       const { enabled, scope } = await readSharing(board);
       return { enabled, scope };
     },
-    async checkpoint(board) {
+    async checkpoint(board, role = "viewer") {
       const state = await readSharing(board);
       const copied = copies.at(-1);
-      verifiedViewerLink(copied, state, board.id, studio.edition);
-      return { scope: state.scope, role: "viewer", sameAsFirst: copied === copies[0] };
+      verifiedGuestLink(copied, state, board.id, studio.edition, role);
+
+      return { scope: state.scope, role, sameAsFirst: copied === copies[0] };
     },
-    async openGuest(board) {
+    async openGuest(board, { role = "viewer", viewport } = {}) {
       const state = await readSharing(board);
-      const invite = verifiedViewerLink(copies.at(-1), state, board.id, studio.edition);
-      const guestContext = await browser.newContext({ locale: "zh-CN" });
+      const invite = verifiedGuestLink(copies.at(-1), state, board.id, studio.edition, role);
+      const guestContext = await browser.newContext({ locale: "zh-CN", viewport });
       contexts.add(guestContext);
       const guest = await guestContext.newPage();
       await guest

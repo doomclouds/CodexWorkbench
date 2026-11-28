@@ -39,15 +39,13 @@
 }
 
 .board-suggestion-panel__list,
-.board-suggestion-review,
-.board-suggestion-attachment {
+.board-suggestion-review {
   display: grid;
   gap: 0.5rem;
 }
 
 .board-suggestion-panel__list:empty,
-.board-suggestion-review:empty,
-.board-suggestion-attachment:not(:has(button, [role='status'], [role='alert'])) {
+.board-suggestion-review:empty {
   display: none;
 }
 

@@ -9,6 +9,7 @@ import {
   readFile,
   realpath,
   rm,
+  writeFile,
 } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -467,12 +468,51 @@ async function verifySuggestionRoundtrip(client, sessionId, rpc, reviewBoard, da
   );
 }
 
-async function protocolSmoke(client, dataRoot) {
+async function verifyGuestAssetRefresh(rpc, boardId, install) {
+  const { BoardSharingService, SharingScope } = requireServer(
+    '@codexworkbench/luming-studio-ii-contracts/sharing/service',
+  );
+  const { getBoardSharing, updateBoardSharing } = BoardSharingService.method;
+  const current = await rpc(BoardSharingService, getBoardSharing, { boardId });
+  await rpc(BoardSharingService, updateBoardSharing, {
+    boardId,
+    commandId: 'runtime-refresh-probe',
+    expectedVersion: current.sharing.version,
+    operation: { case: 'setScope', value: { scope: SharingScope.LOCAL } },
+  });
+  const next = await rpc(BoardSharingService, getBoardSharing, { boardId });
+  const invite = new URL(next.sharing.links.find(({ enabled, url }) => enabled && url)?.url);
+  assert.equal(invite.protocol, 'http:');
+  assert.equal(invite.hostname, '127.0.0.1');
+
+  const entry = new URL('/', invite);
+  const filename = 'runtime-refresh-probe.js';
+  const asset = new URL('/assets/' + filename, invite);
+  const load = (url) => fetch(url, { signal: AbortSignal.timeout(5000) });
+  assert.equal((await load(entry)).status, 200);
+  assert.equal((await load(asset)).status, 404);
+
+  const web = join(install, 'runtime', 'web');
+  const javascript = 'export const refreshed = true;\n';
+  await writeFile(join(web, 'assets', filename), javascript);
+  await writeFile(join(web, 'index.html'), `<html><script src="/assets/${filename}"></script></html>`);
+  const replaced = await load(entry);
+  assert.equal(replaced.status, 200);
+  const html = await replaced.text();
+  assert.ok(html.includes('data-studio-guest-entry="true"') && html.includes(filename));
+  const updated = await load(asset);
+  assert.equal(updated.status, 200);
+  assert.match(updated.headers.get('content-type') ?? '', /^text\/javascript/u);
+  assert.equal(await updated.text(), javascript);
+}
+
+async function protocolSmoke(client, dataRoot, install) {
   const sessionId = await openWorkbench(client);
   const rpc = createAppRpc(client, sessionId);
   const boardId = await verifyBoardRoundtrip(client, sessionId, rpc);
   const reviewBoard = await verifyArchiveRoundtrip(client, sessionId);
   await verifySuggestionRoundtrip(client, sessionId, rpc, reviewBoard, dataRoot);
+  await verifyGuestAssetRefresh(rpc, boardId, install);
   await client.callTool({
     name: 'studio_app_request',
     arguments: { version: 1, action: 'close', sessionId },
@@ -555,7 +595,7 @@ async function verifyRuntime() {
     await copyFile(join(pluginRoot, 'mcp.json'), join(install, 'mcp.json'));
     await client.connect(transport());
     assert.deepEqual(client.getServerVersion(), { name: 'luming-studio-ii', version });
-    const boardId = await protocolSmoke(client, data);
+    const boardId = await protocolSmoke(client, data, install);
     assert.ok(boardId);
     const servicePath = join(data, 'service.json');
     const { pid } = JSON.parse(await readFile(servicePath, 'utf8'));
