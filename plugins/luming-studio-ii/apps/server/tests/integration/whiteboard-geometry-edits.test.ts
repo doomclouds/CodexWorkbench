@@ -771,6 +771,86 @@ test('publishes an authoritative layer order and rejects a stale expected board 
   ]);
 });
 
+test('treats layer changes at the stack boundary as replayable no-ops without advancing history', async () => {
+  const sendToBack: Operation = {
+    case: 'reorder',
+    value: {
+      targets: [target(shapeId)],
+      direction: BoardLayerDirection.BACK,
+      expectedBoardRevision: 0n,
+    },
+  };
+  const before = await currentScene();
+  const response = await edit('already-bottom', sendToBack);
+  expect(applied(response.receipt)).toMatchObject({ boardRevision: 0n, objectOrder: [] });
+  expect(await currentScene()).toEqual(before);
+
+  await server.restart();
+
+  expect(await edit('already-bottom', sendToBack)).toEqual(response);
+  expect(await currentScene()).toEqual(before);
+});
+
+test('unlocks selected protected ancestors with their children in one geometry transaction', async () => {
+  const parent = 'joint-unlock-section';
+  const nested = 'joint-unlock-nested';
+  const child = 'joint-unlock-child';
+  const area = { ...box, width: 500, height: 400 };
+
+  function section(objectId: string, parentId?: string): Operation {
+    return {
+      case: 'create',
+      value: {
+        object: {
+          objectId,
+          kind: 'section',
+          label: objectId,
+          geometry: area,
+          parentId,
+          geometryDetail: { case: 'section', value: { transparent: true } },
+        },
+      },
+    };
+  }
+
+  applied((await edit('make-joint-parent', section(parent))).receipt);
+  applied((await edit('make-joint-nested', section(nested, parent))).receipt);
+  const shape = createShape(child);
+  assert.ok(shape.value.object);
+  shape.value.object.parentId = nested;
+  applied((await edit('make-joint-child', shape)).receipt);
+  for (const id of [child, nested, parent]) {
+    applied((await edit('lock-' + id, lock(id, 0n, true))).receipt);
+  }
+
+  const before = await currentScene();
+  function unlock(ids: readonly string[]): Operation {
+    return {
+      case: 'changeLock',
+      value: { targets: ids.map((id) => target(id, 1n)), locked: false },
+    };
+  }
+
+  const partial = await edit('unlock-only-descendants', unlock([child, nested]));
+  expect(partial.receipt?.outcome).toMatchObject({
+    case: 'rejected',
+    value: { reason: BoardEditRejectionReason.GEOMETRY_LOCKED },
+  });
+  expect(await currentScene()).toEqual(before);
+
+  const complete = applied(
+    (await edit('unlock-parent-chain', unlock([child, nested, parent]))).receipt,
+  );
+  expect(complete.boardRevision).toBe(7n);
+  expect(complete.changedObjects).toHaveLength(3);
+  for (const objectId of [child, nested, parent]) {
+    expect(complete.changedObjects.find((object) => object.objectId === objectId)).toMatchObject({
+      locked: false,
+      geometryVersion: 2n,
+    });
+  }
+});
+
 test('blocks the existing MoveObjects route while an attached connector is geometry locked', async () => {
   const connectorId = 'move-lock-link';
   applied(

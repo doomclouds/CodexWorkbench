@@ -1,3 +1,4 @@
+import { useCallback } from 'react';
 import { StatusText } from '../../../base/index.js';
 import type { CanvasObjectExtension, CanvasObjectViewProps } from '../../canvas/index.js';
 import type {
@@ -6,13 +7,16 @@ import type {
   DocumentCommit,
   DocumentCommitResult,
   DocumentDraft,
+  DocumentExportFormat,
   DocumentNoteSource,
   DocumentValue,
 } from './contracts.js';
 import { exportDocumentFile, resolveDocumentAsset } from './document-export.js';
 import { canvasDocumentPaper, defaultDocumentPaper } from './document-paper.js';
 import { DocumentObject } from './DocumentObject.js';
+import { DocumentReadIcon } from './DocumentToolbar.js';
 import { documentTreeDepth, isRecord } from './model.js';
+import './document-object.css';
 
 const blockTypes = new Set([
   'paragraph',
@@ -80,6 +84,25 @@ function DocumentCanvasView({
   geometry,
   zoom,
 }: CanvasObjectViewProps) {
+  const resolveImage = useCallback(
+    (source: string, signal: AbortSignal) =>
+      resolveDocumentAsset(source, signal, readDocumentAsset),
+    [readDocumentAsset],
+  );
+
+  if (id === undefined && !payload) {
+    return (
+      <div
+        className="studio-document-placement-preview"
+        style={{ fontSize: Math.max(14, 11 / zoom) }}
+        aria-hidden="true"
+      >
+        <DocumentReadIcon />
+        {object.label}
+      </div>
+    );
+  }
+
   const value = readDocument(payload?.value);
   if (!value) {
     return <StatusText message="暂未取得文档正文" announcement="polite" />;
@@ -116,7 +139,11 @@ function DocumentCanvasView({
     onRetentionChange?.(busy || mode !== 'inline');
   }
 
-  async function handleExport(format: 'html' | 'json', draft: DocumentDraft, signal: AbortSignal) {
+  async function handleExport(
+    format: DocumentExportFormat,
+    draft: DocumentDraft,
+    signal: AbortSignal,
+  ) {
     const file = await exportDocumentFile(format, draft, {
       paper,
       readAsset: readDocumentAsset,
@@ -130,10 +157,6 @@ function DocumentCanvasView({
 
   function handleAnnotate({ blockIds, u, v }: DocumentNoteSource) {
     onAnnotateContent?.({ target: { kind: 'document', blockIds }, u, v });
-  }
-
-  function resolveImage(source: string, signal: AbortSignal) {
-    return resolveDocumentAsset(source, signal, readDocumentAsset);
   }
 
   return (
@@ -163,7 +186,14 @@ function DocumentCanvasView({
 
 export const documentExtension = {
   kind: 'document',
-  capabilities: { content: 'native', move: true, resize: true, rotate: false, connect: true },
+  capabilities: {
+    content: 'native',
+    move: true,
+    resize: true,
+    rotate: false,
+    connect: true,
+    managesAnnotationEditing: true,
+  },
   placement: {
     kind: 'document',
     label: '文档',

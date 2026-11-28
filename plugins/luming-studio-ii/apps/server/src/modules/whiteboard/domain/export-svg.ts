@@ -1,3 +1,7 @@
+import {
+  connectionPathData,
+  connectorArrowPoints,
+} from '@codexworkbench/luming-studio-ii-contracts/whiteboard/connector-route';
 import { exportConnector, finitePoint, geometryCorners } from './export-geometry.js';
 import { embedMarkup } from './export-html-content.js';
 import { escapeXml, svgContent, svgLabel } from './export-svg-content.js';
@@ -55,32 +59,26 @@ export function expandFrame(frame: ExportFrame | undefined, points: readonly Poi
 
 function arrowHead(
   head: ConnectorHead | undefined,
-  tip: Point | undefined,
-  previous: Point | undefined,
+  points: readonly Point[],
+  atStart: boolean,
   stroke: string,
   width: number,
 ): string {
-  if (!tip || !previous) {
+  if (!head || head === 'none' || points.length < 2) {
     return '';
   }
-  if (!head || head === 'none') {
-    return '';
-  }
+
   if (head === 'circle') {
+    const tip = atStart ? points[0]! : points.at(-1)!;
     return `<circle cx="${tip.x}" cy="${tip.y}" r="${2 * width}" fill="${stroke}"/>`;
   }
 
-  const distance = Math.hypot(tip.x - previous.x, tip.y - previous.y);
-  if (distance === 0) {
+  const arrow = connectorArrowPoints(points, atStart, width);
+  if (!arrow) {
     return '';
   }
 
-  const dx = (tip.x - previous.x) / distance;
-  const dy = (tip.y - previous.y) / distance;
-  const back = Math.min(distance, 5 * width);
-  const side = 2.5 * width;
-  const left = { x: tip.x - dx * back - dy * side, y: tip.y - dy * back + dx * side };
-  const right = { x: tip.x - dx * back + dy * side, y: tip.y - dy * back - dx * side };
+  const [left, tip, right] = arrow;
 
   return `<path d="M ${tip.x} ${tip.y} L ${left.x} ${left.y} L ${right.x} ${right.y} Z" fill="${stroke}"/>`;
 }
@@ -100,17 +98,16 @@ function connectorMarkup(
   }
 
   const { points, label } = route;
-  const coordinates = points.map(({ x, y }) => `${x},${y}`).join(' ');
   const stroke = svgColor(object.appearance?.stroke, '#4f5d75');
   const width = svgStrokeWidth(object.appearance?.strokeWidth, 2);
   const dash = object.appearance?.dashed ? ' stroke-dasharray="6 5"' : '';
-  const start = arrowHead(detail.startHead, points[0], points[1], stroke, width);
-  const end = arrowHead(detail.endHead ?? 'arrow', points.at(-1), points.at(-2), stroke, width);
+  const start = arrowHead(detail.startHead, points, true, stroke, width);
+  const end = arrowHead(detail.endHead ?? 'arrow', points, false, stroke, width);
   const caption = escapeXml(object.label);
   const text = caption
     ? `<text x="${label.x}" y="${label.y - 4}" text-anchor="middle" font-size="13" fill="#2d3142">${caption}</text>`
     : '';
-  const line = `<polyline points="${coordinates}" fill="none" stroke="${stroke}" stroke-width="${width}" stroke-linejoin="round"${dash}/>`;
+  const line = `<path d="${connectionPathData(points)}" fill="none" stroke-linecap="round" stroke="${stroke}" stroke-width="${width}" stroke-linejoin="round"${dash}/>`;
 
   return { value: line + start + end + text, bounds: [...points, label] };
 }

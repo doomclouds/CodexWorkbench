@@ -134,6 +134,7 @@ export type ContentPayloadPlan =
       readonly label: string;
       readonly data: JsonObject;
       readonly geometryWidth?: number;
+      readonly geometryHeight?: number;
       readonly requiresGeometryUnlock?: boolean;
     }
   | { readonly kind: 'rejected'; readonly reason: ContentEditRejection };

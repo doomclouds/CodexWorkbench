@@ -14,6 +14,7 @@ interface PresentationOptions {
   readonly onRestore: (viewport: CanvasViewport) => void;
   readonly onFit: () => void;
   readonly focusCanvas: () => void;
+  readonly findViewingTrigger: () => HTMLButtonElement | undefined;
 }
 
 function presentationScope(objects: PresentationOptions['objects'], objectIds: readonly string[]) {
@@ -33,6 +34,7 @@ export function useBoardPresentation({
   onRestore,
   onFit,
   focusCanvas,
+  findViewingTrigger,
 }: PresentationOptions) {
   const [watching, setWatching] = useState<WatchingBoard | undefined>(() =>
     initialFocus && objects.has(initialFocus.id)
@@ -79,9 +81,10 @@ export function useBoardPresentation({
     setWatching(undefined);
     onRestore(watching.viewport);
     afterLayout(() => {
-      if (watching.trigger?.isConnected) {
-        watching.trigger.focus({ preventScroll: true });
-      } else {
+      const origin = watching.trigger;
+      const trigger = origin?.isConnected ? origin : origin && findViewingTrigger();
+      trigger?.focus({ preventScroll: true });
+      if (!trigger || trigger.ownerDocument.activeElement !== trigger) {
         focusCanvas();
       }
     });

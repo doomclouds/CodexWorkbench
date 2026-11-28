@@ -270,12 +270,14 @@ test("[WB-EDGE-03] 点击端口快建，单次撤销和重做一起移除或还�
   studio,
 }, testInfo) => {
   const board = await studio.seedBasicBoard({ title: "端口快建白板", objects: [source] });
+  const readCreated = async () =>
+    (await studio.readBoard(board)).objects.filter(({ id }) => id !== source.id);
   await openBoard(page, studio, board, source.id);
   const origin = center((await rendered(page, studio, source.id)).box);
   await page.mouse.click(origin.x, origin.y);
   await button(page, names[studio.edition].port).click();
   await expect.poll(async () => (await studio.readBoard(board)).objects.length).toBe(3);
-  const created = (await studio.readBoard(board)).objects.filter(({ id }) => id !== source.id);
+  const created = await readCreated();
   const addedShape = created.find(({ kind }) => kind === "shape");
   const addedConnection = created.find(({ kind }) => kind === "connector");
   expect(addedConnection).toMatchObject({
@@ -298,9 +300,23 @@ test("[WB-EDGE-03] 点击端口快建，单次撤销和重做一起移除或还�
     .toEqual([source.id]);
   await screenshot(page, testInfo, "adjacent-shape-undone");
   await useHistory(page, "重做");
+  const savedState = ({ geometryVersion, payloadVersion, version, ...content }) => ({
+    content,
+    geometryVersion,
+    payloadVersion,
+    version,
+  });
+  const createdState = created.map(savedState);
   await expect
-    .poll(async () => (await studio.readBoard(board)).objects.filter(({ id }) => id !== source.id))
-    .toEqual(created);
+    .poll(async () => (await readCreated()).map((object) => savedState(object).content))
+    .toEqual(createdState.map(({ content }) => content));
+  const redone = (await readCreated()).map(savedState);
+  for (const [index, restored] of redone.entries()) {
+    const original = createdState[index];
+    expect(restored.geometryVersion).toBeGreaterThan(original.geometryVersion);
+    expect(restored.payloadVersion).toBeGreaterThan(original.payloadVersion);
+    expect(restored.version).toBeGreaterThan(original.version);
+  }
   await page.reload();
   await expect
     .poll(async () => (await readCanvas(page, studio)).objects.map(({ id }) => id).sort())

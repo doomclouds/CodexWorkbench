@@ -5,6 +5,7 @@ import type {
 } from '../../../src/ui/domain/canvas/contracts.js';
 import {
   canvasHitBounds,
+  expandCanvasSelection,
   hitTest,
   marqueeSelection,
   selectObject,
@@ -106,6 +107,21 @@ describe('canvas selection', () => {
     expect(selectObject(selection, 'third', true)).toEqual(['first', 'second', 'third']);
     expect(selectObject(selection, 'first', true)).toEqual(['second']);
     expect(selection).toEqual(['first', 'second']);
+  });
+
+  it('copies directly selected locked objects without expanding into unselected locked members', () => {
+    const groupId = 'group';
+    const free = { ...projectedObject('free').object, groupId };
+    const locked = { ...projectedObject('locked').object, groupId, locked: true };
+    const frame = { ...projectedSection(true).object, locked: true };
+    const child = { ...projectedObject('child').object, parentId: frame.id };
+    const objects = [free, locked, frame, child];
+
+    expect(expandCanvasSelection(objects, ['free'], 'copy')).toEqual(['free']);
+    expect(expandCanvasSelection(objects, ['locked'], 'copy')).toEqual(['locked', 'free']);
+    expect(expandCanvasSelection(objects, ['free', 'locked'], 'copy')).toEqual(['free', 'locked']);
+    expect(expandCanvasSelection(objects, ['child'], 'copy')).toEqual(['child']);
+    expect(expandCanvasSelection(objects, ['free', 'locked', 'child'])).toEqual(['free']);
   });
 
   it('lets a topmost transparent section pass interior hits through to lower objects', () => {

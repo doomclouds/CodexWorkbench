@@ -49,6 +49,7 @@ interface CanvasObjectsProps {
   nativeSourceLabel?: CanvasProps['nativeSourceLabel'];
   nativeSourceRequest?: CanvasProps['nativeSourceRequest'];
   annotationActive?: CanvasProps['annotationActive'];
+  hasContentEditPermission?: CanvasProps['hasContentEditPermission'];
   onAnnotateContent?: CanvasProps['onAnnotateContent'];
   contentTracking?: CanvasProps['contentTracking'];
   isLocked?: (id: string) => boolean;
@@ -73,6 +74,7 @@ interface CanvasRenderedObjectProps {
   singleSelected?: boolean;
   embedActive?: boolean;
   canEdit?: boolean;
+  canEditContent?: boolean;
   locked?: boolean;
   editRequest?: number;
   formatRequest?: CanvasObjectViewProps['formatRequest'];
@@ -191,6 +193,10 @@ function usesOwnedFrame(
   return Boolean(view && payload) && ownedFrameKinds.has(kind);
 }
 
+function managesAnnotationEditing(extension: CanvasObjectExtension | undefined, enabled: boolean) {
+  return enabled && extension?.capabilities.managesAnnotationEditing === true;
+}
+
 const CanvasObjectView = memo(
   ({
     object,
@@ -205,6 +211,7 @@ const CanvasObjectView = memo(
     singleSelected,
     embedActive = false,
     canEdit = false,
+    canEditContent,
     locked,
     editRequest,
     formatRequest,
@@ -247,7 +254,7 @@ const CanvasObjectView = memo(
       embedActive,
       nativeActive,
     );
-    const readOnly = !canEdit || !onObjectIntent;
+    const readOnly = !canEditContent || !onObjectIntent;
     const ownsFrame = usesOwnedFrame(object.kind, View, payload);
     const focusedAttribute = focusedReading ? '' : undefined;
     const body = View ? (
@@ -310,6 +317,7 @@ const CanvasObjectView = memo(
           inert={inert}
           ownsFrame={ownsFrame}
           canEdit={canEdit}
+          locked={locked === true}
           selected={selected}
           mode={mode}
           Frame={frame?.Frame}
@@ -364,6 +372,7 @@ export function CanvasObjects({
   nativeSourceRequest,
   annotationActive,
   onAnnotateContent,
+  hasContentEditPermission,
   contentTracking = emptyContentTracking,
   isLocked,
   canWriteObject = () => true,
@@ -376,6 +385,7 @@ export function CanvasObjects({
   const selectedIds = useMemo(() => new Set(selection), [selection]);
   const annotateEmbeds = Boolean(annotationActive && onAnnotateContent);
   const documentTools = { readDocumentAsset, uploadDocumentImage };
+  const allowManagedAnnotation = Boolean(annotationActive && hasContentEditPermission);
   const single = selection.length === 1;
   const formatRequest =
     selection.length === 1 && selectedIds.has(formatObjectRequest?.id ?? '')
@@ -388,6 +398,8 @@ export function CanvasObjects({
     const expanded = id === expandedObjectId;
     const focused = id === focusObjectId;
     const selected = selectedIds.has(id);
+    const editable = canEdit || Boolean(expanded && canEditExpandedObject);
+    const annotationAuthority = managesAnnotationEditing(extension, allowManagedAnnotation);
     const nativeSource =
       nativeSourceRequest?.source.elementId === id ? nativeSourceRequest : undefined;
 
@@ -407,7 +419,8 @@ export function CanvasObjects({
         embedActive={viewing || id === activeEmbedId || annotateEmbeds}
         focusedReading={focused}
         expanded={expanded}
-        canEdit={canEdit || (expanded && canEditExpandedObject)}
+        canEdit={editable}
+        canEditContent={[editable, annotationAuthority].some(Boolean)}
         locked={locked || isLocked?.(id)}
         editRequest={editRequest?.id === id ? editRequest.sequence : undefined}
         formatRequest={allowedFormatRequest(formatRequest, id, extension)}

@@ -69,6 +69,7 @@ export function SuggestionCard({ suggestion, ...interactions }: SuggestionCardPr
           iconOnly
           icon={<X size={15} />}
           label="清除建议，保留已应用内容"
+          tone="danger"
           disabled={busy}
           onActivate={() => onChoose()}
         />

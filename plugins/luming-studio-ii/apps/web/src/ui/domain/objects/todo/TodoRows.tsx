@@ -20,8 +20,9 @@ interface TodoRowsProps extends Pick<
 > {
   session: TodoEditorSession;
   active: boolean;
-  editable: boolean;
+  showsEditControls: boolean;
   annotating: boolean;
+  editsPaused?: boolean;
   onDraggingChange: (dragging: boolean) => void;
 }
 
@@ -69,6 +70,7 @@ function sourceBadge(item: TodoObjectItem, props: TodoRowsProps) {
       type="button"
       title={label}
       aria-label={'打开任务来源：' + label}
+      disabled={props.annotating}
       onClick={() => onOpen(source)}
     >
       <TodoControlIcon icon="link" size={15} />
@@ -83,25 +85,35 @@ function sourceBadge(item: TodoObjectItem, props: TodoRowsProps) {
 }
 
 function taskText(item: TodoObjectItem, props: TodoRowsProps) {
-  const { session, editable, annotating } = props;
+  const { session, showsEditControls, annotating } = props;
   const title = taskLabel(item);
   if (session.draft?.target.kind === 'item' && session.draft.target.id === item.id) {
-    return <TodoTextEditor label="任务文字" session={session} />;
+    return <TodoTextEditor label="任务文字" session={session} paused={props.editsPaused} />;
   }
-  if (editable) {
+  if (showsEditControls) {
     return (
       <Button
-        label={'编辑任务：' + title}
+        label={(annotating ? '备注任务：' : '编辑任务：') + title}
         icon={title}
         iconOnly
         variant="ghost"
-        disabled={!session.writable}
-        onActivate={() => session.start({ kind: 'item', id: item.id }, item.text)}
+        disabled={!annotating && !session.writable}
+        onActivate={
+          annotating ? undefined : () => session.start({ kind: 'item', id: item.id }, item.text)
+        }
       />
     );
   }
   if (annotating) {
-    return <Button label={'备注任务：' + title} icon={title} iconOnly variant="ghost" />;
+    return (
+      <button
+        type="button"
+        className="studio-object-todo__note-target"
+        aria-label={'备注任务：' + title}
+      >
+        <span>{title}</span>
+      </button>
+    );
   }
 
   return <span title={title}>{title}</span>;
@@ -169,7 +181,7 @@ export function TodoRows(props: TodoRowsProps) {
   const {
     session,
     active,
-    editable,
+    showsEditControls,
     annotating,
     onAnnotateContent,
     onAnnotateItem,
@@ -292,7 +304,7 @@ export function TodoRows(props: TodoRowsProps) {
         onPointerDown={annotating ? handleAnnotationPointerDown : undefined}
         onClick={annotating ? (event) => annotate(event, id) : undefined}
       >
-        {editable && (
+        {showsEditControls && (
           <button
             type="button"
             draggable={canReorder}
@@ -308,7 +320,7 @@ export function TodoRows(props: TodoRowsProps) {
           </button>
         )}
         <span className="studio-object-todo__checked">
-          {editable ? (
+          {showsEditControls ? (
             <input
               type="checkbox"
               aria-label={'完成任务：' + label}
@@ -330,7 +342,7 @@ export function TodoRows(props: TodoRowsProps) {
           {taskText(item, props)}
         </div>
         {sourceBadge(item, props)}
-        {editable && (
+        {showsEditControls && (
           <button
             type="button"
             className="studio-object-todo__remove"
@@ -359,13 +371,15 @@ export function TodoRows(props: TodoRowsProps) {
         <ul ref={list} className="studio-object-todo__list" aria-label="任务">
           {items.map(renderItem)}
         </ul>
-        {orphaned && <TodoTextEditor label="任务文字" session={session} />}
-        {(adding || editable) && (
+        {orphaned && (
+          <TodoTextEditor label="任务文字" session={session} paused={props.editsPaused} />
+        )}
+        {(adding || showsEditControls) && (
           <div className="studio-object-todo__add">
             {adding ? (
               <>
                 <TodoControlIcon icon="add" size={18} />
-                <TodoTextEditor label="新增任务" session={session} />
+                <TodoTextEditor label="新增任务" session={session} paused={props.editsPaused} />
               </>
             ) : (
               <Button

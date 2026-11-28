@@ -13,6 +13,7 @@ import {
   layerDirection,
   type GeometryActionContext,
 } from './GeometryBoardMenu.js';
+import type { SelectionLocks } from './organization-selection.js';
 import './geometry-controls.css';
 
 export { GeometryBoardMenu } from './GeometryBoardMenu.js';
@@ -53,17 +54,16 @@ function reorderDirection(event: KeyboardEvent): WhiteboardLayerDirection | unde
 
 function modifiedSelectionAction(
   event: KeyboardEvent,
-  allLocked: boolean,
-  anyLocked: boolean,
+  locks: SelectionLocks,
 ): GeometrySelectionAction | undefined {
   const key = event.key.toLowerCase();
   if (event.shiftKey && key === 'l') {
-    return { kind: 'changeLock', locked: !allLocked };
+    return locks.change && { kind: 'changeLock', locked: locks.change.locked };
   }
   if (!event.shiftKey && key === 'd') {
     return { kind: 'duplicate' };
   }
-  if (anyLocked) {
+  if (locks.ids.size > 0) {
     return undefined;
   }
 
@@ -79,8 +79,7 @@ function modifiedSelectionAction(
 function keyboardAction(
   event: KeyboardEvent,
   canEdit: boolean,
-  allLocked: boolean,
-  anyLocked: boolean,
+  locks: SelectionLocks,
 ): GeometrySelectionAction | undefined {
   if (!canEdit) {
     return undefined;
@@ -88,9 +87,9 @@ function keyboardAction(
 
   const command = event.ctrlKey || event.metaKey;
   if (command && !event.altKey) {
-    return modifiedSelectionAction(event, allLocked, anyLocked);
+    return modifiedSelectionAction(event, locks);
   }
-  if (command || anyLocked) {
+  if (command || locks.ids.size > 0) {
     return undefined;
   }
 
@@ -102,6 +101,16 @@ function keyboardAction(
 
   const deletion = event.key === 'Delete' || event.key === 'Backspace';
   return deletion && !event.altKey ? { kind: 'delete' } : undefined;
+}
+
+function lockControl(locks: SelectionLocks) {
+  if (!locks.change) {
+    return { label: '由分区锁定', title: '请先解锁上级分区' };
+  }
+
+  return locks.change.locked
+    ? { label: '锁定元素', title: '锁定位置与尺寸（仍可编辑内容）' }
+    : { label: '解锁元素', title: '解锁位置与尺寸' };
 }
 
 function acceptsSelectionShortcut(event: KeyboardEvent) {
@@ -121,6 +130,7 @@ function acceptsSelectionShortcut(event: KeyboardEvent) {
 
 export function GeometrySelectionActions({
   selection,
+  locks,
   canEdit,
   onAction,
   onFit,
@@ -138,11 +148,10 @@ export function GeometrySelectionActions({
   }
 
   const ids = selection.map(({ id }) => id);
-  const allLocked = selection.every(({ locked }) => locked);
-  const anyLocked = selection.some(({ locked }) => locked);
-  const canChangeLayer = canEdit && !anyLocked;
-  const lockLabel = allLocked ? '解锁元素' : '锁定元素';
-  const LockIcon = allLocked ? LockOpen : Lock;
+  const allLocked = locks.ids.size === ids.length;
+  const canChangeLayer = canEdit && locks.ids.size === 0;
+  const lock = lockControl(locks);
+  const LockIcon = locks.change?.locked === false ? LockOpen : Lock;
 
   const selectionShortcut = useEffectEvent((event: KeyboardEvent) => {
     if (ids.length === 0 || !acceptsSelectionShortcut(event)) {
@@ -157,11 +166,12 @@ export function GeometrySelectionActions({
       return;
     }
 
-    const action = keyboardAction(event, canEdit, allLocked, anyLocked);
+    const action = keyboardAction(event, canEdit, locks);
     const needsMultiple = action?.kind === 'group' || action?.kind === 'arrange';
     if (action && (!needsMultiple || ids.length > 1)) {
       event.preventDefault();
-      onAction(action, ids);
+      const targets = action.kind === 'changeLock' ? (locks.change?.ids ?? []) : ids;
+      onAction(action, targets);
     } else if (event.key === 'F2' && canEdit && onRenameSection) {
       event.preventDefault();
       onRenameSection();
@@ -234,11 +244,14 @@ export function GeometrySelectionActions({
       <button
         type="button"
         className="whiteboard-editor__selection-icon whiteboard-editor__lock"
-        aria-label={lockLabel}
-        title={allLocked ? '解锁位置与尺寸' : '锁定位置与尺寸（仍可编辑内容）'}
+        aria-label={lock.label}
+        title={lock.title}
         aria-pressed={allLocked}
-        disabled={!canEdit}
-        onClick={() => onAction({ kind: 'changeLock', locked: !allLocked }, ids)}
+        disabled={!canEdit || !locks.change}
+        onClick={() =>
+          locks.change &&
+          onAction({ kind: 'changeLock', locked: locks.change.locked }, locks.change.ids)
+        }
       >
         <LockIcon size={18} />
       </button>
@@ -258,6 +271,7 @@ export function GeometrySelectionActions({
         type="button"
         className="whiteboard-editor__selection-icon"
         aria-label="更多操作"
+        data-canvas-toolbar-primary-action=""
         title="更多操作"
         aria-haspopup="menu"
         aria-expanded={moreOpen || menu?.kind === 'more'}
@@ -279,6 +293,7 @@ export function GeometrySelectionActions({
         <GeometryBoardMenu
           anchor={menu.anchor}
           selection={selection}
+          locks={locks}
           canEdit={canEdit}
           onAction={onAction}
           onFit={onFit}

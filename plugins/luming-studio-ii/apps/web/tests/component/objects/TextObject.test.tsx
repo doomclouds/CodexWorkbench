@@ -87,7 +87,7 @@ describe('registered canvas text objects', () => {
     await act(async () =>
       root.render(<CanvasText {...props} request={request} onRetentionChange={retention} />),
     );
-    expect(retention).not.toHaveBeenCalled();
+    expect(retention.mock.calls).toEqual([[true]]);
     await replaceText('');
     expect(retention.mock.calls).toEqual([[true]]);
     await key('Escape');
@@ -95,7 +95,7 @@ describe('registered canvas text objects', () => {
     expect(request).toHaveBeenCalledExactlyOnceWith({
       expectedVersion: 12,
       name: 'text.commit',
-      value: { text: '', adjacent: false, close: true },
+      value: { text: '', baseText: '已保存内容', adjacent: false, close: true },
     });
     expect(host.querySelector('[role="textbox"]')).toBeNull();
     expect(host.textContent).toBe('');
@@ -116,7 +116,7 @@ describe('registered canvas text objects', () => {
     expect(request).toHaveBeenCalledExactlyOnceWith({
       name: 'text.commit',
       expectedVersion: 0,
-      value: { text: '', close: true, adjacent: false },
+      value: { text: '', baseText: '', close: true, adjacent: false },
     });
     expect(host.querySelector('[role="textbox"]')).toBeNull();
     expect(host.querySelector('[role="alert"]')).toBeNull();
@@ -145,6 +145,7 @@ describe('registered canvas text objects', () => {
     expect(request.mock.calls[1]).toEqual(request.mock.calls[0]);
     expect(host.querySelector('[role="alert"]')?.textContent).toBe('原文字刚被其他成员更新');
     expect(editor().textContent).toBe('');
+    expect(host.textContent).not.toContain('重试保存文字');
     await act(async () => clickButton('放弃文字修改'));
     expect(host.textContent).toBe('他人新稿');
   });
@@ -173,7 +174,7 @@ describe('registered canvas text objects', () => {
     expect(request).toHaveBeenCalledExactlyOnceWith({
       name: 'text.commit',
       expectedVersion: 12,
-      value: { text: '确认连接', close: true, adjacent: false },
+      value: { text: '确认连接', baseText: '已保存内容', close: true, adjacent: false },
     });
     expect(host.textContent).toBe('确认连接');
   });
@@ -198,7 +199,7 @@ describe('registered canvas text objects', () => {
     expect(request).toHaveBeenNthCalledWith(2, {
       expectedVersion: 12,
       name: 'text.commit',
-      value: { text: '我的新内容', adjacent: true, close: true },
+      value: { text: '我的新内容', baseText: '已保存内容', adjacent: true, close: true },
     });
 
     await act(async () => clickButton('放弃文字修改'));
@@ -225,7 +226,7 @@ describe('registered canvas text objects', () => {
     expect(request).toHaveBeenCalledWith({
       expectedVersion: 12,
       name: 'text.commit',
-      value: { text: '已保存内容', adjacent: true, close: true },
+      value: { text: '已保存内容', baseText: '已保存内容', adjacent: true, close: true },
     });
     expect(retention.mock.calls).toEqual([[true]]);
 
@@ -254,7 +255,7 @@ describe('registered canvas text objects', () => {
     expect(request).toHaveBeenCalledExactlyOnceWith({
       expectedVersion: 13,
       name: 'text.commit',
-      value: { text: '确认内容', adjacent: false, close: true },
+      value: { text: '确认内容', baseText: '远端新内容', adjacent: false, close: true },
     });
     expect(host.textContent).toBe('确认内容');
   });
@@ -281,10 +282,11 @@ describe('registered canvas text objects', () => {
       expect(request).toHaveBeenCalledExactlyOnceWith({
         name: 'text.commit',
         expectedVersion: 12,
-        value: { text: '第一稿', adjacent: false, close: false },
+        value: { text: '第一稿', baseText: '已保存内容', adjacent: false, close: false },
       });
       expect(editor()).toBe(originalEditor);
       expect(document.activeElement).toBe(originalEditor);
+      expect(host.textContent).not.toContain('正在保存文字');
 
       await replaceText('最后稿');
       await key('Escape');
@@ -299,10 +301,45 @@ describe('registered canvas text objects', () => {
       expect(request).toHaveBeenNthCalledWith(2, {
         name: 'text.commit',
         expectedVersion: 13,
-        value: { text: '最后稿', adjacent: false, close: true },
+        value: { text: '最后稿', baseText: '第一稿', adjacent: false, close: true },
       });
       expect(host.querySelector('[role="textbox"]')).toBeNull();
       expect(host.textContent).toBe('最后稿');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('holds the editing session and uses the confirmed revision for the next keystrokes', async () => {
+    vi.useFakeTimers();
+    try {
+      const props = textViewProps();
+      const retention = vi.fn<(retain: boolean) => void>();
+      const request = vi
+        .fn<TextViewProps['request']>()
+        .mockResolvedValueOnce({ ok: true, payload: { version: 13, value: { text: 'abc' } } })
+        .mockResolvedValueOnce({ ok: true, payload: { version: 14, value: { text: 'abcdef' } } });
+      await act(async () =>
+        root.render(<CanvasText {...props} request={request} onRetentionChange={retention} />),
+      );
+      const originalEditor = editor();
+      await replaceText('abc');
+      await act(async () => vi.advanceTimersByTimeAsync(250));
+
+      expect(retention.mock.calls).toEqual([[true]]);
+      expect(document.activeElement).toBe(originalEditor);
+      await replaceText('abcdef');
+      await act(async () => vi.advanceTimersByTimeAsync(250));
+      expect(request).toHaveBeenNthCalledWith(2, {
+        expectedVersion: 13,
+        name: 'text.commit',
+        value: { text: 'abcdef', baseText: 'abc', close: false, adjacent: false },
+      });
+      expect(document.activeElement).toBe(originalEditor);
+      await key('Escape');
+      expect(retention.mock.calls).toEqual([[true], [false]]);
+      expect(request).toHaveBeenCalledTimes(2);
+      expect(host.textContent).toBe('abcdef');
     } finally {
       vi.useRealTimers();
     }
@@ -337,7 +374,7 @@ describe('registered canvas text objects', () => {
       expect(request).toHaveBeenNthCalledWith(3, {
         name: 'text.commit',
         expectedVersion: 13,
-        value: { text: '最后稿', close: true, adjacent: false },
+        value: { text: '最后稿', baseText: '第一稿', close: true, adjacent: false },
       });
       expect(host.querySelector('[role="textbox"]')).toBeNull();
       expect(host.textContent).toBe('最后稿');
@@ -370,7 +407,7 @@ describe('canvas text object', () => {
     expect(richTextFirstLine(source)).toBe('粗体 斜体 安全 [危险](javascript:alert)');
   });
 
-  it('opens by double click and applies a toolbar mark to the selected range only', async () => {
+  it('opens by double click and applies a keyboard mark without an embedded toolbar', async () => {
     const changed = vi.fn();
     const committed = vi.fn();
 
@@ -404,8 +441,9 @@ describe('canvas text object', () => {
     });
     expect(editor().getAttribute('aria-label')).toBe('编辑便签');
     expect(editor().closest('[data-canvas-native]')).not.toBeNull();
+    expect(host.querySelector('[role="toolbar"]')).toBeNull();
     await select(texts()[0]!, 0, texts()[0]!, 2);
-    await act(async () => clickButton('粗体'));
+    await key('b', { ctrlKey: true });
 
     expect(changed).toHaveBeenLastCalledWith('**便签** 待整理');
     expect(editor().querySelector('strong')?.textContent).toBe('便签');
@@ -416,17 +454,46 @@ describe('canvas text object', () => {
     expect(host.querySelector('strong')?.textContent).toBe('便签');
   });
 
+  it('keeps the draft on focus loss without a destination and commits a real transfer', async () => {
+    const committed = vi.fn();
+    await act(async () =>
+      root.render(
+        <>
+          <TextObject text="正在输入" editing onTextChange={vi.fn()} onCommit={committed} />
+          <button type="button">继续画板操作</button>
+        </>,
+      ),
+    );
+    await act(async () => {
+      editor().dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+    });
+    expect(committed).not.toHaveBeenCalled();
+    expect(editor().textContent).toBe('正在输入');
+
+    await act(async () => host.querySelector('button')?.focus());
+    expect(committed).toHaveBeenCalledExactlyOnceWith(false);
+  });
+
   it('opens the URL field from Ctrl K, rejects unsafe URLs and restores selection after a safe link', async () => {
     const changed = vi.fn();
     const committed = vi.fn();
     await act(async () =>
       root.render(
-        <TextObject text="打开 文档" editing onTextChange={changed} onCommit={committed} />,
+        <div data-canvas-root="">
+          <div data-canvas-world="">
+            <div data-canvas-object="note">
+              <TextObject text="打开 文档" editing onTextChange={changed} onCommit={committed} />
+            </div>
+          </div>
+        </div>,
       ),
     );
     await select(texts()[0]!, 3);
     await key('k', { ctrlKey: true });
-    const field = host.querySelector('input');
+    const dialog = host.querySelector('[role="dialog"][aria-label="文字链接"]');
+    const field = dialog?.querySelector('input');
+    expect(dialog?.parentElement).toBe(host.querySelector('[data-canvas-root]'));
+    expect(host.querySelector('[data-canvas-world] input')).toBeNull();
     expect(document.activeElement).toBe(field);
     expect(field).toBeDefined();
 
@@ -446,12 +513,105 @@ describe('canvas text object', () => {
     expect(changed).not.toHaveBeenCalled();
 
     await fill('https://example.com/todo');
-    await act(async () => clickButton('应用链接'));
+    await act(async () => {
+      field?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
+      );
+    });
     expect(changed).toHaveBeenCalledWith('打开 [文档](https://example.com/todo)');
     expect(host.querySelector('input')).toBeNull();
     expect(document.activeElement).toBe(editor());
     expect(document.getSelection()?.toString()).toBe('文档');
     expect(committed).not.toHaveBeenCalled();
+  });
+
+  it('returns to the selected text on Escape and leaves the outside control focused on dismissal', async () => {
+    const changed = vi.fn();
+    const props = { text: '打开 文档', editing: true, onTextChange: changed };
+    await act(async () =>
+      root.render(
+        <div data-canvas-root="">
+          <div data-canvas-object="note">
+            <TextObject {...props} formatRequest={{ sequence: 1, format: 'link' }} />
+          </div>
+          <button type="button">画板控制</button>
+        </div>,
+      ),
+    );
+    const dialog = () => host.querySelector('[role="dialog"][aria-label="文字链接"]');
+    const field = dialog()?.querySelector('input');
+    expect(document.activeElement).toBe(field);
+    await act(async () => {
+      field?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+      );
+    });
+    expect(dialog()).toBeNull();
+    expect(document.activeElement).toBe(editor());
+    expect(document.getSelection()?.toString()).toBe('打开 文档');
+
+    await key('k', { metaKey: true });
+    expect(document.activeElement).toBe(dialog()?.querySelector('input'));
+    const outside = host.querySelector('button');
+    await act(async () => {
+      outside?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+      outside?.focus();
+    });
+    expect(dialog()).toBeNull();
+    expect(document.activeElement).toBe(outside);
+    expect(changed).not.toHaveBeenCalled();
+  });
+
+  it('opens an existing link at the caret and removes its whole range with formatting intact', async () => {
+    const url = 'https://example.com/plan';
+    const otherUrl = 'https://example.com/notes';
+    const changed = vi.fn();
+    const committed = vi.fn();
+    await act(async () =>
+      root.render(
+        <TextObject
+          text={`[**发布** _方案_](${url}) 和 [备注](${otherUrl})`}
+          editing
+          singleLine
+          onTextChange={changed}
+          onCommit={committed}
+        />,
+      ),
+    );
+    const word = editor().querySelector('a strong')?.firstChild as Text;
+    await select(word, 1, word, 1);
+    await key('k', { ctrlKey: true });
+    expect(host.querySelector('input')?.value).toBe(url);
+    expect(host.querySelector('.studio-ui-text-object-link-open')?.getAttribute('href')).toBe(url);
+    await act(async () => clickButton('取消链接编辑'));
+    expect(changed).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(editor());
+
+    await select(word, 1, word, 1);
+    await key('k', { ctrlKey: true });
+    await act(async () => clickButton('移除链接'));
+    expect(changed).toHaveBeenCalledExactlyOnceWith(`**发布** _方案_ 和 [备注](${otherUrl})`);
+    expect(editor().querySelector('strong')?.textContent).toBe('发布');
+    expect(editor().querySelector('em')?.textContent).toBe('方案');
+    expect(Array.from(editor().querySelectorAll('a'), (anchor) => anchor.href)).toEqual([otherUrl]);
+    expect(document.activeElement).toBe(editor());
+    expect(committed).not.toHaveBeenCalled();
+  });
+
+  it('inserts a URL at an unlinked caret with no selection', async () => {
+    const ref = createRef<InlineTextEditorHandle>();
+    const changed = vi.fn();
+    const url = 'https://example.com/plan';
+    await act(async () =>
+      root.render(
+        <InlineTextEditor value="地址 " ref={ref} onChange={changed} onCommit={vi.fn()} />,
+      ),
+    );
+    await act(async () => {
+      expect(ref.current?.format('link', url)).toBe(true);
+    });
+    expect(changed).toHaveBeenCalledExactlyOnceWith(`地址 [${url}](${url})`);
+    expect(editor().querySelector('a')?.getAttribute('href')).toBe(url);
   });
 
   it('keeps read-only labels out of the editing interaction', async () => {

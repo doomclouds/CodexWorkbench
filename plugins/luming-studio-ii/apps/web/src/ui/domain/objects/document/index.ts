@@ -8,6 +8,7 @@ export type {
   DocumentCommitResult,
   DocumentContent,
   DocumentDraft,
+  DocumentExportFormat,
   DocumentJson,
   DocumentNoteSource,
   DocumentObjectProps,

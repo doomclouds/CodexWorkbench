@@ -258,10 +258,14 @@
   padding: 6px;
 }
 
-.board-sharing__button--member-role,
-.board-sharing__button--forget {
+.board-sharing__button--member-role {
   flex: none;
   color: var(--sharing-muted);
+}
+
+.board-sharing__button--forget {
+  flex: none;
+  color: var(--studio-ui-danger, light-dark(#a53131, #ff9b9b));
 }
 
 .board-sharing__button--scope {

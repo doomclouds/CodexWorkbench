@@ -311,6 +311,16 @@ async function serveAsset(request, response, path) {
   }
 }
 
+function isLegacyExport(pathname, searchParams) {
+  const prefix = "/api/exports/";
+  return (
+    pathname.startsWith(prefix) &&
+    legacyBoardId.test(pathname.slice(prefix.length)) &&
+    searchParams.size === 1 &&
+    legacyBoardId.test(searchParams.get("artifactId") ?? "")
+  );
+}
+
 function allowedRoute({ pathname, searchParams }, method, legacy) {
   if (legacy) {
     if (method === "GET") {
@@ -319,7 +329,8 @@ function allowedRoute({ pathname, searchParams }, method, legacy) {
           pathname,
         ) ||
         pathname.startsWith("/api/thumbnails/") ||
-        pathname.startsWith("/assets/")
+        pathname.startsWith("/assets/") ||
+        isLegacyExport(pathname, searchParams)
       );
     }
 

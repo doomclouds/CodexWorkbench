@@ -6,16 +6,27 @@ const fixturePath = fileURLToPath(new URL(fixtureSpecifier, import.meta.url));
 const fixtureImports = new Set(["expect", "focused", "observe", "screenshot", "test"]);
 const whiteboardFixtureSpecs = new Set(
   [
-    "viewport",
-    "placement",
-    "selection",
-    "geometry",
-    "organization",
-    "connectors",
-    "objects",
-    "objects-media",
-    "persistence",
-  ].map((spec) => pathOfSpec("whiteboard-basics/" + spec)),
+    "whiteboard-basics/viewport",
+    "whiteboard-basics/placement",
+    "whiteboard-basics/selection",
+    "whiteboard-basics/geometry",
+    "whiteboard-basics/organization",
+    "whiteboard-basics/connectors",
+    "whiteboard-basics/objects",
+    "whiteboard-basics/objects-media",
+    "whiteboard-basics/persistence",
+    "whiteboard-editing/html",
+    "whiteboard-editing/document",
+    "whiteboard-editing/todo",
+    "whiteboard-editing/rich-gestures",
+    "whiteboard-editing/organization",
+    "whiteboard-editing/connector-directions",
+    "whiteboard-editing/object-menus",
+    "whiteboard-editing/reading-controls",
+    "whiteboard-editing/zoom-visibility",
+    "whiteboard-editing/canvas-extras",
+    "whiteboard-editing/inline-editing",
+  ].map(pathOfSpec),
 );
 const whiteboardFixtureMethods = new Set(["readBoard", "seedBasicBoard"]);
 const boardSeedMethods = new Set(["seedBoards", "seedBasicBoard"]);
@@ -31,11 +42,30 @@ const scopedFixtureImports = new Map(
     ],
     ["workbench/link", ["workbenchLinkProbe"]],
     ["whiteboard-basics/organization", ["workbenchLinkProbe"]],
+    ["whiteboard-basics/objects", ["controlNextCanvasSave"]],
     [
       "whiteboard-basics/objects-media",
       ["chooseBoardMedia", "imageLoaded", "mediaDisplaySize", "mediaPlaying"],
     ],
     ["whiteboard-basics/persistence", ["controlNextCanvasSave", "enableCanvasClipboard"]],
+    [
+      "whiteboard-editing/html",
+      ["embedFrame", "chooseHtmlFile", "controlNextHtmlSave", "workbenchLinkProbe"],
+    ],
+    [
+      "whiteboard-editing/document",
+      ["chooseDocumentImage", "readDocumentDownload", "failNextDocumentSave", "workbenchLinkProbe"],
+    ],
+    ["whiteboard-editing/todo", ["controlNextTodoSave", "workbenchLinkProbe"]],
+    ["whiteboard-editing/rich-gestures", ["embedFrame", "workbenchLinkProbe"]],
+    ["whiteboard-editing/organization", ["enableCanvasClipboard"]],
+    ["whiteboard-editing/inline-editing", ["holdNextInlineTextRefresh", "holdNextInlineTextWrite"]],
+    ["whiteboard-editing/reading-controls", ["readViewingInk", "workbenchLinkProbe"]],
+    ["whiteboard-editing/zoom-visibility", ["readZoomDetails", "holdNextCanvasMove"]],
+    [
+      "whiteboard-editing/canvas-extras",
+      ["workbenchLinkProbe", "readPeerCursors", "readPlacementPreview", "controlNextTextSave"],
+    ],
   ].map(([spec, helpers]) => [pathOfSpec(spec), new Set(helpers)]),
 );
 const testModes = new Set(["only", "skip", "fixme", "fail", "failOnly"]);
@@ -96,6 +126,7 @@ const browserInternals = new Set([
   "waitForResponse",
 ]);
 const screenshotAccess = new Set(["attach", "screenshot", "toHaveScreenshot"]);
+const downloadAccess = new Set(["createReadStream", "path", "saveAs"]);
 const rawPageActions = new Set([
   "check",
   "click",
@@ -230,13 +261,26 @@ function isPage(source, receiver, visited = new Set()) {
   return definition.type === "Variable" && isPage(source, variableInitializer(definition), visited);
 }
 
+function isBrowserCall(source, { callee }) {
+  if (callee.type === "MemberExpression") {
+    return browserFactories.has(propertyName(callee));
+  }
+
+  if (callee.type === "Identifier") {
+    const definition = definitionOf(source, callee);
+    return definition?.type === "ImportBinding" && definition.node.imported?.name === "embedFrame";
+  }
+
+  return false;
+}
+
 function isBrowserReceiver(source, receiver, visited = new Set()) {
   const node = unwrapped(receiver);
   if (isPage(source, node)) {
     return true;
   }
-  if (node?.type === "CallExpression" && node.callee.type === "MemberExpression") {
-    return browserFactories.has(propertyName(node.callee));
+  if (node?.type === "CallExpression") {
+    return isBrowserCall(source, node);
   }
   if (node?.type === "MemberExpression" && propertyName(node) === "describe") {
     return isBrowserReceiver(source, node.object, visited);
@@ -256,6 +300,30 @@ function isBrowserReceiver(source, receiver, visited = new Set()) {
   }
 
   return definition.type === "Variable" && isBrowserReceiver(source, definition.node.init, visited);
+}
+
+function isDownload(source, receiver, visited = new Set()) {
+  const node = unwrapped(receiver);
+  if (node?.type === "CallExpression" && node.callee.type === "MemberExpression") {
+    const listening = propertyName(node.callee) === "waitForEvent";
+    return listening && node.arguments[0]?.value === "download";
+  }
+  if (node?.type !== "Identifier") {
+    return false;
+  }
+  if (node.name === "download") {
+    return true;
+  }
+
+  const definition = definitionOf(source, node);
+  if (!definition || visited.has(definition)) {
+    return false;
+  }
+
+  visited.add(definition);
+  return (
+    definition.type === "Variable" && isDownload(source, variableInitializer(definition), visited)
+  );
 }
 
 function isCurrentContext(source, receiver) {
@@ -314,7 +382,7 @@ function fixtureUrl(source, input) {
   return false;
 }
 
-function restrictedProperty(name) {
+function restrictedProperty(name, source, receiver) {
   if (testModes.has(name)) {
     return "testMode";
   }
@@ -323,6 +391,9 @@ function restrictedProperty(name) {
   }
   if (screenshotAccess.has(name)) {
     return "screenshot";
+  }
+  if (downloadAccess.has(name) && isDownload(source, receiver)) {
+    return "download";
   }
   if (name === "waitForTimeout") {
     return "wait";
@@ -365,6 +436,7 @@ const userFlowBoundary = {
       selector: "Locate controls with getByRole, getByText, getByLabel or getByTestId.",
       navigation: "Navigate using studio.url, a seeded board URL or browser history.",
       screenshot: "Attach screenshots with the screenshot helper from the Studio fixture.",
+      download: "Inspect download bytes through the assigned Studio fixture helper.",
       testMode: "Run every declared scenario without only, skip, fixme or expected failure.",
       wait: "Wait for the visible result with an assertion.",
       computed: "Name the browser operation explicitly.",
@@ -382,7 +454,7 @@ const userFlowBoundary = {
 
     function inspectOperation(node, receiver) {
       const name = propertyName(node);
-      const restricted = restrictedProperty(name);
+      const restricted = restrictedProperty(name, source, receiver);
       if (restricted) {
         context.report({ node, messageId: restricted });
         return;
@@ -419,7 +491,8 @@ const userFlowBoundary = {
         return;
       }
 
-      if (isBrowserReceiver(source, receiver) || isFixtureReference(source, receiver, "studio")) {
+      const browserReceiver = isBrowserReceiver(source, receiver) || isDownload(source, receiver);
+      if (browserReceiver || isFixtureReference(source, receiver, "studio")) {
         context.report({ node, messageId: "computed" });
       }
     }

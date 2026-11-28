@@ -26,7 +26,8 @@ import './document-object.css';
 
 const DocumentEditor = lazy(() => import('./DocumentEditor.js'));
 const nativeControl = 'button,input,textarea,select,a[href],[contenteditable]';
-const vendorMenu = '.bn-suggestion-menu,[role="menu"],[role="listbox"]';
+const vendorMenu =
+  '.bn-suggestion-menu,[role="menu"],[role="listbox"],.bn-container [role="dialog"]';
 const readingBackground = '#ffffff';
 const readingInk = '#211f1d';
 
@@ -175,6 +176,7 @@ export function DocumentObject({
   const [comparing, setComparing] = useState(false);
   const searchField = useRef<SearchFieldHandle>(null);
   const readOnly = readOnlyDocument;
+  const writesPaused = [readOnly, annotationActive].some(Boolean);
   const {
     view,
     setView,
@@ -185,15 +187,17 @@ export function DocumentObject({
     readOnly,
     composing,
     editRequest,
+    annotationActive,
     onOpen: onOpenPresentation,
   });
-  const draft = useDocumentDraft({ value, readOnly, composing, onCommit, onChange });
+  const draft = useDocumentDraft({ value, readOnly: writesPaused, composing, onCommit, onChange });
   const { dirty, saving } = draft;
   const viewport = useDocumentViewport(
     phase,
     draft.draft.document,
     draft.confirmed.version,
     nativeBlockRequest,
+    focusedReading,
   );
   const {
     scroll,
@@ -234,7 +238,7 @@ export function DocumentObject({
   }, []);
 
   function openEditor(focusBlockId?: string) {
-    if (!readOnly) {
+    if (!writesPaused) {
       setView({ mode: 'edit', focusBlockId });
     }
   }
@@ -322,18 +326,21 @@ export function DocumentObject({
 
   function handleEscape(event: KeyboardEvent<HTMLDivElement>) {
     const composingNow = composing || event.nativeEvent.isComposing || event.key === 'Process';
-    if (composingNow || event.repeat || vendorControlsOpen(event.currentTarget)) {
+    if (composingNow || event.repeat) {
       return;
     }
 
-    const consumed = editing || comparing || exportOpen;
-    if (!consumed) {
+    const localDialog = comparing || exportOpen;
+    const editingOwnsEscape =
+      editing && !annotationActive && !vendorControlsOpen(event.currentTarget);
+
+    if (!localDialog && !editingOwnsEscape) {
       return;
     }
 
     event.preventDefault();
     event.stopPropagation();
-    if (exportOpen || comparing) {
+    if (localDialog) {
       setExportOpen(false);
       setComparing(false);
     } else {
@@ -374,7 +381,8 @@ export function DocumentObject({
       return false;
     }
 
-    if (focusedReading && event.key === 'Escape' && !editing) {
+    const canExitReader = focusedReading && !editing && !annotationActive;
+    if (canExitReader && event.key === 'Escape') {
       event.preventDefault();
       event.stopPropagation();
       handleBack();
@@ -423,6 +431,7 @@ export function DocumentObject({
         iconOnly={layout !== undefined || focusedReading}
         expandControl={expandControl}
         readOnly={readOnly}
+        annotationActive={annotationActive}
         draft={draft}
         outline={outline}
         exportOpen={exportOpen}
@@ -456,7 +465,7 @@ export function DocumentObject({
           >
             <DocumentEditor
               value={draft.draft.document}
-              editable={!readOnly || composing}
+              editable={!writesPaused || composing}
               theme={shell.colorScheme}
               focusBlockId={view.focusBlockId}
               resolveImage={resolveImage}
@@ -508,9 +517,14 @@ export function DocumentObject({
             <DocumentCanvasHeading
               visible={layout !== undefined || focusedReading}
               moveHandle={layout !== undefined}
-              locked={locked || readOnly}
+              locked={locked || writesPaused}
             />
-            <DocumentTitle draft={draft} editing={editing} readOnly={readOnly} inline={!expanded} />
+            <DocumentTitle
+              draft={draft}
+              editing={editing}
+              readOnly={writesPaused}
+              inline={!expanded}
+            />
           </>
         }
         renderActions={renderActions}
@@ -518,7 +532,7 @@ export function DocumentObject({
           comparing && (
             <DocumentComparison
               model={draft}
-              readOnly={readOnly}
+              readOnly={writesPaused}
               onClose={() => setComparing(false)}
             />
           )

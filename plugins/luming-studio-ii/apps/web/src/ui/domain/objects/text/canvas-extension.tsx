@@ -1,4 +1,6 @@
 import { useEffectEvent, useLayoutEffect, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
 import { Button, StatusText } from '../../../base/index.js';
 import type {
   CanvasObjectExtension,
@@ -28,6 +30,8 @@ interface SaveFailure {
   readonly message: string;
   readonly attempt: TextCommit;
   readonly finish?: FinishMode;
+  readonly conflict?: true;
+  readonly noticeRoot: HTMLElement | null;
 }
 
 type FinishMode = 'close' | 'adjacent';
@@ -47,6 +51,7 @@ interface SaveOptions {
 }
 
 const commitName = 'text.commit';
+const defaultTextLabel = '文本';
 const saveFailureMessage = '无法保存文字';
 const adjacentTextKinds = new Set<TextKind>(['text', 'note', 'shape', 'section']);
 
@@ -98,13 +103,14 @@ function canWriteText(id: string | undefined, readOnly: boolean, source: TextSou
   return Boolean(id) && !readOnly && Boolean(source);
 }
 
-function useDraftRetention(
+function useTextRetention(
+  editing: boolean,
   draft: TextDraft | undefined,
   failure: SaveFailure | undefined,
   saving: boolean,
   onRetentionChange: CanvasObjectViewProps['onRetentionChange'],
 ) {
-  const retained = saving || Boolean(draft ?? failure);
+  const retained = editing || saving || Boolean(draft ?? failure);
   const observesRetention = onRetentionChange !== undefined;
   const retain = useEffectEvent(() => {
     onRetentionChange?.(true);
@@ -119,14 +125,69 @@ function useDraftRetention(
   }, [retained, observesRetention]);
 }
 
-function canvasTextColor(object: CanvasObjectViewProps['object'], color: string | undefined) {
-  if (object.kind === 'connector') {
+interface TextSaveNoticeProps {
+  readonly failure?: SaveFailure;
+  readonly selected: boolean;
+  readonly writable: boolean;
+  readonly onRetry: () => void;
+  readonly onDiscard: () => void;
+}
+
+function TextSaveNotice({ failure, selected, writable, onRetry, onDiscard }: TextSaveNoticeProps) {
+  if (!failure || !selected) {
+    return null;
+  }
+
+  const notice = (
+    <div className="studio-ui-canvas-text-failure" data-canvas-native="" data-canvas-controls="">
+      <StatusText message={failure.message} tone="error" announcement="assertive" />
+      {writable && !failure.conflict && <Button label="重试保存文字" onActivate={onRetry} />}
+      {writable && (
+        <Button label="放弃文字修改" variant="ghost" tone="danger" onActivate={onDiscard} />
+      )}
+    </div>
+  );
+
+  return failure.noticeRoot ? createPortal(notice, failure.noticeRoot) : notice;
+}
+
+interface TextPaintStyle extends CSSProperties {
+  '--studio-ui-text-link'?: string;
+}
+
+function linearChannel(hex: string) {
+  const channel = parseInt(hex, 16) / 255;
+
+  return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+}
+
+function textPaintStyle({
+  kind,
+  hollow,
+  fill,
+}: CanvasObjectViewProps['object']): TextPaintStyle | undefined {
+  if (hollow || (kind !== 'shape' && kind !== 'note')) {
     return undefined;
   }
 
-  const pinnedNote = object.kind === 'note' && object.fill?.toLowerCase() === '#f9e56f';
+  const background = fill ?? (kind === 'note' ? '#fff0b5' : '');
+  const hex =
+    /^#([\da-f]{6})(?:ff)?$/iu.exec(background)?.[1] ??
+    /^#([\da-f]{3})$/iu.exec(background)?.[1]?.replace(/./gu, '$&$&');
 
-  return pinnedNote && color?.toLowerCase() === '#0b0b0b' ? undefined : color;
+  if (!hex) {
+    return undefined;
+  }
+
+  const luminance =
+    0.2126 * linearChannel(hex.slice(0, 2)) +
+    0.7152 * linearChannel(hex.slice(2, 4)) +
+    0.0722 * linearChannel(hex.slice(4));
+
+  return {
+    color: luminance >= 0.179 ? '#111827' : '#f5f5f5',
+    '--studio-ui-text-link': luminance >= 0.22 ? '#14356e' : '#bcd8ff',
+  };
 }
 
 function automaticText(draft: TextDraft | undefined, kind: TextKind, allowed: boolean) {
@@ -167,6 +228,7 @@ function confirmedText(
       kind: 'failed' as const,
       message: receipt.message || saveFailureMessage,
       current: readTextSource(receipt.current, base.body.text),
+      conflict: receipt.conflict,
     };
   }
 
@@ -186,11 +248,39 @@ function confirmedText(
   return { kind: 'saved' as const, source };
 }
 
-function CanvasTextView({
+function canvasLabelState(
+  {
+    object,
+    geometry,
+    zoom,
+    expanded,
+    focusedReading,
+  }: Pick<CanvasObjectViewProps, 'object' | 'geometry' | 'zoom' | 'expanded' | 'focusedReading'>,
+  fontSize: number | undefined,
+  { editing, saving, failure }: { editing: boolean; saving?: SaveMode; failure?: SaveFailure },
+) {
+  if (editing || saving !== undefined || failure !== undefined) {
+    return 'active';
+  }
+  if (object.kind !== 'shape' || expanded || focusedReading) {
+    return;
+  }
+
+  const boxFits = geometry.width * zoom >= 32 && geometry.height * zoom >= 12;
+  if (!boxFits || (fontSize ?? 16) * zoom < 8) {
+    return 'concealed';
+  }
+}
+
+function CanvasTextBody({
   id,
   object,
+  geometry,
+  zoom,
   payload,
   selected,
+  expanded,
+  focusedReading,
   readOnly,
   editRequest,
   formatRequest,
@@ -205,7 +295,7 @@ function CanvasTextView({
   const [closedFormatRequest, setClosedFormatRequest] = useState<number>();
   const [failure, setFailure] = useState<SaveFailure>();
   const [saving, setSaving] = useState<SaveMode>();
-  useDraftRetention(draft, failure, saving !== undefined, onRetentionChange);
+  const frame = useRef<HTMLDivElement>(null);
   const latestDraft = useRef<TextDraft | undefined>(undefined);
   const writeInFlight = useRef<SaveMode | undefined>(undefined);
   const pendingFinish = useRef<FinishMode | undefined>(undefined);
@@ -224,6 +314,7 @@ function CanvasTextView({
   const formatting = activeRequest(formatSequence, closedFormatRequest);
   const editingRequested = requested || formatting || localEdit;
   const editing = writable && editingRequested;
+  useTextRetention(editing, draft, failure, saving !== undefined, onRetentionChange);
   useLayoutEffect(() => {
     canWrite.current = canMutate;
   }, [canMutate]);
@@ -302,8 +393,9 @@ function CanvasTextView({
     }
   }
 
-  function reportSaveFailure(message: string, attempt: TextCommit) {
-    setFailure({ message, attempt, finish: pendingFinish.current });
+  function reportSaveFailure(message: string, attempt: TextCommit, conflict?: true) {
+    const noticeRoot = frame.current?.closest<HTMLElement>('[data-canvas-root]') ?? null;
+    setFailure({ message, attempt, finish: pendingFinish.current, conflict, noticeRoot });
   }
 
   async function save(mode: SaveMode, { confirmed = source, retry }: SaveOptions = {}) {
@@ -321,7 +413,7 @@ function CanvasTextView({
       const receipt = await request({
         name: commitName,
         expectedVersion: base.version,
-        value: { text, adjacent, close },
+        value: { text, baseText: base.body.text, adjacent, close },
       });
 
       const result = confirmedText(receipt, next);
@@ -330,7 +422,7 @@ function CanvasTextView({
           setReceiptSource(result.current);
         }
 
-        reportSaveFailure(result.message, next);
+        reportSaveFailure(result.message, next, result.conflict);
         return;
       }
       if (result.kind === 'removed') {
@@ -377,7 +469,7 @@ function CanvasTextView({
   }
 
   function handleRetry() {
-    if (failure) {
+    if (failure && !failure.conflict) {
       sendSave(failure.attempt.mode, { retry: failure });
     }
   }
@@ -391,9 +483,19 @@ function CanvasTextView({
 
   const canRequestDirectly = writable && directlyEditable;
   const finishing = saving !== undefined && saving !== 'autosave';
+  const captionState = canvasLabelState(
+    { object, geometry, zoom, expanded, focusedReading },
+    body.fontSize,
+    { editing, saving, failure },
+  );
 
   return (
-    <div className="studio-ui-canvas-text-body">
+    <div
+      ref={frame}
+      className="studio-ui-canvas-text-body"
+      data-canvas-label-state={captionState}
+      style={textPaintStyle(object)}
+    >
       <div inert={finishing}>
         <TextObject
           text={draft?.text ?? body.text}
@@ -401,7 +503,7 @@ function CanvasTextView({
           editing={editing}
           readOnly={!writable}
           singleLine={singleLine}
-          color={canvasTextColor(object, body.color)}
+          color={body.color}
           fontFamily={body.fontFamily}
           fontSize={body.fontSize}
           align={body.align}
@@ -413,18 +515,13 @@ function CanvasTextView({
           onRequestEdit={canRequestDirectly ? () => setLocalEdit(true) : undefined}
         />
       </div>
-      {saving && <StatusText message="正在保存文字" busy announcement="polite" />}
-      {failure && (
-        <div className="studio-ui-canvas-text-failure" data-canvas-native="">
-          <StatusText message={failure.message} tone="error" announcement="assertive" />
-          {writable && (
-            <>
-              <Button label="重试保存文字" onActivate={handleRetry} />
-              <Button label="放弃文字修改" variant="ghost" onActivate={handleCloseEditor} />
-            </>
-          )}
-        </div>
-      )}
+      <TextSaveNotice
+        failure={failure}
+        selected={selected}
+        writable={writable}
+        onRetry={handleRetry}
+        onDiscard={handleCloseEditor}
+      />
     </div>
   );
 }
@@ -442,10 +539,26 @@ const richLabelCapabilities: CanvasObjectExtension['capabilities'] = {
   inlineFormats: ['link', 'bullets'],
 };
 
+function CanvasTextView(props: CanvasObjectViewProps) {
+  const { id, object, geometry, zoom } = props;
+  const newText = id === undefined && object.kind === 'text';
+  if (newText && object.label === defaultTextLabel && zoom < 0.5) {
+    return (
+      <span
+        className="studio-ui-canvas-text-placement"
+        aria-hidden="true"
+        style={{ height: Math.min(2 / zoom, geometry.height / 3) }}
+      />
+    );
+  }
+
+  return <CanvasTextBody {...props} />;
+}
+
 export const textExtension: CanvasObjectExtension = {
   kind: 'text',
   capabilities: richLabelCapabilities,
-  placement: { kind: 'text', label: '文本', width: 300, height: 70, fill: 'transparent' },
+  placement: { kind: 'text', label: defaultTextLabel, width: 300, height: 70, fill: 'transparent' },
   View: CanvasTextView,
 };
 

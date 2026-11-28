@@ -53,6 +53,7 @@ function tableEdit(
   columnIds: string[],
   columnWidths: number[],
   widths?: [number, number],
+  rowIds = ['row-1'],
 ): ContentEdit {
   const cells = columnIds.map((id) => ({ value: { case: 'text' as const, value: id } }));
 
@@ -61,12 +62,54 @@ function tableEdit(
     value: {
       table: {
         text: 'Schedule',
-        grid: { rows: [{ cells }], rowIds: ['row-1'], columnIds, columnWidths, head: true },
+        grid: { rows: rowIds.map(() => ({ cells })), rowIds, columnIds, columnWidths, head: true },
       },
       widthChange: widths ? { expectedWidth: widths[0], width: widths[1] } : undefined,
     },
   };
 }
+
+test.each([false, true])('commits a row and its frame together with lock %s', async (locked) => {
+  seedNativeObjects(server.databasePath, locked);
+  const columns = [240, 240];
+  const add = tableEdit(initialColumns, columns, undefined, ['row-1', 'row-2']);
+  const saved = await editContent(tableId, 'table-add-row', 0n, add);
+  expect(saved.receipt?.outcome).toMatchObject({
+    case: 'applied',
+    value: {
+      changedObjects: [
+        {
+          objectId: tableId,
+          geometry: { x: 12, y: 28, height: locked ? 120 : 240, width: originalWidth },
+          geometryVersion: locked ? 0n : 1n,
+          payloadVersion: 1n,
+        },
+      ],
+    },
+  });
+
+  await server.restart();
+  expect((await editContent(tableId, 'table-add-row', 0n, add)).receipt).toEqual(saved.receipt);
+  const removed = await editContent(
+    tableId,
+    'table-remove-row',
+    1n,
+    tableEdit(initialColumns, columns),
+  );
+  expect(removed.receipt?.outcome).toMatchObject({
+    case: 'applied',
+    value: {
+      changedObjects: [
+        {
+          objectId: tableId,
+          geometry: { height: 120, width: originalWidth },
+          geometryVersion: locked ? 0n : 2n,
+          payloadVersion: 2n,
+        },
+      ],
+    },
+  });
+});
 
 test('keeps locked table content writable while allowing same-frame columns to be added', async () => {
   seedNativeObjects(server.databasePath, true);

@@ -52,7 +52,7 @@ export function flattenBlocks(blocks: readonly DocumentBlock[]): DocumentBlock[]
   return blocks.flatMap((block) => [block, ...flattenBlocks(block.children ?? [])]);
 }
 
-function inlineText(value: unknown): string {
+export function inlineText(value: unknown): string {
   if (typeof value === 'string') {
     return value;
   }

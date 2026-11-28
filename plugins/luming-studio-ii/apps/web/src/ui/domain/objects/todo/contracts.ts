@@ -76,6 +76,7 @@ export interface TodoObjectProps {
   readonly locked?: boolean;
   readonly focusedReading?: boolean;
   readonly overview?: boolean;
+  readonly overviewRows?: number;
   readonly editRequest?: number;
   readonly appearance?: TodoObjectAppearance;
   readonly onRequestExpand?: () => void;

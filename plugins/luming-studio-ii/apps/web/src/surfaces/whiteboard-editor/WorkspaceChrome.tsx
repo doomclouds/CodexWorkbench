@@ -63,6 +63,8 @@ export function WorkspaceCanvas({ viewOnly, annotating, input }: WorkspaceCanvas
       pendingEdits={viewOnly ? undefined : input.pendingEdits}
       onSelectionChange={viewOnly || annotating ? ignoreSelection : input.onSelectionChange}
       canEdit={input.canEdit && !annotating}
+      canDraw={input.canDraw && !viewOnly && !annotating}
+      hasContentEditPermission={input.canEdit}
       selectionActions={annotating ? undefined : input.selectionActions}
       onContextMenu={viewOnly || annotating ? undefined : input.onContextMenu}
     />
@@ -71,7 +73,9 @@ export function WorkspaceCanvas({ viewOnly, annotating, input }: WorkspaceCanvas
 
 interface WorkspaceSelectionBarProps {
   readonly selection: readonly CanvasObject[];
+  readonly locks: GeometryActionContext['locks'];
   readonly editAvailable: boolean;
+  readonly formatAvailable: boolean;
   readonly canEdit: boolean;
   readonly moreOpen: boolean;
   readonly onOpenViewing: BoardAnchorAction;
@@ -90,7 +94,9 @@ interface WorkspaceSelectionBarProps {
 
 export function WorkspaceSelectionBar({
   selection,
+  locks,
   editAvailable,
+  formatAvailable,
   canEdit,
   moreOpen,
   onOpenViewing,
@@ -112,8 +118,11 @@ export function WorkspaceSelectionBar({
       {editAvailable && (
         <>
           <GeometrySelectionObjectControls
-            selection={selection}
-            canEdit={canEdit}
+            selection={selection.map((object) =>
+              locks.ids.has(object.id) && !object.locked ? { ...object, locked: true } : object,
+            )}
+            canEdit={formatAvailable}
+            disabled={!canEdit}
             onEditObject={onEditObject}
             selectedHtmlId={selectedHtmlId}
             onAction={onAction}
@@ -123,6 +132,7 @@ export function WorkspaceSelectionBar({
           />
           <GeometrySelectionActions
             selection={selection}
+            locks={locks}
             canEdit={canEdit}
             onAction={onAction}
             onOpenMore={onOpenMore}

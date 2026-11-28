@@ -421,6 +421,49 @@ test('offers Paste on a fresh board when a clipboard reader is available', async
   }
 });
 
+test('writes a mixed locked group on native Copy and blocks native Cut before writing', async () => {
+  const groupId = 'clipboard-locked-group';
+  const free = { ...baseObject, groupId };
+  const locked = {
+    ...baseObject,
+    id: 'locked-clipboard-member',
+    groupId,
+    locked: true,
+    geometry: { ...bounds, x: 310 },
+  };
+  const app = geometryFixture({ initialObjects: [free, locked] });
+  const written = new Map<string, string>();
+
+  function emitClipboardEvent(kind: 'copy' | 'cut') {
+    const event = new Event(kind, { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: { setData: (type: string, value: string) => written.set(type, value) },
+    });
+    app.canvas().dispatchEvent(event);
+  }
+
+  try {
+    await app.open();
+    const point = { x: 80, y: 75 };
+    await app.drag(point, point);
+    await app.update(() => emitClipboardEvent('cut'));
+    expect(written.size).toBe(0);
+    expect(app.commands).toHaveLength(0);
+
+    await app.update(() => emitClipboardEvent('copy'));
+    expect(written.get('application/x-luming-studio-ii')).toBe(
+      JSON.stringify({
+        sourceBoardId: boardId,
+        sourceRevision: '0',
+        objectIds: [free.id, locked.id],
+      }),
+    );
+    expect(app.commands).toHaveLength(0);
+  } finally {
+    app.dispose();
+  }
+});
+
 test('keeps the newer object selection and menu when a pending duplicate is confirmed', async () => {
   let confirmDuplicate!: () => void;
   const pendingGeometry = new Promise<void>((resolve) => {
@@ -763,7 +806,7 @@ test('uses the same shape outlines as Canvas and saves the selected drawing ink'
       kind: 'create',
       object: { kind: 'ink', appearance: { stroke: '#2F7CC4' } },
     });
-    expect(button(app.host, '选择').getAttribute('aria-pressed')).toBe('true');
+    expect(button(app.host, '画笔').getAttribute('aria-pressed')).toBe('true');
   } finally {
     app.dispose();
   }

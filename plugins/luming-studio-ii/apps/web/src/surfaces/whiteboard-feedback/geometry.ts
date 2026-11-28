@@ -7,6 +7,7 @@ import type {
 import type { FeedbackCanvasObject, FeedbackViewport } from './contracts.js';
 
 type ObjectIndex = ReadonlyMap<string, FeedbackCanvasObject>;
+type ViewportSize = Readonly<{ width: number; height: number }>;
 
 const degreesPerRadian = 180 / Math.PI;
 const centerFraction = 0.5;
@@ -36,22 +37,69 @@ function validObject(object: FeedbackCanvasObject | undefined): object is Feedba
   return Boolean(object && object.geometry.width > 0 && object.geometry.height > 0);
 }
 
-export function selectionTarget(
-  selectedIds: readonly string[],
-  objects: ObjectIndex,
-): FeedbackObjectTarget | undefined {
-  const [objectId] = selectedIds;
-  if (!objectId || selectedIds.length !== 1) {
-    return undefined;
-  }
+function objectFractions(
+  { x, y, width, height, rotation }: FeedbackCanvasObject['geometry'],
+  point: FeedbackPoint,
+) {
+  const local = rotate(
+    { x: point.x - x - width * centerFraction, y: point.y - y - height * centerFraction },
+    -rotation,
+  );
 
+  return { u: local.x / width + centerFraction, v: local.y / height + centerFraction };
+}
+
+function visibleTopRight(
+  geometry: FeedbackCanvasObject['geometry'],
+  viewport: FeedbackViewport,
+  size?: ViewportSize,
+) {
+  const corners = [
+    objectPoint(geometry, 0, 0),
+    objectPoint(geometry, 1, 0),
+    objectPoint(geometry, 1, 1),
+    objectPoint(geometry, 0, 1),
+  ].map((point) => screenPoint(point, viewport));
+  const x = corners.map(({ left }) => left);
+  const y = corners.map(({ top }) => top);
+  const bounds = {
+    left: Math.min(...x),
+    top: Math.min(...y),
+    right: Math.max(...x),
+    bottom: Math.max(...y),
+  };
+  const clipped = {
+    left: Math.max(bounds.left, 0),
+    top: Math.max(bounds.top, 0),
+    right: Math.min(bounds.right, size?.width ?? bounds.right),
+    bottom: Math.min(bounds.bottom, size?.height ?? bounds.bottom),
+  };
+  const visible = clipped.right > clipped.left && clipped.bottom > clipped.top ? clipped : bounds;
+  const inset = Math.min(
+    16,
+    (visible.right - visible.left) / 4,
+    (visible.bottom - visible.top) / 4,
+  );
+
+  return worldPoint({ x: visible.right - inset, y: visible.top + inset }, viewport);
+}
+
+export function selectionTarget(
+  objectId: string,
+  objects: ObjectIndex,
+  viewport: FeedbackViewport,
+  size?: ViewportSize,
+): FeedbackObjectTarget | undefined {
   const object = objects.get(objectId);
   if (validObject(object)) {
+    const corner = visibleTopRight(object.geometry, viewport, size);
+    const { u, v } = objectFractions(object.geometry, corner);
+
     return {
       kind: 'object',
       objectId: object.id,
-      u: centerFraction,
-      v: centerFraction,
+      u: Math.max(0, Math.min(1, u)),
+      v: Math.max(0, Math.min(1, v)),
       geometryVersion: object.geometryVersion,
     };
   }
@@ -67,13 +115,7 @@ export function targetAt(
       continue;
     }
 
-    const { x, y, width, height, rotation } = object.geometry;
-    const local = rotate(
-      { x: point.x - x - width * centerFraction, y: point.y - y - height * centerFraction },
-      -rotation,
-    );
-    const u = local.x / width + centerFraction;
-    const v = local.y / height + centerFraction;
+    const { u, v } = objectFractions(object.geometry, point);
     const horizontal = u >= 0 && u <= 1;
     const vertical = v >= 0 && v <= 1;
     if (horizontal && vertical) {

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type {
   CanvasConnection,
   CanvasGeometry,
+  CanvasPoint,
   CanvasRect,
 } from '../../../src/ui/domain/canvas/contracts.js';
 import {
@@ -19,7 +20,10 @@ import {
   rotateConnection,
   translateConnection,
 } from '../../../src/ui/domain/canvas/connectors/geometry.js';
-import { connectionPathData } from '../../../src/ui/domain/canvas/connectors/path.js';
+import {
+  connectionPathData,
+  connectorArrowPoints,
+} from '../../../src/ui/domain/canvas/connectors/path.js';
 
 const target: CanvasGeometry = { x: 10, y: 20, width: 80, height: 40, rotation: 0 };
 const line: CanvasConnection = {
@@ -75,6 +79,54 @@ describe('adjacent connector placement', () => {
 });
 
 describe('connector geometry', () => {
+  it.each([
+    [250, 100, 0],
+    [-250, 100, 0],
+    [185, 0, 0],
+    [35, 25, 0],
+    [0, 0, 0],
+    [220, -130, 42],
+  ])(
+    'keeps both terminal tangents on their signed ports at %d, %d and %d degrees',
+    (x, y, rotation) => {
+      const ports = ['top', 'right', 'bottom', 'left'] as const;
+      const geometry = { ...target, x, y, rotation };
+      const definitions = new Map([
+        ['first', target],
+        ['last', geometry],
+      ]);
+
+      for (const from of ports) {
+        for (const to of ports) {
+          const connection: CanvasConnection = {
+            start: { ...line.start, attachment: { objectId: 'first', port: from } },
+            end: { ...line.end, attachment: { objectId: 'last', port: to } },
+          };
+          const { points } = resolveConnection(connection, (id) => definitions.get(id));
+          const [start, next] = points;
+
+          if (!start || !next) {
+            throw new Error('Expected a visible route between the ports.');
+          }
+
+          const end = points.at(-1)!;
+          const previous = points.at(-2)!;
+          const startOutside = portPoint(target, from, 1);
+          const endOutside = portPoint(geometry, to, 1);
+          const outward = (tip: CanvasPoint, other: CanvasPoint, neighbor: CanvasPoint) =>
+            ((neighbor.x - tip.x) * (other.x - tip.x) + (neighbor.y - tip.y) * (other.y - tip.y)) /
+            Math.hypot(neighbor.x - tip.x, neighbor.y - tip.y);
+
+          expect(start).toEqual(portPoint(target, from));
+          expect(end).toEqual(portPoint(geometry, to));
+          expect(outward(start, startOutside, next)).toBeGreaterThan(0.999999);
+          expect(outward(end, endOutside, previous)).toBeGreaterThan(0.999999);
+          expect(points.length).toBeLessThanOrEqual(8);
+        }
+      }
+    },
+  );
+
   it('turns free and manually routed geometry around the selection pivot without changing the attachment', () => {
     const connection: CanvasConnection = {
       ...line,
@@ -264,6 +316,42 @@ describe('connector geometry', () => {
     expect(hitConnection(route, { x: 98, y: 2 }, 8)).toBe(true);
     expect(hitConnection(route, { x: 100, y: 0 }, 8)).toBe(false);
     expect(route.geometry).toEqual({ x: -6, y: -6, width: 112, height: 92, rotation: 0 });
+  });
+
+  it('keeps both arrow wings clear of a short rounded terminal at a right port', () => {
+    const bend = { x: 108, y: 40 };
+    const connection: CanvasConnection = {
+      start: { point: { x: 108, y: 0 } },
+      end: { point: line.end.point, attachment: { objectId: 'node', port: 'right' } },
+      bends: [bend],
+    };
+    const route = resolveConnection(connection, () => target, 4);
+
+    expect(route.points).toEqual([connection.start.point, bend, { x: 90, y: 40 }]);
+    expect(connectionPathData(route.points)).toContain('Q 108 40 100 40');
+    const arrow = connectorArrowPoints(route.points, false, route.strokeWidth);
+    expect(arrow).toEqual([
+      { x: 98, y: 44 },
+      { x: 90, y: 40 },
+      { x: 98, y: 36 },
+    ]);
+    expect(connectorArrowPoints([...route.points].reverse(), true, route.strokeWidth)).toEqual(
+      arrow,
+    );
+  });
+
+  it('keeps full-size arrowheads on long straight sections crossing a collinear waypoint', () => {
+    const points = [
+      { x: 0, y: 0 },
+      { x: 98, y: 0 },
+      { x: 100, y: 0 },
+    ];
+
+    expect(connectorArrowPoints(points, false, 2)).toEqual([
+      { x: 90, y: -5 },
+      { x: 100, y: 0 },
+      { x: 90, y: 5 },
+    ]);
   });
 
   it('positions a moved label from the middle segment and includes it in visibility bounds', () => {

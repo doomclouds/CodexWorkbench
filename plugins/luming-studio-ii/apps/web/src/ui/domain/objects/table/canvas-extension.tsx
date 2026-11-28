@@ -5,6 +5,7 @@ import type {
   TableCellValue,
   TableObjectActivity,
   TableObjectDraft,
+  TableObjectPaint,
   TableObjectValue,
 } from './contracts.js';
 import { readTable, type TableModel } from './table-model.js';
@@ -118,6 +119,36 @@ function tableSaveValue(draft: TableObjectDraft) {
   return sameWidth && sameLayout ? value : { ...value, layoutChanged: true };
 }
 
+const placementColumns = [0, 1, 2];
+const placementBodyRows = [0, 1];
+
+function TablePlacementPreview({ headerPaint }: { headerPaint: TableObjectPaint }) {
+  return (
+    <table
+      className="studio-object-table-grid studio-object-table-placement"
+      aria-hidden="true"
+      style={tableBodyPaint}
+    >
+      <thead>
+        <tr>
+          {placementColumns.map((column) => (
+            <th key={column} style={headerPaint} />
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {placementBodyRows.map((row) => (
+          <tr key={row}>
+            {placementColumns.map((column) => (
+              <td key={column} />
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
 function TableCanvasView({
   id,
   object,
@@ -146,6 +177,9 @@ function TableCanvasView({
   );
   const headerPaint = useMemo(() => tableHeaderPaint(object.fill), [object.fill]);
 
+  if (id === undefined) {
+    return <TablePlacementPreview headerPaint={headerPaint} />;
+  }
   if (!value) {
     return content;
   }

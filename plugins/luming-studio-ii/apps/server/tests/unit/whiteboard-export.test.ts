@@ -202,7 +202,7 @@ describe('fixed revision board export', () => {
     });
     const svg = fileText(file);
 
-    expect(svg).toContain('<polyline points="-60,-60 30,-60"');
+    expect(svg).toContain('<path d="M -60 -60 L 30 -60"');
     expect(svg).toContain('Plan &lt;review&gt; &amp; share');
     expect(svg).toContain('viewBox="-92 -92 154 64"');
     expect(svg).not.toContain('unselected');
@@ -216,6 +216,41 @@ describe('fixed revision board export', () => {
       objects: [{ objectId: 'connector', detail: { start: { point: { x: -60, y: -60 } } } }],
     });
     expect(fileText(json)).not.toContain('"attachment"');
+  });
+
+  it('rounds the exported route and enters a rear-facing right port from its outside', () => {
+    const left = object('left', { kind: 'shape', geometry: outline });
+    const right = object('right', { kind: 'shape', geometry: { ...outline, x: 300 } });
+    const connector = object('connector', {
+      kind: 'connector',
+      appearance: { strokeWidth: 4 },
+      detail: {
+        kind: 'connector',
+        start: { point: { x: 0, y: 0 }, attachment: { objectId: 'left', port: 'right' } },
+        end: { point: { x: 0, y: 0 }, attachment: { objectId: 'right', port: 'right' } },
+        bends: [],
+      },
+    });
+    const repository = new TestWhiteboardRepository([left, right, connector]);
+    const svg = fileText(
+      createWhiteboardApplication(repository).exportBoard(viewer, { ...allJson, format: 'svg' }),
+    );
+    const polyline = /<path d="(M 100 40 [^"]+ L 400 40)" fill="none" stroke-linecap="round"/u.exec(
+      svg,
+    )?.[1];
+    expect(polyline).toContain(' Q ');
+    const numbers = polyline!
+      .split(/[MLQ\s]+/u)
+      .filter(Boolean)
+      .map(Number);
+    const straightStart = numbers.at(-4)!;
+    expect(straightStart).toBeGreaterThan(400);
+    expect(numbers.slice(-3)).toEqual([40, 400, 40]);
+    const arrow = /<path d="M 400 40 L ([\d.]+) [\d.]+ L ([\d.]+) [\d.]+ Z"/u.exec(svg);
+    expect(arrow).not.toBeNull();
+    expect(Number(arrow?.[1])).toBeGreaterThan(400);
+    expect(Number(arrow?.[1])).toBe(Number(arrow?.[2]));
+    expect(Number(arrow?.[1]) + 2).toBeLessThanOrEqual(straightStart);
   });
 
   it('captures only selected archived image bytes and embeds a safe SVG raster', () => {

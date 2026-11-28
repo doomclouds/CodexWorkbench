@@ -161,7 +161,7 @@ function requests() {
 }
 
 describe('TodoObject', () => {
-  it('shows title and progress in overview and exposes real rows after expansion', async () => {
+  it('shows read-only task summaries below compact progress and exposes editing after expansion', async () => {
     const expand = vi.fn();
     const renderOutsideRows = vi.fn(() => <span data-fallback-pin />);
     render({
@@ -182,6 +182,13 @@ describe('TodoObject', () => {
     expect(progress.previousElementSibling?.tagName).toBe('HEADER');
     expect(renderOutsideRows).toHaveBeenLastCalledWith([]);
     expect(region.querySelector('[data-fallback-pin]')).toBeTruthy();
+    const preview = required('[aria-label="任务预览"]');
+    expect([...preview.querySelectorAll('li')].map((row) => row.textContent)).toEqual([
+      '✓整理需求',
+      '核对读取上限',
+    ]);
+    expect(preview.querySelector('[aria-label="未完成"]')).toBeTruthy();
+    expect(preview.querySelector('button, input')).toBeNull();
     expect(rows()).toHaveLength(0);
 
     await click('展开任务清单');
@@ -192,6 +199,12 @@ describe('TodoObject', () => {
     expect(rowIds()).toEqual(['plan', 'limits']);
     expect(input('完成任务：整理需求').checked).toBe(true);
     expect(requests()).toEqual([]);
+  });
+
+  it('keeps progress as the fallback for a card with no room for preview rows', () => {
+    render({ overview: true, overviewRows: 0 });
+    expect(required<HTMLProgressElement>('progress').value).toBe(1);
+    expect(fixture.host.querySelector('[aria-label="任务预览"]')).toBeNull();
   });
 
   it('uses an explicit checked value and only exposes write controls when interactive', async () => {
@@ -323,14 +336,19 @@ describe('TodoObject', () => {
 
   it('uses the measured row for Canvas annotations and does not send a point for a hidden row', async () => {
     const annotate = vi.fn<NonNullable<TodoObjectProps['onAnnotateContent']>>();
-    render({ annotationActive: true, movable: true, onAnnotateContent: annotate });
+    render({
+      annotationActive: true,
+      movable: true,
+      onRequestExpand: vi.fn(),
+      onAnnotateContent: annotate,
+    });
     const row = required('[data-todo-item-id="limits"]');
     const measure = vi
       .spyOn(row, 'getBoundingClientRect')
       .mockReturnValue(new DOMRect(100, 20, 200, 44));
     const text = button('备注任务：核对读取上限');
-    expect(fixture.host.querySelector('[aria-label="移动任务清单"]')).toBeNull();
-    expect(fixture.host.querySelector('[aria-label="展开任务清单"]')).toBeNull();
+    expect(button('移动任务清单').disabled).toBe(true);
+    expect(button('展开任务清单').disabled).toBe(true);
 
     await act(async () => {
       text.dispatchEvent(
@@ -347,6 +365,31 @@ describe('TodoObject', () => {
     await click(text);
     expect(annotate).toHaveBeenCalledTimes(2);
     expect(requests()).toEqual([]);
+  });
+
+  it('keeps the open task editor and completion control when note mode pauses edits', async () => {
+    render({ onAnnotateItem: vi.fn() });
+    await click('编辑任务：核对读取上限');
+    const editor = input('任务文字');
+    const completion = input('完成任务：核对读取上限');
+    await enterText(editor, '尚未提交的任务文字');
+
+    render({ annotationActive: true });
+    expect(input('任务文字')).toBe(editor);
+    expect(editor.value).toBe('尚未提交的任务文字');
+    expect(editor.readOnly).toBe(true);
+    expect(input('完成任务：核对读取上限')).toBe(completion);
+    expect(completion.disabled).toBe(true);
+    await key(editor, 'Enter');
+    await key(editor, 'Escape');
+    expect(requests()).toEqual([]);
+    expect(input('任务文字')).toBe(editor);
+
+    render({ annotationActive: false });
+    expect(editor.readOnly).toBe(false);
+    await key(editor, 'Enter');
+    expect(requests()).toHaveLength(1);
+    expect(required('[data-todo-item-id="limits"]').textContent).toContain('尚未提交的任务文字');
   });
 
   it('keeps pins outside the scroller and aligned to visible row padding boxes', async () => {

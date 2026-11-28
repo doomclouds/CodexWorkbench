@@ -137,7 +137,12 @@ function RecoveryDetails({ comparison, busy, actions }: RecoveryDetailsProps) {
             onActivate={() => actions.download?.(draft)}
           />
         )}
-        <Button label="放弃上次草稿" disabled={busy} onActivate={() => actions.discard(draft)} />
+        <Button
+          label="放弃上次草稿"
+          tone="danger"
+          disabled={busy}
+          onActivate={() => actions.discard(draft)}
+        />
         <Button
           label="应用已比较的草稿"
           variant="primary"

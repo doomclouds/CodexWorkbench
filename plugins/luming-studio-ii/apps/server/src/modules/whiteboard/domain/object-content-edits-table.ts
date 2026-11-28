@@ -19,6 +19,7 @@ const maxColumns = 256;
 const maxCells = 20_000;
 const maxAxisIdLength = 192;
 const maxTableWidth = 10_000_000;
+const minimumRowHeight = 50;
 const widthTolerance = 0.000001;
 const controlCharacter = /\p{Cc}/u;
 
@@ -105,6 +106,12 @@ export function tableContentIssue(data: JsonObject): ContentEditRejection | unde
   }
 }
 
+function textRows(data: JsonObject) {
+  const text = typeof data.text === 'string' ? data.text : '';
+
+  return text.replace(/\r\n?/gu, '\n').replace(/\n$/u, '').split('\n');
+}
+
 function existingColumns(data: JsonObject, grid: JsonObject | undefined): number {
   if (Array.isArray(grid?.rows) && grid.rows.length > 0) {
     return grid.rows.reduce((count: number, row) => {
@@ -113,15 +120,27 @@ function existingColumns(data: JsonObject, grid: JsonObject | undefined): number
       return Array.isArray(cells) ? Math.max(count, cells.length) : count;
     }, 1);
   }
-  if (typeof data.text === 'string' && data.text) {
-    return data.text
-      .replace(/\r\n?/gu, '\n')
-      .replace(/\n$/u, '')
-      .split('\n')
-      .reduce((columns, row) => Math.max(columns, row.split('\t').length), 1);
+
+  return textRows(data).reduce((columns, row) => Math.max(columns, row.split('\t').length), 1);
+}
+
+function rowCount(data: JsonObject) {
+  const rows = contentRecord(data.grid)?.rows;
+
+  return Array.isArray(rows) && rows.length ? rows.length : textRows(data).length;
+}
+
+function tableHeight(frameHeight: number, current: JsonObject, data: JsonObject, locked: boolean) {
+  const before = rowCount(current);
+  const after = rowCount(data);
+
+  if (locked || before === after) {
+    return undefined;
   }
 
-  return 1;
+  const height = Math.max(minimumRowHeight, frameHeight / before) * after;
+
+  return height === frameHeight ? undefined : height;
 }
 
 function columnShares(widths: readonly number[]): readonly number[] {
@@ -184,6 +203,7 @@ export function editTableContent(
   object: BoardObject,
   current: JsonObject,
   { data, widthChange }: TableEdit,
+  locked: boolean,
 ): ContentPayloadDecision {
   const issue = tableContentIssue(data);
   if (issue) {
@@ -205,6 +225,7 @@ export function editTableContent(
   const width = widthChange?.width ?? object.geometry.width;
   const resizedFrame = width !== object.geometry.width;
   const geometryChanged = changesLayout || resizedFrame;
+  const height = tableHeight(object.geometry.height, current, data, locked);
   const label = typeof data.text === 'string' ? data.text : object.label;
 
   return {
@@ -212,6 +233,7 @@ export function editTableContent(
     label,
     data,
     geometryWidth: geometryChanged ? width : undefined,
+    geometryHeight: height,
     requiresGeometryUnlock: columnsResized || resizedFrame,
   };
 }

@@ -32,7 +32,8 @@ test('presents an existing selection without replacing Canvas or writing geometr
     await app.drag(grab, grab);
     expect(canvas.querySelectorAll('[data-canvas-static-corner]')).toHaveLength(4);
 
-    await app.update(() => action(canvas, '全屏观看选区').click());
+    const origin = action(canvas, '全屏观看选区');
+    await app.update(() => origin.click());
     await flushViewport();
     expect(app.canvas()).toBe(canvas);
     expect(canvas.hasAttribute('data-canvas-presentation')).toBe(true);
@@ -48,7 +49,8 @@ test('presents an existing selection without replacing Canvas or writing geometr
     expect(world?.style.transform).toBe(originalTransform);
     expect(canvas.hasAttribute('data-canvas-presentation')).toBe(false);
     expect(canvas.querySelectorAll('[data-canvas-static-corner]')).toHaveLength(4);
-    expect(document.activeElement).toBe(canvas);
+    expect(origin.isConnected).toBe(false);
+    expect(document.activeElement).toBe(action(canvas, '全屏观看选区'));
   } finally {
     app.dispose();
   }

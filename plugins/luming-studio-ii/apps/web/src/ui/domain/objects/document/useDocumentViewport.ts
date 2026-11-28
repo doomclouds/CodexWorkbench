@@ -21,6 +21,27 @@ function blockAt(root: HTMLElement, id: string) {
   );
 }
 
+function headingAtScroll(paper: HTMLElement, region: HTMLElement) {
+  const atBottom =
+    region.scrollTop > 0 && region.scrollHeight - region.clientHeight - region.scrollTop <= 1;
+  const top = region.getBoundingClientRect().top + 1;
+  let current: string | undefined;
+  for (const heading of paper.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6')) {
+    const block = heading.closest<HTMLElement>('[data-document-read-block],[data-id]');
+    const id = block?.dataset.documentReadBlock ?? block?.dataset.id;
+    if (!id) {
+      continue;
+    }
+    if (current !== undefined && !atBottom && heading.getBoundingClientRect().top > top) {
+      break;
+    }
+
+    current = id;
+  }
+
+  return current;
+}
+
 function blockSearch(blocks: readonly DocumentBlock[], find: string) {
   const target = find.trim().toLocaleLowerCase();
 
@@ -89,6 +110,7 @@ export function useDocumentViewport(
   value: DocumentContent,
   version: number,
   nativeBlockRequest?: DocumentObjectProps['nativeBlockRequest'],
+  focused = false,
 ) {
   const body = useRef<HTMLDivElement>(null);
   const scroll = useRef<ScrollRegionHandle>(null);
@@ -97,7 +119,12 @@ export function useDocumentViewport(
   const [selectionVersion, setSelectionVersion] = useState<number>();
   const [find, setFind] = useState('');
   const [index, setIndex] = useState(0);
+  const [headingId, setHeadingId] = useState<string>();
+  const headingJump = useRef<number | undefined>(undefined);
   const blocks = flattenBlocks(value.blocks);
+  const headings = blocks.filter((block) => block.type === 'heading');
+  const currentHeadingId =
+    headings.find((heading) => heading.id === headingId)?.id ?? headings[0]?.id;
   const matches = blockSearch(blocks, find);
   const selected = matches.at(index % Math.max(1, matches.length));
   const currentId = selected?.id;
@@ -123,7 +150,19 @@ export function useDocumentViewport(
   }, [currentId, expanded, mode]);
 
   function handleScroll(positionNow: ScrollRegionPosition) {
-    position.current[expanded ? 'expanded' : 'inline'] = positionNow;
+    const view = expanded ? 'expanded' : 'inline';
+    const movedVertically = position.current[view].top !== positionNow.top;
+    const followsOutline = focused && movedVertically;
+    position.current[view] = positionNow;
+    const paper = body.current;
+    const region = paper?.parentElement;
+    if (followsOutline && paper && region) {
+      const jump = headingJump.current;
+      headingJump.current = undefined;
+      if (jump === undefined || Math.abs(positionNow.top - jump) > 1) {
+        setHeadingId(headingAtScroll(paper, region));
+      }
+    }
   }
 
   function handleFind(valueNow: string) {
@@ -139,9 +178,26 @@ export function useDocumentViewport(
   }
 
   function reveal(id: string) {
-    if (body.current) {
-      blockAt(body.current, id)?.scrollIntoView({ block: 'nearest' });
+    const paper = body.current;
+    const block = paper && blockAt(paper, id);
+    if (!block) {
+      return;
     }
+
+    const region = paper.parentElement;
+    if (!focused || !region) {
+      block.scrollIntoView({ block: 'nearest' });
+      return;
+    }
+
+    const offset = block.getBoundingClientRect().top - region.getBoundingClientRect().top;
+    const top = Math.max(
+      0,
+      Math.min(region.scrollTop + offset, region.scrollHeight - region.clientHeight),
+    );
+    setHeadingId(id);
+    headingJump.current = top !== region.scrollTop ? top : undefined;
+    scroll.current?.scrollTo({ top });
   }
 
   function captureSelection() {
@@ -205,7 +261,8 @@ export function useDocumentViewport(
     matches,
     currentId,
     matchIndex: index % Math.max(1, matches.length),
-    headings: blocks.filter((block) => block.type === 'heading'),
+    headings,
+    currentHeadingId,
     handleScroll,
     handleFind,
     advance,

@@ -138,7 +138,8 @@ function StickerView({
   request,
   onRetentionChange,
 }: CanvasObjectViewProps) {
-  const { id, fallback } = stickerValue(payload?.value);
+  const { id: storedId, fallback } = stickerValue(payload?.value);
+  const id = payload ? storedId : readText(object.metadata?.stickerId);
   const text = fallback ?? object.label;
   const graphic = stickerDefinition(id);
   const canOpenLegacy = !graphic && !readOnly;

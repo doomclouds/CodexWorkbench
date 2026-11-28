@@ -1,5 +1,6 @@
 import { basename, dirname, relative, resolve, sep } from 'node:path';
 import manifest from '../package.json' with { type: 'json' };
+import { allowsConnectorRoute, connectorRoute } from './connector-route-boundary.mjs';
 import {
   aliasTargets,
   baseRoot,
@@ -344,6 +345,13 @@ const contractBoundary = {
       }
 
       const clean = specifier.split(/[?#]/u)[0];
+      if (clean === connectorRoute) {
+        if (specifier !== clean || !allowsConnectorRoute(file, node)) {
+          context.report({ node, messageId: 'import' });
+        }
+
+        return;
+      }
       const targets = referenceTargets(file, clean);
       for (const target of targets) {
         const privatePackagePath = clean !== canvasSpecifier && clean.startsWith(packageName + '/');

@@ -261,6 +261,19 @@
   gap: 3px;
 }
 
+.studio-ui-canvas-selection-actions[data-canvas-toolbar-compact]
+  > .whiteboard-editor__geometry-actions {
+  display: contents;
+}
+
+.studio-ui-canvas-selection-actions[data-canvas-toolbar-compact]
+  [data-canvas-toolbar-primary-action] {
+  position: sticky;
+  z-index: 1;
+  inset-inline-end: 0;
+  background-color: var(--studio-ui-canvas-selection-surface, var(--studio-ui-surface, Canvas));
+}
+
 .whiteboard-editor__selection-icon {
   display: grid;
   flex-shrink: 0;
@@ -293,8 +306,9 @@
   opacity: 0.45;
 }
 
-.whiteboard-editor__selection-label {
+.studio-ui-canvas-selection-actions > .whiteboard-editor__selection-label {
   flex: 0 1 auto;
+  min-inline-size: 0;
   max-inline-size: min(170px, 40vw);
   padding-inline: 7px;
   overflow: hidden;
@@ -325,6 +339,8 @@
   --studio-ui-surface: var(--board-float, Canvas);
   --studio-ui-border: var(--board-float-border, #d9d9d9);
   inline-size: 220px;
+  max-inline-size: calc(100vw - 16px);
+  max-block-size: calc(100dvh - 16px);
   gap: 0;
   padding: 4px;
   border-radius: 9px;

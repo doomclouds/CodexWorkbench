@@ -1,4 +1,5 @@
 import { isBuiltin } from 'node:module';
+import { extname } from 'node:path';
 import { localResolver, projectPath, serverRoot } from './project-paths.mjs';
 
 const whiteboard = 'src/modules/whiteboard/';
@@ -191,6 +192,11 @@ const portLayers = new Set([
   'rooms-ports',
 ]);
 const protocolPrefix = '@codexworkbench/luming-studio-ii-contracts/whiteboard/';
+const connectorRoute = protocolPrefix + 'connector-route';
+const connectorRouteSources = new Set([
+  whiteboard + 'domain/export-geometry',
+  whiteboard + 'domain/export-svg',
+]);
 const catalogProtocol = '@codexworkbench/luming-studio-ii-contracts/catalog/service';
 const roomsProtocol = '@codexworkbench/luming-studio-ii-contracts/rooms/service';
 const roomStreamRoute = 'src/entrypoints/http/room-event-stream';
@@ -356,6 +362,15 @@ function usesTypesOnly(node) {
   );
 }
 
+function allowsConnectorRoute(node, from, file) {
+  const namedImport =
+    node.type === 'ImportDeclaration' &&
+    node.specifiers.length > 0 &&
+    node.specifiers.every(({ type }) => type === 'ImportSpecifier');
+
+  return connectorRouteSources.has(from) && extname(file) === '.ts' && namedImport;
+}
+
 function importBinding(sourceCode, identifier) {
   let scope = sourceCode.getScope(identifier);
   while (scope) {
@@ -400,6 +415,13 @@ const contractBoundary = {
         return;
       }
 
+      if (specifier === connectorRoute) {
+        if (reexport || !allowsConnectorRoute(node, from, context.physicalFilename)) {
+          context.report({ node, messageId: reexport ? 'reexport' : 'dependency' });
+        }
+
+        return;
+      }
       const local = resolveLocal(specifier);
       if (local && !local.file) {
         context.report({ node, messageId: 'unresolved' });
@@ -426,21 +448,21 @@ const contractBoundary = {
         inspect(node, node.source, true);
         return;
       }
-      if (!usesTypesOnly(node)) {
-        for (const specifier of node.specifiers) {
-          inspectExportedBinding(specifier, specifier.local);
-        }
+      const typeOnly = usesTypesOnly(node);
+      for (const specifier of node.specifiers) {
+        inspectExportedBinding(specifier, specifier.local, typeOnly);
       }
     }
 
-    function inspectExportedBinding(node, identifier) {
+    function inspectExportedBinding(node, identifier, typeOnly = false) {
       if (identifier?.type !== 'Identifier') {
         return;
       }
 
       const binding = importBinding(context.sourceCode, identifier);
-      if (binding?.parent?.source) {
-        inspect(node, binding.parent.source, true);
+      const source = binding?.parent?.source;
+      if (source && (!typeOnly || source.value === connectorRoute)) {
+        inspect(node, source, true);
       }
     }
 

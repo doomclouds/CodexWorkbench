@@ -6,7 +6,7 @@ interface FeedbackShortcutOptions {
   readonly enabled: boolean;
   readonly singleKeys: boolean;
   readonly onBegin: () => void;
-  readonly onCancel: () => void;
+  readonly onCancel: () => boolean;
 }
 
 const shortcutExclusions =
@@ -28,7 +28,9 @@ export function useFeedbackShortcut({
 }: FeedbackShortcutOptions) {
   const handleShortcut = useEffectEvent((event: KeyboardEvent) => {
     if (event.key === 'Escape' && !event.defaultPrevented) {
-      onCancel();
+      if (onCancel()) {
+        event.preventDefault();
+      }
       return;
     }
 

@@ -58,6 +58,7 @@ import { adjacentTextDraft, clipboardTextDraft } from './geometry-commands.js';
 import { useGeometryEdits } from './geometry-session.js';
 import { readBoardDraftCurrent } from './local-board-drafts.js';
 import { useMoveSession } from './move-session.js';
+import { describeSelectionLocks } from './organization-selection.js';
 import { renderSuggestionPreview } from './suggestion-preview.js';
 import { useBoardPresentation } from './use-board-presentation.js';
 import { useBoardClipboard } from './use-board-clipboard.js';
@@ -268,6 +269,22 @@ function welcomeAvailable(
 
 function bodyEditingAvailable(online: boolean, expanded: boolean, scope?: string) {
   return online || (expanded && Boolean(scope));
+}
+
+function geometryAvailability(
+  editingReady: boolean,
+  hasGeometryService: boolean,
+  undoPending: boolean,
+  geometry: Pick<ReturnType<typeof useGeometryEdits>, 'hasPendingEdit' | 'canQueueInk'>,
+  tool: BoardTool,
+) {
+  const historyReady = editingReady && !geometry.hasPendingEdit;
+  const canEdit = historyReady && !undoPending;
+  const canInsert = canEdit && hasGeometryService;
+  const canDraw = editingReady && !undoPending && hasGeometryService && geometry.canQueueInk;
+  const canChooseTools = canInsert || (tool === 'pen' && canDraw);
+
+  return { historyReady, canEdit, canInsert, canDraw, canChooseTools };
 }
 
 function annotationActions(
@@ -536,6 +553,9 @@ function BoardWorkspace({
     onRestore: restoreViewport,
     onFit: fitPresentation,
     focusCanvas,
+    findViewingTrigger: () =>
+      canvasArea?.querySelector<HTMLButtonElement>('.whiteboard-chrome__selection-viewing') ??
+      undefined,
   });
 
   function handleOpenViewing(ids: readonly string[], trigger?: HTMLButtonElement) {
@@ -674,15 +694,20 @@ function BoardWorkspace({
     onApplied: handleEditApplied,
     onConflict: session.acceptConflict,
   });
-  const historyReady = editingReady && !geometry.hasPendingEdit;
-  const canEdit = historyReady && !undo.hasPendingEdit;
-  const canInsert = canEdit && Boolean(editService);
+  const { historyReady, canEdit, canInsert, canDraw, canChooseTools } = geometryAvailability(
+    editingReady,
+    Boolean(editService),
+    undo.hasPendingEdit,
+    geometry,
+    tool,
+  );
   const viewportHistory = {
     canUndo: historyReady && undo.canUndo,
     canRedo: historyReady && undo.canRedo,
     onChange: (direction: 'undo' | 'redo') => undo[direction](),
   };
   const selectedObjects = selectedObjectsFor(projection, selection);
+  const selectionLocks = describeSelectionLocks(selectedObjects, projection.objectsById);
   const selectedHtmlId = selectedHtmlObjectId(selectedObjects, state.payloads);
 
   async function handleObjectIntent(intent: CanvasObjectIntent) {
@@ -769,6 +794,7 @@ function BoardWorkspace({
     selection,
     active: !viewOnly && !annotationActive,
     canEdit: canInsert && !annotationActive,
+    hasLockedSelection: selectionLocks.ids.size > 0,
     onSelectionAction: geometry.handleSelectionAction,
     onObjects: geometry.handlePaste,
     onText: insertClipboardText,
@@ -1036,7 +1062,9 @@ function BoardWorkspace({
   const selectionActions = (
     <WorkspaceSelectionBar
       selection={selectedObjects}
+      locks={selectionLocks}
       editAvailable={Boolean(editService)}
+      formatAvailable={editingReady}
       canEdit={canEdit}
       onOpenViewing={(trigger) => handleOpenViewing(selection, trigger)}
       onEditObject={editObject}
@@ -1087,6 +1115,7 @@ function BoardWorkspace({
           presentation: scope,
           selectionActions,
           canEdit,
+          canDraw,
           pendingResizeObjectId: online && !annotationActive ? pendingPlacement?.id : undefined,
           nudgeSave: online && !annotationActive ? move.nudgeSave : undefined,
           canEditExpandedObject: canEditExpanded,
@@ -1242,7 +1271,11 @@ function BoardWorkspace({
           readNotices={renderEditNotices()}
         />
         {room?.notice}
-        <div className="whiteboard-editor__canvas" ref={setCanvasArea}>
+        <div
+          className="whiteboard-editor__canvas"
+          data-document-reading={documentReading || undefined}
+          ref={setCanvasArea}
+        >
           <BoardDraftRecovery
             draftAccess={content.draftAccess}
             readCurrent={(objectId, signal) =>
@@ -1295,7 +1328,7 @@ function BoardWorkspace({
                 visible={board.canEdit}
                 canInsertImage={board.canEdit}
                 mediaPaused={!online}
-                canEditGeometry={canInsert}
+                canEditGeometry={canChooseTools}
                 renderMedia={features.renderMedia}
                 onApplied={handleEditApplied}
                 onToolChange={handleToolChange}
@@ -1376,6 +1409,7 @@ function BoardWorkspace({
         <GeometryBoardMenu
           anchor={menuAnchor}
           selection={selectedObjects}
+          locks={selectionLocks}
           canEdit={canInsert}
           onAction={geometry.handleSelectionAction}
           onFit={handleManualFit}

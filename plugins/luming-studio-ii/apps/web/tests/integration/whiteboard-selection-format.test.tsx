@@ -43,7 +43,11 @@ async function unexpected(): Promise<never> {
   throw new Error('Unexpected whiteboard operation.');
 }
 
-function selectionApp(objects: readonly WhiteboardObject[], canEdit = true) {
+function selectionApp(
+  objects: readonly WhiteboardObject[],
+  canEdit = true,
+  waitForEdit?: () => Promise<void>,
+) {
   const commands: EditBoardGeometryCommand[] = [];
   const service: WhiteboardService = {
     getScene: async () => ({ boardId, title: '格式栏验收', revision: 1n, objects, canEdit }),
@@ -54,6 +58,7 @@ function selectionApp(objects: readonly WhiteboardObject[], canEdit = true) {
   const editService: WhiteboardEditService = {
     async editGeometry(command) {
       commands.push(command);
+      await waitForEdit?.();
       return {
         kind: 'applied',
         boardId,
@@ -155,6 +160,72 @@ test('emits the original fill and stroke values and applies shape form through g
     expect(app.commands[2]?.operation).toMatchObject({
       kind: 'style',
       patch: { stroke: '#2F7CC4', dashed: true },
+    });
+  } finally {
+    app.dispose();
+  }
+});
+
+test('keeps the style panel open during an edit and dismisses it when leaving the selection', async () => {
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const app = selectionApp([rectangle, note], true, () => pending);
+  const panel = () => app.host.querySelector('[role="dialog"][aria-label="边框与线条"]');
+
+  try {
+    await app.open(boardId);
+    await app.drag({ x: 70, y: 70 }, { x: 70, y: 70 });
+    await app.click('边框与线条');
+    const open = panel();
+    expect(open).not.toBeNull();
+
+    await app.click('虚线');
+    expect(panel()).toBe(open);
+    expect(open?.querySelector<HTMLInputElement>('input')?.readOnly).toBe(true);
+
+    await app.update(release);
+    expect(panel()).toBe(open);
+    expect(open?.querySelector<HTMLInputElement>('input')?.readOnly).toBe(false);
+
+    await app.click('墨色 陶土色');
+    expect(app.commands[1]?.operation).toMatchObject({
+      kind: 'style',
+      patch: { stroke: '#D97757' },
+    });
+    expect(panel()).toBe(open);
+
+    await app.drag({ x: 240, y: 70 }, { x: 240, y: 70 });
+    expect(panel()).toBeNull();
+  } finally {
+    release();
+    app.dispose();
+  }
+});
+
+test('uses the actual swatch values for explicit white and ink text colors', async () => {
+  const app = selectionApp([rectangle]);
+
+  try {
+    await app.open(boardId);
+    await app.drag({ x: 70, y: 70 }, { x: 70, y: 70 });
+    await app.click('文字颜色');
+    const white = app.host.querySelector<HTMLButtonElement>('[aria-label="墨色 白色"]');
+    const ink = app.host.querySelector<HTMLButtonElement>('[aria-label="墨色 墨色"]');
+    expect(white?.style.background).toBe('rgb(255, 255, 255)');
+    expect(ink?.style.background).toBe('rgb(11, 11, 11)');
+
+    await app.click('墨色 白色');
+    expect(app.commands[0]?.operation).toMatchObject({
+      kind: 'style',
+      patch: { textColor: '#FFFFFF' },
+    });
+
+    await app.click('墨色 墨色');
+    expect(app.commands[1]?.operation).toMatchObject({
+      kind: 'style',
+      patch: { textColor: '#0B0B0B' },
     });
   } finally {
     app.dispose();

@@ -1,11 +1,23 @@
 import { useEffectEvent, useImperativeHandle, useLayoutEffect, useRef } from 'react';
-import type { ClipboardEvent, CSSProperties, FocusEvent, KeyboardEvent, Ref } from 'react';
+import type {
+  ClipboardEvent,
+  CSSProperties,
+  FocusEvent,
+  KeyboardEvent,
+  MouseEvent,
+  Ref,
+} from 'react';
 import { readDocument, renderDocument } from './editor-document.js';
 import { indentList, patchSelectedRuns, toggleList } from './editor-format.js';
 import { markdownLines, serialize } from './editor-markdown.js';
 import { lineText, sameEditLines, snapshotLines } from './editor-model.js';
 import type { DocumentText, EditSnapshot, Run, SelectionOffsets } from './editor-model.js';
-import { restoreSelection, selectedRuns, selectionOffsets } from './editor-selection.js';
+import {
+  restoreSelection,
+  selectedLink,
+  selectedRuns,
+  selectionOffsets,
+} from './editor-selection.js';
 import { safeHttpLink } from './rich-text.js';
 import './text.css';
 
@@ -196,19 +208,41 @@ export function InlineTextEditor({
 
     const doc = readDocument(editor);
     const selection = editorSelection(editor, doc, savedSelection.current);
-    savedSelection.current = selection;
-    const current = selectedRuns(doc, selection, savedCaret.current)[0]?.href ?? '';
-    onRequestLink?.(current);
+    const link = selectedLink(doc, selection, savedCaret.current);
+    if (link) {
+      restoreSelection(editor, link.selection);
+    }
+
+    savedSelection.current = link?.selection ?? selection;
+    onRequestLink?.(link?.href ?? '');
 
     return true;
+  }
+
+  function updateLink(url: string) {
+    const href = safeHttpLink(url);
+    if (url && !href) {
+      return false;
+    }
+
+    return mutate((doc, selection) => {
+      const target = selectedLink(doc, selection, savedCaret.current)?.selection ?? selection;
+      if (href && target.start === target.end) {
+        patchSelectedRuns(doc, target, (run) => ({ ...run, text: href, href }));
+        selection.end += href.length;
+        return;
+      }
+
+      patchSelectedRuns(doc, target, (run) => ({ ...run, href }));
+    });
   }
 
   function format(kind: InlineTextFormat, url?: string) {
     if (disabled) {
       return false;
     }
-    if (kind === 'link' && url === undefined) {
-      return requestLink();
+    if (kind === 'link') {
+      return url === undefined ? requestLink() : updateLink(url);
     }
 
     if (kind === 'bullets' || kind === 'numbered') {
@@ -217,17 +251,10 @@ export function InlineTextEditor({
       return mutate((doc, selection) => toggleList(doc, selection, list));
     }
 
-    const href = safeHttpLink(url);
-    const invalidLink = kind === 'link' && Boolean(url) && !href;
-    if (invalidLink) {
-      return false;
-    }
-
     return mutate((doc, selection) => {
       const runs = selectedRuns(doc, selection, savedCaret.current);
-      const enabled = kind !== 'link' && !runs.every((run) => run[kind]);
-      const patch = (run: Run) =>
-        kind === 'link' ? { ...run, href } : { ...run, [kind]: runs.length === 0 || enabled };
+      const enabled = runs.length === 0 || !runs.every((run) => run[kind]);
+      const patch = (run: Run) => ({ ...run, [kind]: enabled });
       patchSelectedRuns(doc, selection, patch);
     });
   }
@@ -344,6 +371,12 @@ export function InlineTextEditor({
     const toolbarFocused = event.relatedTarget?.closest('.studio-selection-toolbar');
     if (!event.defaultPrevented && !toolbarFocused) {
       onCommit(false);
+    }
+  }
+
+  function handleClick(event: MouseEvent<HTMLDivElement>) {
+    if (event.target instanceof Element && event.target.closest('a')) {
+      event.preventDefault();
     }
   }
 
@@ -478,6 +511,7 @@ export function InlineTextEditor({
       data-canvas-native=""
       data-native-interactive="true"
       onPointerDown={(event) => event.stopPropagation()}
+      onClick={handleClick}
       onPointerUp={handleSelectionChange}
       onKeyUp={handleSelectionChange}
       onInput={handleInput}

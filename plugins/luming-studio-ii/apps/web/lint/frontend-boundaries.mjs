@@ -1,5 +1,6 @@
 import { basename, dirname, relative, resolve, sep } from 'node:path';
 import manifest from '../package.json' with { type: 'json' };
+import { allowsConnectorRoute, connectorRoute } from './connector-route-boundary.mjs';
 import { isObjectEntry, objectTargets } from './objects-boundaries.mjs';
 import { isRegisteredPage, pageRegistryEntries, pageRegistryFile } from './page-registry.mjs';
 import { aliasTargets, contains, sourceRoot, testsRoot } from './project-paths.mjs';
@@ -459,6 +460,13 @@ const contractBoundary = {
       }
 
       const [specifier] = written.split(/[?#]/u, 1);
+      if (specifier === connectorRoute) {
+        if (reexport) {
+          return 'reexport';
+        }
+
+        return written === specifier && allowsConnectorRoute(file, node) ? undefined : 'dependency';
+      }
       if (file === stickerCatalog && written === stickerArtwork) {
         return;
       }
@@ -484,18 +492,17 @@ const contractBoundary = {
     }
 
     function checkExportedBinding(node, identifier, typeOnly = false) {
-      if (!governed || identifier?.type !== 'Identifier') {
+      if (identifier?.type !== 'Identifier') {
         return;
       }
 
       const definition = bindingOf(context.sourceCode, identifier)?.defs[0];
       if (definition?.type === 'ImportBinding') {
         const source = definition.parent.source;
-        if (
-          !typeOnly ||
-          mcpSdkLibraries.has(source.value) ||
-          source.value.startsWith('@connectrpc/')
-        ) {
+        const privatePackage =
+          !typeOnly || mcpSdkLibraries.has(source.value) || source.value.startsWith('@connectrpc/');
+
+        if (source.value === connectorRoute || (governed && privatePackage)) {
           checkReference(node, source, true);
         }
       }

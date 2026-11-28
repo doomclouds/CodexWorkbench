@@ -98,3 +98,45 @@ export function selectedRuns(
 
   return runs;
 }
+
+function wholeLink(value: DocumentText, run: Run, href: string) {
+  for (const [index, { runs }] of value.lines.entries()) {
+    const at = runs.indexOf(run);
+    if (at === -1) {
+      continue;
+    }
+
+    let first = at;
+    let last = at + 1;
+    while (runs[first - 1]?.href === href) {
+      first--;
+    }
+    while (runs[last]?.href === href) {
+      last++;
+    }
+
+    const start = runs
+      .slice(0, first)
+      .reduce((offset, item) => offset + item.text.length, value.starts[index]!);
+    const end = runs.slice(first, last).reduce((offset, item) => offset + item.text.length, start);
+
+    return { start, end };
+  }
+}
+
+export function selectedLink(
+  value: DocumentText,
+  selection: SelectionOffsets,
+  caret?: Node | null,
+) {
+  const runs = selectedRuns(value, selection, caret);
+  const run = runs[0];
+  const href = run?.href;
+  if (!run || !href || !runs.every((item) => item.href === href)) {
+    return undefined;
+  }
+
+  const range = selection.start === selection.end ? wholeLink(value, run, href) : undefined;
+
+  return { href, selection: range ?? selection };
+}

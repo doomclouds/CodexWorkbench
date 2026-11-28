@@ -197,6 +197,7 @@ export function ViewingControls({
       </button>
       <button
         type="button"
+        className="whiteboard-viewing__clear-ink"
         aria-label="清除临时笔迹"
         title="清除本次观看的临时笔迹"
         onClick={(event) => refocus(event, onClear)}

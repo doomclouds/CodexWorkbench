@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react';
 import type {
   BoardEditReceipt,
   BoardEditRejection,
@@ -8,6 +8,7 @@ import type {
 } from '../../data/whiteboard/index.js';
 import {
   expandCanvasSelection,
+  type CanvasCreateIntent,
   type CanvasEditIntent,
   type CanvasGeometry,
   type CanvasObject,
@@ -83,6 +84,10 @@ function errorDetail(error: unknown): string {
   return error instanceof Error ? error.message : '请求失败。';
 }
 
+function isInkCreation(operation: EditBoardGeometryOperation) {
+  return operation.kind === 'create' && operation.object.kind === 'ink';
+}
+
 async function readReceipt(
   service: GeometryService,
   { command, controller }: PendingEdit,
@@ -124,6 +129,7 @@ export function useGeometryEdits({
   onConflict,
 }: GeometryOptions) {
   const [state, setState] = useState<GeometryState>({ kind: 'idle' });
+  const [inkQueue, setInkQueue] = useState<readonly CanvasCreateIntent[]>([]);
   const pending = useRef<PendingEdit | undefined>(undefined);
   const running = useRef(false);
   const queuedResize = useRef<CanvasTransformIntent | undefined>(undefined);
@@ -164,10 +170,15 @@ export function useGeometryEdits({
       case 'applied': {
         setState({ kind: 'saved' });
         const placementKind = edit.placement?.kind;
-        onApplied(receipt, selectionForOperation(edit.command.operation), {
-          selectionCurrent,
-          editText: (placementKind === 'text' || placementKind === 'note') && !resize,
-        });
+        const operation = edit.command.operation;
+        onApplied(
+          receipt,
+          isInkCreation(operation) ? undefined : selectionForOperation(operation),
+          {
+            selectionCurrent,
+            editText: (placementKind === 'text' || placementKind === 'note') && !resize,
+          },
+        );
         const placed = receipt.objects.find(({ id }) => id === edit.placement?.id);
         if (placed && resize && canWriteCurrent.current) {
           submitEdit({
@@ -190,6 +201,9 @@ export function useGeometryEdits({
       case 'rejected':
         if (edit.placement) {
           onPlacementFailed(edit.placement.id, selectionCurrent);
+        }
+        if (receipt.reason === 'forbidden') {
+          setInkQueue([]);
         }
         setState({ kind: 'rejected', detail: rejectionDetails[receipt.reason] });
         break;
@@ -258,6 +272,13 @@ export function useGeometryEdits({
   }
 
   function submitEdit(intent: CanvasEditIntent, optimisticPlacement = false) {
+    if (intent.kind === 'create' && intent.object.kind === 'ink') {
+      if (canEdit && service && state.kind !== 'unknown') {
+        setInkQueue((current) => [...current, intent]);
+      }
+
+      return;
+    }
     if (canEdit && intent.kind === 'resize' && intent.changes.length === 1) {
       const [change] = intent.changes;
       if (change && change.id === pending.current?.placement?.id) {
@@ -280,6 +301,21 @@ export function useGeometryEdits({
   function reportEditFailure(error: unknown) {
     setState({ kind: 'rejected', detail: errorDetail(error) });
   }
+
+  const submitQueuedInk = useEffectEvent((stroke: CanvasCreateIntent) => {
+    if (!canEdit || !service || pending.current) {
+      return;
+    }
+
+    setInkQueue((current) => current.slice(1));
+    start((commandId) => geometryOperation(stroke, commandId), [stroke])?.catch(reportEditFailure);
+  });
+  const nextStroke = inkQueue[0];
+  useEffect(() => {
+    if (nextStroke) {
+      submitQueuedInk(nextStroke);
+    }
+  }, [nextStroke, state.kind, canEdit, service]);
 
   function handleEdit(intent: CanvasEditIntent) {
     submitEdit(intent)?.catch(reportEditFailure);
@@ -328,8 +364,12 @@ export function useGeometryEdits({
     state,
     pendingPlacement:
       placement && placementGeometry ? { ...placement, geometry: placementGeometry } : placement,
-    pendingEdits: 'edit' in state ? state.edit.edits : emptyEdits,
-    hasPendingEdit: 'edit' in state,
+    pendingEdits: inkQueue.length
+      ? [...(currentEdit?.edits ?? emptyEdits), ...inkQueue]
+      : (currentEdit?.edits ?? emptyEdits),
+    hasPendingEdit: Boolean(currentEdit) || inkQueue.length > 0,
+    canQueueInk:
+      state.kind !== 'unknown' && (!currentEdit || isInkCreation(currentEdit.command.operation)),
     handleEdit,
     submitEdit,
     reportEditFailure,

@@ -14,7 +14,7 @@ const point: ActionMenuAnchor = { x: 32, y: 48 };
 const items: readonly ActionMenuItem[] = [
   { id: 'copy', label: '复制', disabled: true },
   { id: 'rename', label: '重命名' },
-  { id: 'remove', label: '删除' },
+  { id: 'remove', label: '删除', tone: 'danger' },
 ];
 
 function getMenu(host: HTMLElement) {
@@ -104,6 +104,8 @@ describe('ActionMenu', () => {
       '重命名',
       '删除',
     ]);
+    expect(getItem(menu, '删除').dataset.tone).toBe('danger');
+    expect(getItem(menu, '重命名').dataset.tone).toBeUndefined();
     expect(Number.parseFloat(menu.style.left)).toBe(point.x);
     expect(Number.parseFloat(menu.style.top)).toBe(point.y);
     expect(menu.dataset.placement).toBeUndefined();

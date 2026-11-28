@@ -116,14 +116,15 @@ export function expandMoveIds(
   selection: readonly string[],
   changes: ReadonlyMap<string, CanvasObjectChange> = new Map(),
 ): readonly string[] {
-  return expandIds(index, selection, changes, false);
+  return expandIds(index, selection, changes, 'none');
 }
 
 export function expandCanvasSelection(
   objects: readonly CanvasObject[],
   ids: readonly string[],
+  scope: 'move' | 'copy' = 'move',
 ): readonly string[] {
-  return expandMoveIds(createSceneIndex(objects), ids);
+  return expandIds(createSceneIndex(objects), ids, new Map(), scope === 'copy' ? 'direct' : 'none');
 }
 
 export function expandSelectionIds(
@@ -131,20 +132,22 @@ export function expandSelectionIds(
   selection: readonly string[],
   changes: ReadonlyMap<string, CanvasObjectChange> = new Map(),
 ): readonly string[] {
-  return expandIds(index, selection, changes, true);
+  return expandIds(index, selection, changes, 'all');
 }
 
 function expandIds(
   index: SceneIndex,
   selection: readonly string[],
   changes: ReadonlyMap<string, CanvasObjectChange>,
-  includeLocked: boolean,
+  locked: 'none' | 'direct' | 'all',
 ): readonly string[] {
   const pending = new Set(selection);
+  const direct = locked === 'direct' ? new Set(selection) : undefined;
   const seenGroups = new Set<string>();
   const included: string[] = [];
   for (const id of pending) {
     const entry = projectObject(index, changes, id);
+    const includeLocked = locked === 'all' || direct?.has(id);
     if (!entry || (!includeLocked && isObjectLocked(index, id))) {
       continue;
     }

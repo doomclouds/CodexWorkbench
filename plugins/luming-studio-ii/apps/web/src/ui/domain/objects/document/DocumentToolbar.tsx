@@ -2,7 +2,7 @@ import { useEffect, useEffectEvent, useImperativeHandle, useRef } from 'react';
 import type { KeyboardEvent, ReactNode, Ref } from 'react';
 import { Button, Select, StatusText, Toolbar } from '../../../base/index.js';
 import type { SearchFieldHandle } from '../../../base/index.js';
-import type { DocumentActivity, DocumentObjectProps } from './contracts.js';
+import type { DocumentActivity, DocumentExportFormat, DocumentObjectProps } from './contracts.js';
 import { blockText, documentText, documentTitleLimit, untitledDocument } from './model.js';
 import type { useDocumentDraft } from './useDocumentDraft.js';
 import type { useDocumentViewport } from './useDocumentViewport.js';
@@ -14,6 +14,7 @@ interface EditorToolbarProps {
   readonly iconOnly?: boolean;
   readonly expandControl?: DocumentObjectProps['expandControl'];
   readonly readOnly: boolean;
+  readonly annotationActive?: boolean;
   readonly exportOpen: boolean;
   readonly draft: ReturnType<typeof useDocumentDraft>;
   readonly outline?: ReactNode;
@@ -82,7 +83,7 @@ function DocumentExportIcon() {
   );
 }
 
-function DocumentReadIcon() {
+export function DocumentReadIcon() {
   return (
     <svg
       width="17"
@@ -173,7 +174,7 @@ function DocumentExport({
     return () => owner.removeEventListener('pointerdown', closeOutside);
   }, [exportOpen]);
 
-  async function exportDocument(format: 'html' | 'json', signal: AbortSignal) {
+  async function exportDocument(format: DocumentExportFormat, signal: AbortSignal) {
     const value = await draft.prepareExport();
     if (value && !signal.aborted) {
       const { title, document } = value;
@@ -181,7 +182,7 @@ function DocumentExport({
     }
   }
 
-  function handleExport(format: 'html' | 'json') {
+  function handleExport(format: DocumentExportFormat) {
     if (activeExport.current) {
       return;
     }
@@ -211,6 +212,9 @@ function DocumentExport({
       />
       {exportOpen && (
         <div className="studio-document-export-options" role="menu" aria-label="文档导出格式">
+          <button type="button" role="menuitem" onClick={() => handleExport('md')}>
+            全文 Markdown
+          </button>
           <button type="button" role="menuitem" onClick={() => handleExport('html')}>
             全文 HTML
           </button>
@@ -227,10 +231,14 @@ function DocumentModeAction({
   mode,
   iconOnly,
   readOnly,
+  annotationActive,
   onEdit,
   onRead,
   onOpen,
-}: Pick<EditorToolbarProps, 'mode' | 'iconOnly' | 'readOnly' | 'onEdit' | 'onRead' | 'onOpen'>) {
+}: Pick<
+  EditorToolbarProps,
+  'mode' | 'iconOnly' | 'readOnly' | 'annotationActive' | 'onEdit' | 'onRead' | 'onOpen'
+>) {
   const variant = iconOnly ? 'ghost' : undefined;
   if (mode === 'edit') {
     return (
@@ -239,6 +247,7 @@ function DocumentModeAction({
         icon={iconOnly ? <DocumentReadIcon /> : undefined}
         iconOnly={iconOnly}
         variant={variant}
+        disabled={annotationActive}
         onActivate={onRead}
       />
     );
@@ -261,6 +270,7 @@ function DocumentModeAction({
       icon={iconOnly ? <DocumentEditIcon /> : undefined}
       iconOnly={iconOnly}
       variant={variant}
+      disabled={annotationActive}
       onActivate={onEdit}
     />
   );
@@ -295,6 +305,7 @@ export function DocumentToolbar({
   iconOnly = false,
   expandControl,
   readOnly,
+  annotationActive,
   draft,
   outline,
   onEdit,
@@ -320,6 +331,7 @@ export function DocumentToolbar({
           mode={mode}
           iconOnly={iconOnly}
           readOnly={readOnly}
+          annotationActive={annotationActive}
           onEdit={onEdit}
           onRead={onRead}
           onOpen={onOpen}
@@ -360,7 +372,11 @@ export function DocumentToolbar({
       {draft.failure && (
         <div className="studio-document-notice">
           <StatusText message={draft.failure} tone="error" announcement="assertive" />
-          <Button label="重试保存" disabled={readOnly || draft.saving} onActivate={handleRetry} />
+          <Button
+            label="重试保存"
+            disabled={readOnly || annotationActive || draft.saving}
+            onActivate={handleRetry}
+          />
           <Button label="比较最新内容" onActivate={onCompare} />
         </div>
       )}

@@ -89,11 +89,16 @@ function createGeometryScope(writer: BoardEditPlanningReader, board: BoardHeader
   return { board, writer, object, objects };
 }
 
-function isLocked(scope: GeometryScope, object: BoardObject | undefined): boolean {
+function isLocked(
+  scope: GeometryScope,
+  object: BoardObject | undefined,
+  unlocking?: ReadonlySet<string>,
+): boolean {
   const visited = new Set<string>();
   let current = object;
   while (current) {
-    if (current.locked || visited.has(current.objectId)) {
+    const remainsLocked = current.locked && !unlocking?.has(current.objectId);
+    if (remainsLocked || visited.has(current.objectId)) {
       return true;
     }
 
@@ -104,8 +109,12 @@ function isLocked(scope: GeometryScope, object: BoardObject | undefined): boolea
   return false;
 }
 
-function lockedParent(scope: GeometryScope, object: BoardObject): boolean {
-  return object.parentId !== undefined && isLocked(scope, scope.object(object.parentId));
+function lockedParent(
+  scope: GeometryScope,
+  object: BoardObject,
+  unlocking?: ReadonlySet<string>,
+): boolean {
+  return object.parentId !== undefined && isLocked(scope, scope.object(object.parentId), unlocking);
 }
 
 function conflict(scope: GeometryScope, objects: readonly BoardObject[]): BoardEditConflict {
@@ -334,7 +343,9 @@ function changeLock(scope: GeometryScope, operation: Lock): BoardEditDecision {
   if (objects.length === 0) {
     return reject('invalidEdit');
   }
-  if (objects.some((object) => lockedParent(scope, object))) {
+
+  const unlocking = operation.locked ? undefined : new Set(objects.map(({ objectId }) => objectId));
+  if (objects.some((object) => lockedParent(scope, object, unlocking))) {
     return reject('geometryLocked');
   }
   if (objects.some(({ geometryVersion }) => !canAdvanceVersion(geometryVersion))) {
@@ -484,7 +495,7 @@ function reorderObjects(scope: GeometryScope, operation: Reorder): BoardEditDeci
 
   return next.order.some((id, index) => order[index] !== id)
     ? { kind: 'changes', ...next }
-    : reject('invalidEdit');
+    : { kind: 'changes' };
 }
 
 interface Duplication {

@@ -169,13 +169,35 @@ test("archive scenarios still reject direct use of the native file chooser", asy
 const canvasSpec = "whiteboard-basics/objects.spec.mjs";
 
 const whiteboardScopedFixtures = [
-  ["organization", ["workbenchLinkProbe"]],
-  ["objects-media", ["chooseBoardMedia", "imageLoaded", "mediaDisplaySize", "mediaPlaying"]],
-  ["persistence", ["controlNextCanvasSave", "enableCanvasClipboard"]],
+  ["whiteboard-basics/organization", ["workbenchLinkProbe"]],
+  ["whiteboard-basics/objects", ["controlNextCanvasSave"]],
+  [
+    "whiteboard-basics/objects-media",
+    ["chooseBoardMedia", "imageLoaded", "mediaDisplaySize", "mediaPlaying"],
+  ],
+  ["whiteboard-basics/persistence", ["controlNextCanvasSave", "enableCanvasClipboard"]],
+  [
+    "whiteboard-editing/html",
+    ["embedFrame", "chooseHtmlFile", "controlNextHtmlSave", "workbenchLinkProbe"],
+  ],
+  [
+    "whiteboard-editing/document",
+    ["chooseDocumentImage", "readDocumentDownload", "failNextDocumentSave", "workbenchLinkProbe"],
+  ],
+  ["whiteboard-editing/todo", ["controlNextTodoSave", "workbenchLinkProbe"]],
+  ["whiteboard-editing/rich-gestures", ["embedFrame", "workbenchLinkProbe"]],
+  ["whiteboard-editing/organization", ["enableCanvasClipboard"]],
+  ["whiteboard-editing/inline-editing", ["holdNextInlineTextRefresh", "holdNextInlineTextWrite"]],
+  ["whiteboard-editing/reading-controls", ["readViewingInk", "workbenchLinkProbe"]],
+  ["whiteboard-editing/zoom-visibility", ["readZoomDetails", "holdNextCanvasMove"]],
+  [
+    "whiteboard-editing/canvas-extras",
+    ["workbenchLinkProbe", "readPeerCursors", "readPlacementPreview", "controlNextTextSave"],
+  ],
 ];
 
 for (const [name, helpers] of whiteboardScopedFixtures) {
-  const file = "whiteboard-basics/" + name + ".spec.mjs";
+  const file = name + ".spec.mjs";
   test("limits the whiteboard scenario helpers to " + file, async () => {
     const content = importFixture(helpers);
     assert.deepEqual(await messages(content, file), []);
@@ -184,14 +206,15 @@ for (const [name, helpers] of whiteboardScopedFixtures) {
   for (const helper of helpers) {
     test("keeps the whiteboard helper " + helper + " in its declared fixture path", async () => {
       const probes = await Promise.all([
-        messages(importFixture([helper]), canvasSpec),
+        messages(importFixture([helper]), "whiteboard-basics/viewport.spec.mjs"),
         messages(importFixture([helper]), "workbench/manage.spec.mjs"),
+        messages(importFixture([helper]), "whiteboard-editing/connector-directions.spec.mjs"),
         messages(importFixture([helper], "../support/runtime.mjs"), file),
       ]);
 
       assert.deepEqual(
         probes.map((reports) => reports.map(({ messageId }) => messageId)),
-        [["fixture"], ["fixture"], ["fixture"]],
+        [["fixture"], ["fixture"], ["fixture"], ["fixture"]],
       );
     });
   }
@@ -215,15 +238,26 @@ const whiteboardActions = [
 ];
 
 const whiteboardFiles = [
-  "viewport",
-  "placement",
-  "selection",
-  "geometry",
-  "organization",
-  "connectors",
-  "objects",
-  "objects-media",
-  "persistence",
+  "whiteboard-basics/viewport",
+  "whiteboard-basics/placement",
+  "whiteboard-basics/selection",
+  "whiteboard-basics/geometry",
+  "whiteboard-basics/organization",
+  "whiteboard-basics/connectors",
+  "whiteboard-basics/objects",
+  "whiteboard-basics/objects-media",
+  "whiteboard-basics/persistence",
+  "whiteboard-editing/html",
+  "whiteboard-editing/document",
+  "whiteboard-editing/todo",
+  "whiteboard-editing/rich-gestures",
+  "whiteboard-editing/organization",
+  "whiteboard-editing/connector-directions",
+  "whiteboard-editing/object-menus",
+  "whiteboard-editing/reading-controls",
+  "whiteboard-editing/zoom-visibility",
+  "whiteboard-editing/canvas-extras",
+  "whiteboard-editing/inline-editing",
 ];
 
 for (const name of whiteboardFiles) {
@@ -231,7 +265,7 @@ for (const name of whiteboardFiles) {
     "allows semantic canvas and persisted-state assertions in the " + name + " scenario",
     async () => {
       const text = importFixture(["readCanvas"]) + "\n" + scenario(whiteboardActions.join("\n"));
-      assert.deepEqual(await messages(text, "whiteboard-basics/" + name + ".spec.mjs"), []);
+      assert.deepEqual(await messages(text, name + ".spec.mjs"), []);
     },
   );
 }
@@ -295,6 +329,63 @@ test("keeps semantic selector rules on a native media link popup", async () => {
   assert.deepEqual(
     (await messages(rejected, file)).map(({ messageId }) => messageId),
     ["selector"],
+  );
+});
+
+test("allows the HTML helper to expose the frame through semantic browser actions", async () => {
+  const file = "whiteboard-editing/html.spec.mjs";
+  const allowed =
+    importFixture(["embedFrame", "chooseHtmlFile"]) +
+    "\n" +
+    scenario(
+      "  const upload = page.getByRole('button', { name: 'Import HTML' });\n" +
+        "  await chooseHtmlFile(page, () => upload.click(), 'ordinary');\n" +
+        "  const frame = embedFrame(page, 'Sample');\n" +
+        "  await frame.getByRole('button', { name: 'Next' }).click();",
+    );
+  const rejected = scenario(
+    "  const frame = page.frameLocator('iframe');\n" +
+      "  await frame.locator('#private').click();\n" +
+      "  await page.route('**/addon', handler);",
+  );
+  assert.deepEqual(await messages(allowed, file), []);
+  assert.deepEqual(
+    (await messages(rejected, file)).map(({ messageId }) => messageId),
+    ["selector", "selector", "browserInternal"],
+  );
+  const aliased =
+    importFixture(["embedFrame", "test"]) +
+    "\n\n" +
+    "test('opens the fixture iframe', async ({ page }) => {\n" +
+    "  const frame = embedFrame(page, 'Sample');\n" +
+    "  await frame['lo' + 'cator']('#file');\n" +
+    "});\n";
+  assert.deepEqual(
+    (await messages(aliased, file)).map(({ messageId }) => messageId),
+    ["computed"],
+  );
+});
+
+test("allows the document scenario to inspect an actual download only through its fixture", async () => {
+  const file = "whiteboard-editing/document.spec.mjs";
+  const save =
+    "  const exportButton = page.getByRole('button', { name: 'Export' });\n" +
+    "  const [exportedFile] = await Promise.all([page.waitForEvent('download'), exportButton.click()]);\n";
+  const allowed =
+    importFixture(["readDocumentDownload"]) +
+    "\n" +
+    scenario(save + "  const exported = await readDocumentDownload(exportedFile, 'html');");
+  const rejected = scenario(
+    save +
+      "  await exportedFile.path();\n" +
+      "  await exportedFile.saveAs('/outside/export.html');\n" +
+      "  const data = await exportedFile.createReadStream();\n" +
+      "  await exportedFile['pa' + 'th']();",
+  );
+  assert.deepEqual(await messages(allowed, file), []);
+  assert.deepEqual(
+    (await messages(rejected, file)).map(({ messageId }) => messageId),
+    ["download", "download", "download", "computed"],
   );
 });
 

@@ -63,6 +63,21 @@ async function expectSavedObjects(studio, board, count) {
   return (await studio.readBoard(board)).objects;
 }
 
+async function typeThroughFirstSave(page, studio, board) {
+  const input = inlineText(page);
+  await expect(input).toBeFocused();
+  await page.keyboard.type("abc", { delay: 40 });
+  if (studio.edition === "ii") {
+    await expect
+      .poll(
+        async () =>
+          (await studio.readBoard(board)).objects.find(({ kind }) => kind === "text")?.text,
+      )
+      .toBe("abc");
+  }
+  await expect(input).toBeFocused();
+}
+
 async function expectSelected(page) {
   await expect(tool(page, "选择")).toHaveAttribute("aria-pressed", "true");
   await expect(selection(page)).toBeVisible();
@@ -133,13 +148,14 @@ test("[WB-PLACE-02] 工具按钮与数字键放置文字、便签和反向分区
   studio,
 }, testInfo) => {
   const { board, canvas, box } = await openBoard(page, studio, "文字便签分区验收");
-  const text = "放置文字验收";
+  const text = "abc 放置文字验收";
   const note = "放置便签验收";
   await canvas.press("3");
   await expect(tool(page, "文字")).toHaveAttribute("aria-pressed", "true");
   await clickAt(page, onCanvas(box, 240, 175));
+  await typeThroughFirstSave(page, studio, board);
+  await page.keyboard.insertText(" 放置文字验收");
   await expect(inlineText(page)).toBeFocused();
-  await inlineText(page).fill(text);
   await clickAt(page, onCanvas(box, 520, 210));
   await expect(page.getByText(text, { exact: true })).toBeVisible();
 
@@ -248,9 +264,10 @@ test("[WB-PLACE-04] Escape 与切换工具中止放置，空白双击可恢复�
 
   const point = onCanvas(box, 370, 250);
   await page.mouse.dblclick(point.x, point.y);
+  await typeThroughFirstSave(page, studio, board);
+  await page.keyboard.insertText(" 双击后放置的文字");
   await expect(inlineText(page)).toBeFocused();
-  const content = "双击后放置的文字";
-  await inlineText(page).fill(content);
+  const content = "abc 双击后放置的文字";
   await clickAt(page, onCanvas(box, 720, 225));
   await expect(page.getByText(content, { exact: true })).toBeVisible();
   const saved = await expectSavedObjects(studio, board, 1);

@@ -558,7 +558,7 @@ describe('Canvas', () => {
     });
   });
 
-  it('publishes one completed pen stroke with its last sampled point', () => {
+  it('publishes consecutive pen strokes with their final point and exits on Escape', () => {
     const { root, onEditIntent, onToolChange } = renderCanvas({ tool: 'pen' });
     act(() => {
       pointer(root, 'pointerdown', { x: 470, y: 250 });
@@ -577,6 +577,20 @@ describe('Canvas', () => {
     expect(onEditIntent).toHaveBeenCalledTimes(1);
     expect(intent.object.ink.points).toHaveLength(3);
     expect(intent.object.geometry.width).toBeGreaterThanOrEqual(60);
+    expect(onToolChange).not.toHaveBeenCalled();
+
+    renderCanvas({ tool: 'pen', canEdit: false, canDraw: true, onEditIntent, onToolChange });
+    drag(root, { x: 470, y: 330 }, { x: 530, y: 360 });
+    expect(onEditIntent).toHaveBeenCalledTimes(2);
+    expect(onEditIntent.mock.lastCall?.[0]).toMatchObject({
+      kind: 'create',
+      object: { kind: 'ink' },
+    });
+    expect(onToolChange).not.toHaveBeenCalled();
+
+    act(() => {
+      root.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
     expect(onToolChange).toHaveBeenCalledExactlyOnceWith('select');
   });
 

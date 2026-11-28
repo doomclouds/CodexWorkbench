@@ -8,7 +8,12 @@ const { BoardEditService } = requireServer(
 const { WhiteboardService } = requireServer(
   "@codexworkbench/luming-studio-ii-contracts/whiteboard/service",
 );
-const legacySummaries = { move: "移动元素", duplicate: "复制元素", create: "添加元素" };
+const legacySummaries = {
+  move: "移动元素",
+  duplicate: "复制元素",
+  create: "添加元素",
+  embedSource: "保存 HTML 源码",
+};
 const legacy = {
   path: "/api/tools/artifact_apply",
   readRequest(request, action) {
@@ -31,16 +36,18 @@ const legacy = {
 };
 
 function modernContract(action) {
-  const method =
-    action === "move"
-      ? WhiteboardService.method.moveObjects
-      : BoardEditService.method.editBoardGeometry;
+  const methods = {
+    move: WhiteboardService.method.moveObjects,
+    embedSource: BoardEditService.method.editObjectContent,
+  };
+  const method = methods[action] ?? BoardEditService.method.editBoardGeometry;
 
   return {
     path: "/" + method.parent.typeName + "/" + method.name,
     readRequest(request) {
       const body = fromBinary(method.input, request.postDataBuffer());
-      if (action !== "move" && body.operation?.case !== action) {
+      const operation = action === "embedSource" ? body.edit : body.operation;
+      if (action !== "move" && operation?.case !== action) {
         return;
       }
 
@@ -174,4 +181,65 @@ export async function controlNextCanvasSave(page, studio, { boardId, action, mod
     release: release.resolve,
     requests: () => [...commandIds],
   };
+}
+
+function requestedTextSave(request, edition, method) {
+  if (edition === "initial") {
+    const body = request.postDataJSON();
+    const operation = body?.operations?.[0];
+    const updatesText = operation?.op === "update" && typeof operation.changes?.text === "string";
+    if (body?.summary === "编辑文字" && body.operations?.length === 1 && updatesText) {
+      return { boardId: body.artifactId, objectId: operation.id };
+    }
+
+    return;
+  }
+
+  const body = fromBinary(method.input, request.postDataBuffer());
+  if (body.edit.case === "text") {
+    return { boardId: body.boardId, objectId: body.objectId };
+  }
+}
+
+export async function controlNextTextSave(page, studio, { boardId, objectId }) {
+  const hasBoard = typeof boardId === "string" && boardId !== "";
+  const hasObject = typeof objectId === "string" && objectId !== "";
+  if (!hasBoard || !hasObject) {
+    throw new TypeError("A seeded board and text object are required.");
+  }
+
+  const origin = new URL(studio.url);
+  if (origin.protocol !== "http:" || origin.hostname !== "127.0.0.1") {
+    throw new Error("Text save injection requires the isolated loopback origin.");
+  }
+
+  const method = BoardEditService.method.editObjectContent;
+  const path =
+    studio.edition === "initial" ? legacy.path : `/${method.parent.typeName}/${method.name}`;
+  const observed = Promise.withResolvers();
+  let blocked = false;
+
+  await page.route(new URL(path, origin).href, async (route) => {
+    const request = route.request();
+    const save =
+      !blocked && request.method() === "POST"
+        ? requestedTextSave(request, studio.edition, method)
+        : undefined;
+
+    if (save?.boardId !== boardId || save.objectId !== objectId) {
+      await route.continue();
+      return;
+    }
+
+    blocked = true;
+    await route.abort();
+
+    observed.resolve();
+  });
+
+  return { observed: observed.promise };
+}
+
+export function holdNextCanvasMove(page, studio, boardId) {
+  return controlNextCanvasSave(page, studio, { boardId, action: "move", mode: "hold" });
 }

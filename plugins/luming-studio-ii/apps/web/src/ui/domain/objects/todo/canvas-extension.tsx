@@ -11,7 +11,7 @@ import type {
   TodoObjectSnapshot,
   TodoSourceRef,
 } from './contracts.js';
-import { isTodoOverview, TodoObject } from './TodoObject.js';
+import { isTodoOverview, TodoObject, visibleTodoOverviewRows } from './TodoObject.js';
 import { TodoContentConflict } from './useTodoEditor.js';
 
 const todoPaper = '#EFEFEF';
@@ -58,10 +58,37 @@ function isTodoSnapshot(value: unknown, id: string, revision: number): value is 
   );
 }
 
-function todoPayload(id: string, payload: CanvasObjectPayload | undefined) {
-  if (payload && isTodoSnapshot(payload.value, id, payload.version)) {
+function todoPayload(id: string | undefined, payload: CanvasObjectPayload | undefined) {
+  if (id && payload && isTodoSnapshot(payload.value, id, payload.version)) {
     return payload.value;
   }
+}
+
+function useLoadedTodoSnapshot(value: TodoObjectSnapshot | undefined, editing: boolean) {
+  const [loaded, setLoaded] = useState(value);
+  if (value && value !== loaded) {
+    setLoaded(value);
+  }
+
+  return value ?? (editing ? loaded : undefined);
+}
+
+function TodoPlacementView(props: CanvasObjectViewProps) {
+  const { id, object, zoom } = props;
+  if (id === undefined) {
+    return (
+      <div
+        className="studio-object-todo__placement-heading"
+        style={{ fontSize: Math.max(15, 11 / zoom) }}
+        aria-hidden="true"
+      >
+        <strong>{object.label}</strong>
+        <span className="studio-object-todo__placement-count">0/0 完成</span>
+      </div>
+    );
+  }
+
+  return <TodoCanvasBody {...props} />;
 }
 
 function TodoCanvasBody({
@@ -89,14 +116,16 @@ function TodoCanvasBody({
   const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const [expandedEditing, setExpandedEditing] = useState(false);
-  const value = useMemo(() => (id ? todoPayload(id, payload) : undefined), [id, payload]);
+  const current = useMemo(() => todoPayload(id, payload), [id, payload]);
+  const value = useLoadedTodoSnapshot(current, editing || expandedEditing);
   const keepExpanded = expanded || expandedEditing;
   const nativeExpanded = expandedOnBoard || focusedReading;
-  const retain = value !== undefined && (nativeExpanded || editing || keepExpanded);
+  const hasSnapshot = value !== undefined;
+  const retentionNeeded = nativeExpanded || editing || keepExpanded;
   const publishRetention = useEffectEvent((retain: boolean) => onRetentionChange?.(retain));
   useEffect(() => {
-    publishRetention(retain);
-  }, [retain]);
+    publishRetention(hasSnapshot && retentionNeeded);
+  }, [hasSnapshot, retentionNeeded]);
   useEffect(() => () => publishRetention(false), []);
 
   if (!value) {
@@ -128,6 +157,7 @@ function TodoCanvasBody({
 
   const appearance = { paper: object.fill ?? todoPaper, uiScale: focusedReading ? 1 : 1 / zoom };
   const overview = isTodoOverview(geometry.width * zoom, geometry.height * zoom);
+  const bodyReadOnly = readOnly || current === undefined;
   const open = onOpenPresentation ?? (() => setExpanded(true));
   const nativeControls = {
     onOpenSource: onOpenNativeSource,
@@ -143,14 +173,17 @@ function TodoCanvasBody({
         {...nativeControls}
         value={value}
         interactive={interactive}
-        readOnly={readOnly}
+        readOnly={bodyReadOnly}
         editRequest={editRequest}
         focusedReading={focusedReading}
         expanded={nativeExpanded}
-        movable={!nativeExpanded && !readOnly}
+        movable={!nativeExpanded && !bodyReadOnly}
         locked={locked}
         appearance={appearance}
         overview={overview}
+        overviewRows={
+          overview ? visibleTodoOverviewRows(geometry.width, geometry.height, zoom) : undefined
+        }
         onEdit={handleEdit}
         onEditingChange={setEditing}
         onRequestExpand={open}
@@ -166,7 +199,7 @@ function TodoCanvasBody({
             <TodoObject
               {...nativeControls}
               value={value}
-              readOnly={readOnly}
+              readOnly={bodyReadOnly}
               appearance={appearance}
               expanded
               onEdit={handleEdit}
@@ -182,6 +215,13 @@ function TodoCanvasBody({
 export const todoExtension: CanvasObjectExtension = {
   kind: 'todo',
   placement: { kind: 'todo', label: '任务清单', width: 540, height: 420, fill: todoPaper },
-  capabilities: { move: true, resize: true, rotate: false, connect: true, content: 'native' },
-  View: TodoCanvasBody,
+  capabilities: {
+    move: true,
+    resize: true,
+    rotate: false,
+    connect: true,
+    content: 'native',
+    managesAnnotationEditing: true,
+  },
+  View: TodoPlacementView,
 };

@@ -280,11 +280,17 @@ describe('recycle bin through the Studio app', () => {
         expect(button(app.host, '恢复作品：可以恢复的作品').textContent).toBe('');
 
         const deleteTrigger = button(app.host, '永久删除作品：可删除的作品');
+        expect(deleteTrigger.dataset.tone).toBe('danger');
+        expect(button(app.host, '永久删除所选作品').dataset.tone).toBe('danger');
+        expect(button(app.host, '清空回收站').dataset.tone).toBe('danger');
+        expect(button(app.host, '恢复作品：可以恢复的作品').dataset.tone).toBeUndefined();
         await act(async () => {
           deleteTrigger.focus();
           deleteTrigger.click();
         });
         expect(dialog(app.host).textContent).toContain('永久删除 1 项作品，此操作无法恢复。');
+        expect(button(dialog(app.host), '永久删除').dataset.tone).toBe('danger');
+        expect(button(dialog(app.host), '取消').dataset.tone).toBeUndefined();
         expect(app.purgeRequests).toEqual([]);
         expect(document.activeElement).toBe(button(dialog(app.host), '关闭弹窗'));
         await click(dialog(app.host), '取消');

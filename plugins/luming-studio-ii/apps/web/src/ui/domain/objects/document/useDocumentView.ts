@@ -9,6 +9,7 @@ interface DocumentView {
 interface DocumentViewOptions {
   readonly focused: boolean;
   readonly readOnly: boolean;
+  readonly annotationActive?: boolean;
   readonly composing: boolean;
   readonly editRequest?: number;
   readonly onOpen?: () => void;
@@ -25,7 +26,7 @@ function documentMode(
 }
 
 export function useDocumentView(options: DocumentViewOptions) {
-  const { focused, readOnly, editRequest, onOpen } = options;
+  const { focused, readOnly, annotationActive, editRequest, onOpen } = options;
   const [view, setView] = useState<DocumentView>({ mode: 'inline' });
   const [wasFocused, setWasFocused] = useState(focused);
   const [consumedEditRequest, setConsumedEditRequest] = useState<number>();
@@ -42,7 +43,7 @@ export function useDocumentView(options: DocumentViewOptions) {
   }
   if (editRequest !== undefined && consumedEditRequest !== editRequest) {
     setConsumedEditRequest(editRequest);
-    if (!readOnly) {
+    if (!readOnly && !annotationActive) {
       setView({ mode: 'edit' });
     }
   }

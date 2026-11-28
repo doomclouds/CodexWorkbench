@@ -69,6 +69,7 @@ export function RecycleSelection({
       <button
         type="button"
         className="studio-recycle-icon"
+        data-tone="danger"
         aria-label="永久删除所选作品"
         title="永久删除所选作品"
         disabled={busy || selected.size === 0}
@@ -170,6 +171,7 @@ function RecycleCard({
         <button
           type="button"
           className="studio-recycle-icon"
+          data-tone="danger"
           aria-label={'永久删除作品：' + title}
           title="永久删除"
           disabled={busy || !canManage}

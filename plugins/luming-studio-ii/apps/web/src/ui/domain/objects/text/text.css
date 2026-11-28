@@ -26,10 +26,19 @@
   font-size: 0.9em;
 }
 
-.studio-ui-rich-text a {
-  color: var(--studio-ui-accent);
+:is(.studio-ui-rich-text, .studio-ui-inline-text-editor) a,
+.studio-ui-text-object-link-open {
+  color: var(--studio-ui-text-link, light-dark(#2456a6, #aacbff));
   text-decoration: underline;
+  text-underline-offset: 0.12em;
+}
+
+.studio-ui-rich-text a {
   pointer-events: auto;
+}
+
+.studio-ui-inline-text-editor a {
+  cursor: text;
 }
 
 .studio-ui-inline-text-editor {
@@ -66,21 +75,19 @@
 
 .studio-ui-text-object-editor {
   display: grid;
-  gap: 0.3rem;
   align-items: start;
   overflow: auto;
 }
 
-.studio-ui-text-object-editor [role='toolbar'] {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.2rem;
-}
-
-.studio-ui-text-object-editor [role='toolbar'] button {
-  min-height: 1.5rem;
-  padding: 0.2rem 0.4rem;
-  font-size: 0.75rem;
+.studio-ui-anchored-popover:has(> .studio-ui-text-object-link) {
+  z-index: 39;
+  box-sizing: border-box;
+  inline-size: min(320px, calc(100vw - 30px));
+  padding: 10px;
+  border-color: var(--board-float-border, GrayText);
+  border-radius: 9px;
+  background: var(--board-float, Canvas);
+  color: var(--board-chrome-text, CanvasText);
 }
 
 .studio-ui-text-object-link-fields {
@@ -90,6 +97,7 @@
 
 .studio-ui-text-object-link-actions {
   display: flex;
+  align-items: center;
   gap: 0.3rem;
   flex-wrap: wrap;
 }
@@ -105,4 +113,34 @@
   align-items: center;
   gap: 0.3rem;
   pointer-events: auto;
+}
+
+[data-canvas-root] > .studio-ui-canvas-text-failure {
+  position: absolute;
+  z-index: 4;
+  inset-inline-start: 1rem;
+  inset-block-end: 5rem;
+  max-inline-size: calc(100% - 2rem);
+  box-sizing: border-box;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--studio-ui-border);
+  border-radius: var(--studio-ui-radius, 0.75rem);
+  background: var(--studio-ui-surface);
+  color: var(--studio-ui-text);
+}
+
+.studio-ui-canvas-text-body[data-canvas-label-state='concealed'] {
+  visibility: hidden;
+}
+
+.studio-ui-canvas-text-placement {
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-start: 2px;
+  inline-size: 65%;
+  border-radius: 99px;
+  opacity: 0.55;
+  background: currentColor;
+  transform: translateY(-50%);
+  pointer-events: none;
 }

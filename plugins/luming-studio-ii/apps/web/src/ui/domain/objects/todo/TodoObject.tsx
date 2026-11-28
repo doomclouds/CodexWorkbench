@@ -1,11 +1,11 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { ClipboardEvent, CSSProperties, RefObject } from 'react';
 import { Button, Progress, StatusText } from '../../../base/index.js';
-import type { TodoObjectAppearance, TodoObjectProps } from './contracts.js';
+import type { TodoObjectAppearance, TodoObjectItem, TodoObjectProps } from './contracts.js';
 import { TodoControlIcon } from './TodoControlIcon.js';
 import { TodoRows } from './TodoRows.js';
 import { TodoTextEditor } from './TodoTextEditor.js';
-import { defaultTodoTitle } from './todo-edit.js';
+import { defaultTodoTitle, taskLabel } from './todo-edit.js';
 import { useTodoEditor } from './useTodoEditor.js';
 import type { TodoEditorSession } from './useTodoEditor.js';
 import './todo-object.css';
@@ -15,9 +15,57 @@ const paperPattern = /^#[0-9a-f]{6}$/iu;
 const darknessThreshold = 128;
 const overviewWidth = 228;
 const overviewHeight = 110;
+const maxOverviewRows = 4;
+const minimumPreviewWidth = 104;
+const minimumPreviewZoom = 0.5;
+const overviewChromeHeight = 46;
+const overviewRowHeight = 18;
 
 export function isTodoOverview(width: number, height: number) {
   return width < overviewWidth || height < overviewHeight;
+}
+
+export function visibleTodoOverviewRows(width: number, height: number, zoom: number) {
+  if (width * zoom < minimumPreviewWidth || zoom < minimumPreviewZoom) {
+    return 0;
+  }
+
+  return Math.min(
+    maxOverviewRows,
+    Math.max(0, Math.floor((height * zoom - overviewChromeHeight) / overviewRowHeight)),
+  );
+}
+
+function TodoOverviewRows({
+  items,
+  limit = maxOverviewRows,
+}: {
+  readonly items: readonly TodoObjectItem[];
+  readonly limit?: number;
+}) {
+  const visible = items.slice(0, limit);
+  if (visible.length === 0) {
+    return null;
+  }
+
+  return (
+    <ul className="studio-object-todo__overview-rows" aria-label="任务预览">
+      {visible.map((item) => (
+        <li key={item.id}>
+          <span
+            role="img"
+            aria-label={item.checked ? '已完成' : '未完成'}
+            data-checked={item.checked}
+          >
+            {item.checked ? '✓' : ''}
+          </span>
+          <span className="studio-object-todo__overview-text" title={taskLabel(item)}>
+            {taskLabel(item)}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 function TodoHeadingIcons({
@@ -31,7 +79,7 @@ function TodoHeadingIcons({
   readonly expanded?: boolean;
   readonly annotationActive?: boolean;
 }) {
-  const showMove = movable && !(expanded || annotationActive);
+  const showMove = movable && !expanded;
 
   return (
     <span className="studio-object-todo__heading-icons">
@@ -42,7 +90,7 @@ function TodoHeadingIcons({
           type="button"
           aria-label="移动任务清单"
           title="移动任务清单"
-          disabled={locked}
+          disabled={locked || annotationActive}
         >
           <TodoControlIcon icon="grip" size={18} />
         </button>
@@ -93,11 +141,16 @@ function todoStyle(appearance: TodoObjectAppearance | undefined, overview: boole
   return { style, scheme };
 }
 
-function titleContent(title: string, editable: boolean, session: TodoEditorSession) {
+function titleContent(
+  title: string,
+  showsEditControls: boolean,
+  session: TodoEditorSession,
+  paused?: boolean,
+) {
   if (session.draft?.target.kind === 'title') {
-    return <TodoTextEditor label="任务清单标题" session={session} />;
+    return <TodoTextEditor label="任务清单标题" session={session} paused={paused} />;
   }
-  if (editable) {
+  if (showsEditControls) {
     return (
       <Button
         label={'编辑清单标题：' + title}
@@ -144,14 +197,15 @@ function todoAccess({
   onAnnotateContent,
   onAnnotateItem,
 }: TodoObjectProps) {
-  const active = (interactive || expanded) && !annotationActive;
+  const active = interactive || expanded;
   const canSave = !readOnly && !annotationActive && onEdit !== undefined;
 
   return {
     active,
     canSave,
     editable: active && canSave,
-    canExpand: !expanded && !annotationActive && onRequestExpand !== undefined,
+    showsEditControls: active && !readOnly && onEdit !== undefined,
+    canExpand: !expanded && onRequestExpand !== undefined,
     annotating: annotationActive && Boolean(onAnnotateContent || onAnnotateItem),
   };
 }
@@ -189,6 +243,7 @@ function TodoSession(props: TodoObjectProps) {
     movable = false,
     locked = false,
     overview,
+    overviewRows,
     editRequest,
     onEditingChange,
     onRequestExpand,
@@ -204,7 +259,7 @@ function TodoSession(props: TodoObjectProps) {
   const [dragging, setDragging] = useState(false);
   const region = useRef<HTMLElement>(null);
   const small = useTodoOverview(region);
-  const { active, canSave, editable, canExpand, annotating } = todoAccess(props);
+  const { active, canSave, editable, showsEditControls, canExpand, annotating } = todoAccess(props);
   const session = useTodoEditor({
     value,
     onEdit,
@@ -251,7 +306,9 @@ function TodoSession(props: TodoObjectProps) {
           expanded={expanded}
           annotationActive={annotationActive}
         />
-        <div className="studio-object-todo__title">{titleContent(title, editable, session)}</div>
+        <div className="studio-object-todo__title">
+          {titleContent(title, showsEditControls, session, annotationActive)}
+        </div>
         <span className="studio-object-todo__count" aria-live="polite">
           {complete}/{items.length} 完成
         </span>
@@ -261,18 +318,23 @@ function TodoSession(props: TodoObjectProps) {
             icon={<TodoControlIcon icon="expand" size={19} />}
             iconOnly
             variant="ghost"
+            disabled={annotationActive}
             onActivate={onRequestExpand}
           />
         )}
       </header>
       {compact ? (
-        <Progress label="任务完成进度" value={complete} max={Math.max(1, items.length)} />
+        <>
+          <Progress label="任务完成进度" value={complete} max={Math.max(1, items.length)} />
+          <TodoOverviewRows items={items} limit={overviewRows} />
+        </>
       ) : (
         <TodoRows
           session={session}
           active={active}
-          editable={editable}
+          showsEditControls={showsEditControls}
           annotating={annotating}
+          editsPaused={annotationActive}
           onOpenSource={onOpenSource}
           sourceLabel={sourceLabel}
           sourceRequest={sourceRequest}

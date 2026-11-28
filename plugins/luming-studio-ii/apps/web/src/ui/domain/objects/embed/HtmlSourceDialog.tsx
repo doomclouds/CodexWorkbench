@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Button, Dialog, TextArea, TextField } from '../../../base/index.js';
+import { Button, Dialog, StatusText, TextArea, TextField } from '../../../base/index.js';
 import type { TextAreaHandle } from '../../../base/index.js';
 import type { EmbedSourceDraft } from './contracts.js';
 import './EmbedObject.css';
@@ -58,6 +58,7 @@ export function HtmlSourceDialog({
   const fieldsLocked = blocked || retryOriginal;
   const editing = mode === 'edit';
   const saveLabel = editing ? '保存源码' : '添加到白板';
+  const failure = readError || error;
 
   useEffect(
     () => () => {
@@ -174,8 +175,8 @@ export function HtmlSourceDialog({
           rows={14}
           spellCheck={false}
           disabled={fieldsLocked}
-          error={readError || error || undefined}
         />
+        {failure && <StatusText message={failure} tone="error" announcement="assertive" />}
         <p className="studio-ui-embed__source-note">
           HTML 会作为独立区域显示在白板上，保留自己的样式。
         </p>

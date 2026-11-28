@@ -135,6 +135,7 @@ export interface CanvasObjectCapabilities {
   readonly connect: boolean;
   readonly content: 'passive' | 'native' | 'embedded';
   readonly inlineFormats?: readonly CanvasInlineFormat[];
+  readonly managesAnnotationEditing?: boolean;
 }
 
 export type CanvasInlineFormat = 'bold' | 'italic' | 'link' | 'bullets' | 'numbered';
@@ -408,6 +409,7 @@ export interface CanvasProps {
   readonly selection: readonly string[];
   readonly tool: CanvasTool;
   readonly penStyle?: CanvasPenStyle;
+  readonly canDraw?: boolean;
   readonly canEdit: boolean;
   readonly initialViewport?: CanvasViewport;
   readonly fitOnMount?: boolean;
@@ -439,6 +441,7 @@ export interface CanvasProps {
   readonly nativeSourceRequest?: CanvasNativeSourceRequest;
   readonly annotationActive?: boolean;
   readonly onAnnotateContent?: (id: string, request: CanvasContentAnnotationRequest) => void;
+  readonly hasContentEditPermission?: boolean;
   readonly contentTracking?: ReadonlyMap<string, CanvasContentTracking>;
   readonly canEditExpandedObject?: boolean;
   readonly onOpenPresentation?: (ids: readonly string[]) => void;

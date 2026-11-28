@@ -8,6 +8,22 @@
   gap: 0.5rem;
 }
 
+.whiteboard-editor__canvas[data-document-reading] {
+  display: flex;
+  flex-direction: column;
+}
+
+.whiteboard-editor__canvas[data-document-reading] > .studio-board-draft__entry {
+  position: static;
+  flex: none;
+  padding: 0.25rem 0.625rem;
+}
+
+.whiteboard-editor__canvas[data-document-reading] > .whiteboard-editor__live-canvas {
+  flex: 1;
+  min-block-size: 0;
+}
+
 .studio-board-draft {
   display: grid;
   gap: 0.75rem;

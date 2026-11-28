@@ -5,7 +5,14 @@ import { launchStudio } from "./runtime.mjs";
 import { registerWorkbenchLinkRuntime } from "./workbench-link.mjs";
 
 export { workbenchLinkProbe } from "./workbench-link.mjs";
+export { readPeerCursors, readPlacementPreview } from "./canvas-peer-observation.mjs";
+export { controlNextTextSave } from "./canvas-persistence.mjs";
 export { chooseBoardMedia, mediaDisplaySize, mediaPlaying } from "./media.mjs";
+export { chooseHtmlFile, controlNextHtmlSave, embedFrame } from "./embed.mjs";
+export { chooseDocumentImage, readDocumentDownload } from "./document-download.mjs";
+export { failNextDocumentSave } from "./document-failure.mjs";
+export { controlNextTodoSave } from "./todo-save.mjs";
+export { holdNextInlineTextRefresh, holdNextInlineTextWrite } from "./inline-text-refresh.mjs";
 
 export {
   chooseArchive,
@@ -148,4 +155,10 @@ export async function interceptNextBoardCreation(page, studio, mode) {
 export { readCardCover, readControlPresentation } from "./card-presentation.mjs";
 export { controlNextThumbnail } from "./thumbnails.mjs";
 export { readCanvas } from "./canvas-presentation.mjs";
-export { controlNextCanvasSave, enableCanvasClipboard } from "./canvas-persistence.mjs";
+export { readZoomDetails } from "./zoom-presentation.mjs";
+export { readViewingInk } from "./reading-ink.mjs";
+export {
+  controlNextCanvasSave,
+  enableCanvasClipboard,
+  holdNextCanvasMove,
+} from "./canvas-persistence.mjs";

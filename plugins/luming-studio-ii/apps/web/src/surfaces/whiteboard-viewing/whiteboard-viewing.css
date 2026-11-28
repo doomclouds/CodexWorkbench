@@ -109,9 +109,10 @@
   --studio-ui-border: var(--board-float-border, #d9d9d9);
   --studio-ui-radius: 8px;
   inset-block-end: 18px;
-  inset-inline-start: 50%;
-  transform: translateX(-50%);
+  inset-inline: 0;
+  inline-size: max-content;
   max-inline-size: calc(100% - 24px);
+  margin-inline: auto;
   gap: 2px;
   padding: 5px;
   border-radius: 11px;
@@ -133,6 +134,10 @@
 
 .whiteboard-viewing__toolbar > button:disabled {
   opacity: 0.5;
+}
+
+.whiteboard-viewing__toolbar > .whiteboard-viewing__clear-ink {
+  color: var(--studio-ui-danger, light-dark(#a53131, #ff9b9b));
 }
 
 .whiteboard-viewing__toolbar > button:hover:not(:disabled) {

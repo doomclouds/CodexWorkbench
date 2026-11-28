@@ -4,14 +4,20 @@ import { mergeRects, rectsIntersect, type CanvasViewportSize } from '../viewport
 
 const margin = 12;
 const gap = 8;
+const tightGap = 4;
 const titleSelector = '[data-canvas-external-title], [data-canvas-section-title]';
 const handleSelector = '[data-canvas-handle], [data-canvas-port], [data-canvas-connector-handle]';
+
+function wider(first?: CanvasRect, second?: CanvasRect) {
+  return second && (!first || second.width > first.width) ? second : first;
+}
 
 function placeToolbar(
   anchor: CanvasRect,
   size: CanvasViewportSize,
   viewport: CanvasViewportSize,
   obstacles: readonly CanvasRect[],
+  spacing = gap,
 ) {
   const right = viewport.width - margin;
   const bottom = viewport.height - margin - size.height;
@@ -21,12 +27,15 @@ function placeToolbar(
   }
 
   const center = anchor.x + anchor.width / 2;
-  const above = anchor.y - gap - size.height;
-  const below = anchor.y + anchor.height + gap;
+  const above = anchor.y - spacing - size.height;
+  const below = anchor.y + anchor.height + spacing;
   const fallbackRows = [
     margin,
     bottom,
-    ...obstacles.flatMap((rect) => [rect.y - gap - size.height, rect.y + rect.height + gap]),
+    ...obstacles.flatMap((rect) => [
+      rect.y - spacing - size.height,
+      rect.y + rect.height + spacing,
+    ]),
   ].sort((a, b) => Math.abs(a - above) - Math.abs(b - above));
   const rows = new Set([above, below, ...fallbackRows]);
   const sortedObstacles = [...obstacles].sort((a, b) => a.x - b.x);
@@ -39,15 +48,15 @@ function placeToolbar(
     const slots: Array<{ left: number; right: number }> = [];
     let left = margin;
     for (const obstacle of sortedObstacles) {
-      if (y + size.height + gap <= obstacle.y || y >= obstacle.y + obstacle.height + gap) {
+      if (y + size.height + spacing <= obstacle.y || y >= obstacle.y + obstacle.height + spacing) {
         continue;
       }
 
-      const end = Math.min(right, obstacle.x - gap);
+      const end = Math.min(right, obstacle.x - spacing);
       if (end > left) {
         slots.push({ left, right: end });
       }
-      left = Math.max(left, obstacle.x + obstacle.width + gap);
+      left = Math.max(left, obstacle.x + obstacle.width + spacing);
     }
     if (left < right) {
       slots.push({ left, right });
@@ -65,10 +74,35 @@ function placeToolbar(
       return full;
     }
 
-    compact ??= candidates.find((candidate) => candidate.width >= Math.min(144, width));
+    compact = candidates.reduce(
+      (best, candidate) =>
+        candidate.width >= Math.min(144, width) ? wider(best, candidate) : best,
+      compact,
+    );
   }
 
   return compact;
+}
+
+function chooseToolbar(
+  target: CanvasRect,
+  size: CanvasViewportSize,
+  viewport: CanvasViewportSize,
+  anchor: CanvasRect,
+  obstacles: readonly CanvasRect[],
+) {
+  const requiredWidth = Math.min(size.width, viewport.width - margin * 2);
+  const preferred = placeToolbar(target, size, viewport, [anchor, ...obstacles]);
+  if (preferred?.width === requiredWidth) {
+    return preferred;
+  }
+
+  const withoutFrame = wider(preferred, placeToolbar(target, size, viewport, obstacles));
+  if (withoutFrame?.width === requiredWidth) {
+    return withoutFrame;
+  }
+
+  return wider(withoutFrame, placeToolbar(target, size, viewport, obstacles, tightGap));
 }
 
 function visibleRect(bounds: DOMRect, canvas: DOMRect, clip = canvas): CanvasRect | undefined {
@@ -84,14 +118,17 @@ function visibleRect(bounds: DOMRect, canvas: DOMRect, clip = canvas): CanvasRec
 
 function titleRect(title: Element, canvas: DOMRect) {
   const bounds = title.getBoundingClientRect();
+  const grip = title.querySelector('[data-canvas-drag-surface="title"]');
+  const gripRect = grip ? visibleRect(grip.getBoundingClientRect(), canvas) : undefined;
   if (!title.textContent?.trim() || !visibleRect(bounds, canvas)) {
-    return undefined;
+    return gripRect;
   }
 
   const range = title.ownerDocument.createRange();
   range.selectNodeContents(title);
 
-  return visibleRect(range.getBoundingClientRect?.() ?? bounds, canvas, bounds);
+  const text = visibleRect(range.getBoundingClientRect?.() ?? bounds, canvas, bounds);
+  return gripRect && text ? mergeRects([gripRect, text]) : (gripRect ?? text);
 }
 
 interface SelectionToolbarProps {
@@ -124,6 +161,8 @@ export function SelectionToolbar({
 
     const place = () => {
       const canvasBounds = canvas.getBoundingClientRect();
+      node.style.removeProperty('max-inline-size');
+      node.removeAttribute('data-canvas-toolbar-compact');
       const bounds = node.getBoundingClientRect();
       const size = {
         width: bounds.width + Math.max(0, node.scrollWidth - node.clientWidth),
@@ -151,12 +190,10 @@ export function SelectionToolbar({
       const target = mergeRects([anchor, ...handleBounds, ...selectedTitles]) ?? anchor;
       const obstacles = [...controlBounds, ...handleBounds, ...selectedTitles, ...nearbyTitles];
       const visible = rectsIntersect(target, { x: 0, y: 0, ...viewportSize });
-      const position =
-        visible &&
-        (placeToolbar(target, size, viewportSize, [anchor, ...obstacles]) ??
-          placeToolbar(target, size, viewportSize, obstacles));
+      const position = visible && chooseToolbar(target, size, viewportSize, anchor, obstacles);
       node.style.visibility = position ? 'visible' : 'hidden';
       if (position) {
+        node.toggleAttribute('data-canvas-toolbar-compact', position.width < size.width);
         node.style.left = position.x + 'px';
         node.style.top = position.y + 'px';
         node.style.maxInlineSize = position.width + 'px';

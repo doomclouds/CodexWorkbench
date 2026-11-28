@@ -1,0 +1,1259 @@
+{
+  "casePrefix": "EDIT-",
+  "scope": "白板页头红框之外的画布交互。保留对象展开产生的控件、选区工具、角落缩放与计时器。",
+  "excluded": [
+    "页头红框控件仍属单独工作流。备注切换用于触发对象布局与编辑暂停，读数取文档和待办自身。"
+  ],
+  "groups": [
+    {
+      "id": "EDIT-HTML",
+      "title": "HTML 图解",
+      "file": "html.spec.mjs",
+      "entries": [
+        "空白及底部入口、文件选择、源码输入与取消",
+        "旧对象源码、标题、保存和失败恢复",
+        "嵌入交互、独立滚动、状态和可编辑归属",
+        "历史 diagram／chart 类型"
+      ],
+      "basics": ["WB-VIEW-01", "WB-SELECT-04", "WB-SAVE-04", "WB-SAVE-05"]
+    },
+    {
+      "id": "EDIT-DOC",
+      "title": "文档",
+      "file": "document.spec.mjs",
+      "entries": [
+        "欢迎区放置、修改标题和正文、正文撤销",
+        "原生文档块、表格单元格、链接与图片",
+        "展开、目录、查找与回到画板",
+        "对象内下载 HTML／块 JSON、保存失败重试、重开后手动找回草稿、只读文档",
+        "备注模式保留文档和待办的布局、暂停编辑并保留未提交正文"
+      ],
+      "basics": ["WB-OBJECT-02", "WB-SAVE-04", "WB-SAVE-05"]
+    },
+    {
+      "id": "EDIT-TODO",
+      "title": "待办清单",
+      "file": "todo.spec.mjs",
+      "entries": [
+        "60% 缩略区的任务行与进度、展开放大",
+        "形状入口新建、连续输入、名称与行编辑、勾选、拖放和键盘排序、删除",
+        "打开来源、写入前失败重试、丢回执确认与只读访客"
+      ],
+      "basics": ["WB-VIEW-03", "WB-SELECT-03", "WB-ORG-04", "WB-SAVE-04"]
+    },
+    {
+      "id": "EDIT-MOVE",
+      "title": "不同对象的手势",
+      "file": "rich-gestures.spec.mjs",
+      "entries": [
+        "HTML 框外移动把手与 5%／25%／60%／100% 的存储坐标",
+        "文档和待办的标题把手",
+        "HTML、文档、待办里的控件交互、视口导航和锁定边界"
+      ],
+      "basics": [
+        "WB-GEO-01",
+        "WB-GEO-02",
+        "WB-GEO-03",
+        "WB-GEO-04",
+        "WB-GEO-05",
+        "WB-GEO-07",
+        "WB-GEO-08"
+      ]
+    },
+    {
+      "id": "EDIT-ORG",
+      "title": "分区与多对象组织",
+      "file": "organization.spec.mjs",
+      "entries": [
+        "重叠中的选择与几何锁、显式父子联合解锁",
+        "整组选择、独立右键、解组与拆分区撤销",
+        "四种层序、撤销重做、跨窗口同步与边界 no-op",
+        "锁定对象及半锁组合的真实跨板复制和粘贴"
+      ],
+      "basics": [
+        "WB-ORG-01",
+        "WB-ORG-02",
+        "WB-ORG-03",
+        "WB-ORG-04",
+        "WB-ORG-05",
+        "WB-ORG-06",
+        "WB-ORG-07",
+        "WB-ORG-08",
+        "WB-SELECT-02",
+        "WB-GEO-06"
+      ]
+    },
+    {
+      "id": "EDIT-LINE",
+      "title": "连线方向与编辑",
+      "file": "connector-directions.spec.mjs",
+      "entries": [
+        "从不同方向创建、重绑与解绑",
+        "自由端、附着端、折点、符号与标签",
+        "连线菜单、对象旋转后跟随和持久化"
+      ],
+      "basics": [
+        "WB-EDGE-01",
+        "WB-EDGE-02",
+        "WB-EDGE-03",
+        "WB-EDGE-04",
+        "WB-EDGE-05",
+        "WB-OBJECT-04"
+      ]
+    },
+    {
+      "id": "EDIT-MENU",
+      "title": "空白与对象的菜单",
+      "file": "object-menus.spec.mjs",
+      "entries": [
+        "空白、单选、多选、锁定、只读的菜单差异",
+        "形状、文字、便签、分区、笔迹、连线、贴纸实际菜单",
+        "PNG、SVG、视频、独立链接、表格、文档、待办、HTML、diagram、chart 专用项",
+        "右键和更多菜单、短窗滚动、Home／End 和 Esc 回焦"
+      ],
+      "basics": ["WB-SELECT-01", "WB-SELECT-04", "WB-SELECT-05", "WB-ORG-08", "WB-SAVE-01"]
+    },
+    {
+      "id": "EDIT-VIEW",
+      "title": "观看与角落计时器",
+      "file": "reading-controls.spec.mjs",
+      "entries": [
+        "右上角共享计时、两页同步、加减、暂停、重开和复位",
+        "单对象与混合选区全屏观看、适配、相机与焦点返回",
+        "临时荧光笔、淡出、清除、只读访客和窄窗明暗显示"
+      ],
+      "basics": ["WB-VIEW-04", "WB-VIEW-07", "WB-GEO-02"]
+    },
+    {
+      "id": "EDIT-ZOOM",
+      "title": "缩放与对象可见性",
+      "file": "zoom-visibility.spec.mjs",
+      "entries": [
+        "普通缩放菜单与快捷相机手势",
+        "文档／待办／表格／媒体的阈值与边缘裁切",
+        "窄窗工具、对象内滚动和视口内外命中"
+      ],
+      "basics": [
+        "WB-VIEW-03",
+        "WB-VIEW-04",
+        "WB-VIEW-05",
+        "WB-VIEW-06",
+        "WB-VIEW-07",
+        "WB-VIEW-08",
+        "WB-VIEW-09",
+        "WB-VIEW-10",
+        "WB-OBJECT-08"
+      ]
+    },
+    {
+      "id": "EDIT-TEXT",
+      "title": "画布内联文字编辑",
+      "file": "inline-editing.spec.mjs",
+      "entries": [
+        "150% 双击形状和便签，选区格式与文字主体",
+        "内联文字 Ctrl＋B、正文读回与放大",
+        "等待首个回执及正文补读时不失焦、停顿后续写"
+      ],
+      "basics": ["WB-OBJECT-02", "WB-OBJECT-10", "WB-SAVE-04", "WB-SAVE-05", "WB-SAVE-07"]
+    },
+    {
+      "id": "EDIT-EXTRA",
+      "title": "画布工具与内容入口",
+      "file": "canvas-extras.spec.mjs",
+      "entries": [
+        "画布数字 9 与选区备注、针点回复、编辑、解决和删除",
+        "浏览器刷新与从目录重开后相机状态",
+        "同板两会话的光标、拖动预览和正式保存",
+        "文字中断后从本机草稿恢复、形状悬停预览与保存",
+        "36% 下文字、贴纸、表格、待办、文档的无写入预览"
+      ],
+      "basics": [
+        "WB-PLACE-01",
+        "WB-PLACE-02",
+        "WB-PLACE-03",
+        "WB-PLACE-04",
+        "WB-PLACE-05",
+        "WB-OBJECT-01",
+        "WB-OBJECT-05",
+        "WB-OBJECT-06",
+        "WB-OBJECT-07",
+        "WB-OBJECT-09",
+        "WB-OBJECT-10",
+        "WB-SAVE-01",
+        "WB-SAVE-02",
+        "WB-SAVE-03",
+        "WB-SAVE-06",
+        "WB-SAVE-07",
+        "WB-SAVE-08",
+        "WB-OBJECT-03"
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "id": "EDIT-HTML-01",
+      "steps": [
+        "从形状菜单进入 HTML 新建",
+        "取消空白草稿并核对数量",
+        "重新输入标题和源码并保存",
+        "刷新后读回"
+      ],
+      "expected": "取消时白板内容保持。合法源码只生成一个对象，重开后正常渲染。",
+      "observations": {
+        "parity-html-create": "取消、源码保存与刷新后渲染"
+      }
+    },
+    {
+      "id": "EDIT-HTML-02",
+      "steps": ["从文件选择离线 HTML", "核对用文件名预填标题", "保存并打开相应嵌入"],
+      "expected": "文件名预填正确，原始源码存储并显示内容。",
+      "observations": {
+        "parity-html-file": "预填标题、已保存文件内容与可见的嵌入对象"
+      }
+    },
+    {
+      "id": "EDIT-HTML-03",
+      "steps": [
+        "在旧样板选择 HTML 对象",
+        "打开选区操作及源码入口",
+        "取消一次改动，再应用新的标题和源码",
+        "刷新读回结果"
+      ],
+      "expected": "渲染旧源码并保持正确选区。取消保留原值，有效修改可持久化。",
+      "observations": {
+        "parity-html-edit-source": "旧对象的源码入口、取消与保存"
+      }
+    },
+    {
+      "id": "EDIT-HTML-04",
+      "steps": ["打开嵌入内容", "点击沙箱内的按钮并滚动内部文档", "刷新确认已保存的交互值"],
+      "expected": "内容交互在嵌入区域内进行，滚动保持独立，重开恢复已提交状态。",
+      "observations": {
+        "parity-html-frame": "按钮交互、独立滚动与持久化嵌入状态"
+      }
+    },
+    {
+      "id": "EDIT-HTML-05",
+      "steps": [
+        "编辑 HTML 源码",
+        "中断一次保存并记录原件与草稿",
+        "使用本版可用恢复入口",
+        "重开核对是否写入"
+      ],
+      "expected": "结果暂不明确时保留草稿和上一保存版。按实际恢复入口核对是否可安全重发原编辑。",
+      "observations": {
+        "parity-html-source-retry": "未写入、失败草稿与重试持久化"
+      },
+      "versionExpectations": {
+        "parity-html-source-retry": {
+          "initial": {
+            "noWriteAfterFailure": true,
+            "draftRetained": true,
+            "retryPersisted": false
+          },
+          "ii": {
+            "noWriteAfterFailure": true,
+            "draftRetained": true,
+            "retryPersisted": true
+          }
+        }
+      },
+      "notes": [
+        "初代在请求中断后保留原件与草稿，并提示先比较。Studio II 允许用原命令重试并确认成功写入。"
+      ]
+    },
+    {
+      "id": "EDIT-HTML-06",
+      "steps": ["导入带历史 diagram 和 chart 的合成白板", "逐个确认源码入口和显示方式"],
+      "expected": "diagram 对象可打开源码，记录兼容 chart 的实际渲染方式。",
+      "observations": {
+        "parity-html-compatible-kinds": "两个历史类型的源码编辑及嵌入呈现"
+      },
+      "versionExpectations": {
+        "parity-html-compatible-kinds": {
+          "initial": {
+            "diagramSourceEditable": false,
+            "chartRenderedAsHtml": false
+          },
+          "ii": {
+            "diagramSourceEditable": true,
+            "chartRenderedAsHtml": true
+          }
+        }
+      },
+      "notes": [
+        "初代 diagram 的源码入口打开空导入，chart 显示标签。Studio II 正确打开旧 diagram 源码且渲染保存的 chart HTML。"
+      ]
+    },
+    {
+      "id": "EDIT-HTML-07",
+      "steps": [
+        "在隔离样板创建只读访客会话",
+        "打开 HTML 并核对源码工具隐藏",
+        "在嵌入区域点击互动控件",
+        "检查房主侧保存内容"
+      ],
+      "expected": "访客可浏览和操作沙箱内界面。源码和互动状态仍由访问角色约束，没有改变正式白板内容。",
+      "observations": {
+        "parity-html-viewer": "访客会话、沙箱界面和源码／状态的只读边界"
+      }
+    },
+    {
+      "id": "EDIT-DOC-01",
+      "steps": [
+        "从欢迎区放置文档",
+        "锁几何后编辑标题与正文",
+        "对正文执行 Ctrl＋Z",
+        "重启后确认独立文档"
+      ],
+      "expected": "锁定几何后仍可合法编辑内容。正文撤销生效，重开保留正确标题和正文。",
+      "observations": {
+        "parity-document-create-and-persist": "文档创建、正文撤销及持久状态"
+      }
+    },
+    {
+      "id": "EDIT-DOC-02",
+      "steps": ["展开含多个章节的文档", "通过目录定位另一个章节", "查找两处匹配，回到画板"],
+      "expected": "真实文档查找和目录会移动到命中的段落或标题。返回后恢复画板界面。",
+      "observations": {
+        "parity-document-readable-navigation": "查找命中数量、目录跳转和返回画板"
+      }
+    },
+    {
+      "id": "EDIT-DOC-03",
+      "steps": [
+        "进入文档编辑器",
+        "通过斜杠菜单及块旁按钮插入用例列出的块",
+        "编辑嵌入表格单元格",
+        "重开读回块类型和表格内容"
+      ],
+      "expected": "各块及表格内容写入对象并在重开后保留。",
+      "observations": {
+        "parity-document-native-blocks": "原生块、表格单元格及重开状态"
+      }
+    },
+    {
+      "id": "EDIT-DOC-04",
+      "steps": [
+        "选择文档文字并打开链接控件",
+        "取消一次后添加有效链接",
+        "从文档内上传图片，重启读回"
+      ],
+      "expected": "取消保留编辑状态，链接与图片会写入真实文档。重启后核对链接与图像尺寸。",
+      "observations": {
+        "parity-document-links-and-images": "取消链接、实际链接及文档图片尺寸"
+      }
+    },
+    {
+      "id": "EDIT-DOC-05",
+      "steps": ["点对象自身的导出文档", "分别下载全文 HTML 和块 JSON", "读取实际文件内容"],
+      "expected": "两种格式具备可读文件，原文字和字符正确保留。",
+      "observations": {
+        "parity-document-file-downloads": "HTML、块 JSON 与原始正文"
+      }
+    },
+    {
+      "id": "EDIT-DOC-06",
+      "steps": [
+        "编辑同一个段落",
+        "受控拒绝首次保存",
+        "尝试返回画板，第二次保存同样被拒绝",
+        "核对草稿和编辑状态，再重试并重开"
+      ],
+      "expected": "两次真实 503 错误后草稿和编辑器保持。恢复请求成功后重开保留正文。",
+      "observations": {
+        "parity-document-save-retry": "首次保存失败、未确认草稿和有效重试"
+      }
+    },
+    {
+      "id": "EDIT-DOC-07",
+      "steps": [
+        "从独立只读链接会话进入已授权白板",
+        "在 720×620 窗口展开文档并查找",
+        "返回画板并核对写入口"
+      ],
+      "expected": "访客可在窄窗阅读、展开、查找和返回。页面没有文档写入入口。",
+      "observations": {
+        "parity-document-read-only": "真实只读会话的读取、展开、查找以及写保护"
+      }
+    },
+    {
+      "id": "EDIT-DOC-08",
+      "steps": [
+        "中断一次文档保存，核对上一保存版",
+        "重新打开并打开本机草稿",
+        "比较后主动应用",
+        "再次刷新核对已保存正文"
+      ],
+      "expected": "未经确认的正文重开后仍可找回。用户显式应用后才写入，并可再次刷新读取。",
+      "observations": {
+        "parity-document-draft-reopen": "草稿比较、显式应用与持久化"
+      }
+    },
+    {
+      "id": "EDIT-DOC-09",
+      "steps": [
+        "在 36%、60%、100% 检查文档和待办卡片，再切换备注模式",
+        "在选中待办的条件下核对控件位置及写入权限",
+        "实际开启任务、段落备注后取消，退出再确认"
+      ],
+      "expected": "两代卡片外框保持位置，任务与段落可以取为备注目标。Studio II 保留控件布局并暂停写操作，退出后恢复。",
+      "notes": [
+        "初代备注态移除部分待办控件。Studio II 保留原位置及尺寸，暂时禁用移动、展开、勾选和文档写入口。用页头按钮或数字 9 切换作为测试触发，验收点在对象自身。"
+      ],
+      "observations": {
+        "parity-native-annotation-layout": "三个倍率、卡片外框、待办控件、任务与段落及持久版次"
+      },
+      "versionExpectations": {
+        "parity-native-annotation-layout": {
+          "initial": {
+            "zoom": [36, 60, 100],
+            "stableCardFrames": true,
+            "stableTodoControls": false,
+            "taskAndParagraphTargets": true,
+            "persistedRevisionUnchanged": true
+          },
+          "ii": {
+            "zoom": [36, 60, 100],
+            "stableCardFrames": true,
+            "stableTodoControls": true,
+            "taskAndParagraphTargets": true,
+            "persistedRevisionUnchanged": true
+          }
+        }
+      }
+    },
+    {
+      "id": "EDIT-DOC-10",
+      "steps": [
+        "展开文档编辑，构造尚未保存的草稿",
+        "在正文键入 9，确认字符留在编辑器",
+        "切换备注模式，核对标题、草稿和持久版次",
+        "退出备注模式后继续编辑和重试，重新打开核对"
+      ],
+      "expected": "备注模式暂停写入且保留未提交草稿。Studio II 保持原编辑器挂载且暂时只读，退出后可继续编辑，再确认写入。",
+      "notes": [
+        "初代切入备注时把编辑器换成文档阅读视图，退出后需重新进入编辑。Studio II 在原编辑器暂停输入，退出仍从原草稿续写。"
+      ],
+      "observations": {
+        "parity-native-annotation-document-draft": "编辑器挂载、数字键输入、标题写入和草稿持久化"
+      },
+      "versionExpectations": {
+        "parity-native-annotation-document-draft": {
+          "initial": {
+            "editorKeptMounted": false,
+            "shortcutStayedInEditor": true,
+            "titleWritePaused": true,
+            "draftPreservedAndSaved": true
+          },
+          "ii": {
+            "editorKeptMounted": true,
+            "shortcutStayedInEditor": true,
+            "titleWritePaused": true,
+            "draftPreservedAndSaved": true
+          }
+        }
+      }
+    },
+    {
+      "id": "EDIT-TODO-01",
+      "steps": ["打开有四条任务的已保存白板", "缩放到 60% 并核对各条文字", "展开清单检查进度"],
+      "expected": "60% 时两代的完成进度均可见，展开后都能阅读完整清单。Studio II 同时展示缩略状态的短任务行。",
+      "observations": {
+        "parity-todo-60-percent": "60% 下的任务内容、完成数量和总数"
+      },
+      "notes": [
+        "同一合成清单的初代缩略状态只显示进度。Studio II 留出足够空间展示四条只读短行，展开后仍有完整任务。"
+      ],
+      "versionExpectations": {
+        "parity-todo-60-percent": {
+          "initial": {
+            "rows": [],
+            "complete": 2,
+            "total": 4
+          },
+          "ii": {
+            "rows": ["确认发布范围", "核对白板正文", "验证拖动后保存", "刷新确认保存位置"],
+            "complete": 2,
+            "total": 4
+          }
+        }
+      }
+    },
+    {
+      "id": "EDIT-TODO-02",
+      "steps": ["从形状工具新建任务清单", "展开后用 Enter 连续添加任务", "重开查看任务"],
+      "expected": "多个输入连续提交为独立任务，名称、顺序和写入结果可重开。"
+    },
+    {
+      "id": "EDIT-TODO-03",
+      "steps": ["展开含来源锚点的清单", "编辑、勾选与重新排序", "删除指定任务并打开任务来源"],
+      "expected": "任务的内容、顺序、勾选与删除按实际操作持久化，跳转定位到正确来源。"
+    },
+    {
+      "id": "EDIT-TODO-04",
+      "steps": ["保存任务时中断一次请求", "检查错误提示与保留草稿", "重试后重启查看勾选"],
+      "expected": "重试前后的状态可区分，重开只保留成功保存的勾选结果。"
+    },
+    {
+      "id": "EDIT-TODO-05",
+      "steps": ["在本机独立访客会话打开白板", "展开任务清单", "核对可见任务和未提供的写入入口"],
+      "expected": "已授权访客可查看完整清单。写权限检查按实际角色执行。"
+    },
+    {
+      "id": "EDIT-TODO-06",
+      "steps": [
+        "写入一项任务的勾选",
+        "丢弃服务端已成功返回的回执",
+        "按可用路径核对保存",
+        "读取实际新版本"
+      ],
+      "expected": "服务已经写入时，两代均可核对回执并恢复勾选结果，最终只新增一版。",
+      "observations": {
+        "parity-todo-lost-receipt": "是否手动核对回执与新增版次数"
+      }
+    },
+    {
+      "id": "EDIT-MOVE-01",
+      "steps": [
+        "选择 HTML 并依次设 5%、25%、60% 和 100%",
+        "从可用地域拖动对象",
+        "读回对应世界坐标"
+      ],
+      "expected": "对照四档下真实可用的移动入口及对象位移。",
+      "observations": {
+        "parity-html-grip-at-four-zoom-levels": "四档倍率下 HTML 移动手柄与已保存位移"
+      },
+      "versionExpectations": {
+        "parity-html-grip-at-four-zoom-levels": {
+          "initial": [
+            {
+              "percent": 5,
+              "visibleGrip": false,
+              "gripCssWidth": null,
+              "objectCssWidth": 18,
+              "moved": {
+                "x": 200,
+                "y": 100
+              }
+            },
+            {
+              "percent": 25,
+              "visibleGrip": false,
+              "gripCssWidth": null,
+              "objectCssWidth": 90,
+              "moved": {
+                "x": -200,
+                "y": -100
+              }
+            },
+            {
+              "percent": 60,
+              "visibleGrip": false,
+              "gripCssWidth": null,
+              "objectCssWidth": 216,
+              "moved": {
+                "x": 200,
+                "y": 100
+              }
+            },
+            {
+              "percent": 100,
+              "visibleGrip": false,
+              "gripCssWidth": null,
+              "objectCssWidth": 360,
+              "moved": {
+                "x": -200,
+                "y": -100
+              }
+            }
+          ],
+          "ii": [
+            {
+              "percent": 5,
+              "visibleGrip": true,
+              "gripCssWidth": 24,
+              "objectCssWidth": 18,
+              "moved": {
+                "x": 200,
+                "y": 100
+              }
+            },
+            {
+              "percent": 25,
+              "visibleGrip": true,
+              "gripCssWidth": 24,
+              "objectCssWidth": 90,
+              "moved": {
+                "x": -200,
+                "y": -100
+              }
+            },
+            {
+              "percent": 60,
+              "visibleGrip": true,
+              "gripCssWidth": 24,
+              "objectCssWidth": 216,
+              "moved": {
+                "x": 200,
+                "y": 100
+              }
+            },
+            {
+              "percent": 100,
+              "visibleGrip": true,
+              "gripCssWidth": 24,
+              "objectCssWidth": 360,
+              "moved": {
+                "x": -200,
+                "y": -100
+              }
+            }
+          ]
+        }
+      },
+      "notes": [
+        "初代通过标题区域移动。Studio II 在对象外提供 24 CSS 像素的显式把手，四档尺寸一致，实际画布坐标变化同两代的操作目标。"
+      ]
+    },
+    {
+      "id": "EDIT-MOVE-02",
+      "steps": ["选中 HTML 对象并操作正文首行", "尝试普通滚轮", "从内容区域使用缩放与平移手势"],
+      "expected": "按钮和普通滚动由内容处理。画布级手势在相应触发条件下继续作用。",
+      "observations": {
+        "parity-html-body-input-ownership": "内容首行点击、内部滚动与画布导航"
+      },
+      "versionExpectations": {
+        "parity-html-body-input-ownership": {
+          "initial": {
+            "wheelStayedInFrame": true,
+            "gesturePan": true,
+            "topChecked": false
+          },
+          "ii": {
+            "wheelStayedInFrame": true,
+            "gesturePan": true,
+            "topChecked": true
+          }
+        }
+      },
+      "notes": [
+        "初代的对象顶部拖动命中区覆盖正文首行。Studio II 的框外把手保留正文首行按钮的实际点击。"
+      ]
+    },
+    {
+      "id": "EDIT-MOVE-03",
+      "steps": ["打开带原生文档和待办的板", "从各标题把手拖动", "检查实时位置与持久化的正文"],
+      "expected": "两个对象可从各自标题移动，正文内容及任务维持。",
+      "observations": {
+        "parity-native-title-gesture": "文档与待办的标题把手及变更结果"
+      }
+    },
+    {
+      "id": "EDIT-MOVE-04",
+      "steps": [
+        "核对文档与待办正文容器焦点",
+        "从正文容器左内边距触发画布手势",
+        "核对实际相机与存储位置"
+      ],
+      "expected": "按取样位置和角色对照视口与存储。Studio II 的手势作用到相机，对象几何未写入。",
+      "observations": {
+        "parity-native-canvas-navigation": "原生对象的输入归属与持久化位置"
+      },
+      "versionExpectations": {
+        "parity-native-canvas-navigation": {
+          "initial": {
+            "geometryRevisions": 1,
+            "focusedSpace": [
+              {
+                "id": "mixed-document",
+                "panned": false
+              },
+              {
+                "id": "mixed-todo",
+                "panned": true
+              }
+            ]
+          },
+          "ii": {
+            "geometryRevisions": 0,
+            "focusedSpace": [
+              {
+                "id": "mixed-document",
+                "panned": true
+              },
+              {
+                "id": "mixed-todo",
+                "panned": true
+              }
+            ]
+          }
+        }
+      },
+      "notes": [
+        "初代聚焦文档后通过 Space 拖动会提交一笔对象移动。Studio II 将相同手势交还相机，没有改变对象几何版次。"
+      ]
+    },
+    {
+      "id": "EDIT-MOVE-05",
+      "steps": ["打开位置锁定的 HTML", "操作正文并验证不可移动", "在独立只读访客会话操作内容"],
+      "expected": "位置锁和访客两种条件保持对象几何不变，合法内容交互可用。",
+      "observations": {
+        "parity-locked-embed-content": "几何锁定与只读访客的内容交互"
+      }
+    },
+    {
+      "id": "EDIT-ORG-01",
+      "steps": [
+        "打开显式父子均锁定的分区",
+        "尝试单独解锁内部对象并核对层序",
+        "选择父子后统一解锁",
+        "重开核对锁定状态"
+      ],
+      "expected": "明确区分选中内部对象和选中父子。批量解除显式双锁并持久化。",
+      "observations": {
+        "parity-nested-locks": "单独解锁、父子共同解锁及重开"
+      },
+      "versionExpectations": {
+        "parity-nested-locks": {
+          "initial": {
+            "jointUnlock": true,
+            "unlockedAfterReload": true,
+            "individualUnlock": true
+          },
+          "ii": {
+            "jointUnlock": true,
+            "unlockedAfterReload": true,
+            "individualUnlock": false
+          }
+        }
+      },
+      "notes": [
+        "初代允许单独解锁子对象自己的锁。Studio II 保留显式父分区的继承锁，选中父子能一起解除。"
+      ]
+    },
+    {
+      "id": "EDIT-ORG-02",
+      "steps": ["反复点击重叠位置的锁定文字", "尝试拖动并核对位置", "编辑文字正文后通过菜单解锁"],
+      "expected": "仍能选择及合法编辑内容。几何保留原位，随后可单独解锁。",
+      "observations": {
+        "parity-geometry-lock-content": "重叠命中、几何锁定、文字编辑及解锁"
+      }
+    },
+    {
+      "id": "EDIT-ORG-03",
+      "steps": ["常规点击组合并拖动", "从独立成员右键选中及解除锁定", "再对组合执行解组并重开"],
+      "expected": "常规点击选整组，锁定成员不跟移动。独立右键后可解锁，再解除正式组合关系。",
+      "observations": {
+        "parity-whole-group-member": "组选择、单独成员保护与解组持久状态"
+      }
+    },
+    {
+      "id": "EDIT-ORG-04",
+      "steps": ["从菜单移除分区边框", "核对子对象位置与关联", "对拆框操作执行撤销"],
+      "expected": "拆框保留子对象的实际位置。撤销恢复分区及原有关联。记录两代留存的分区链接。",
+      "observations": {
+        "parity-section-dissolve": "子位置、父链接和撤销后的关联"
+      },
+      "versionExpectations": {
+        "parity-section-dissolve": {
+          "initial": {
+            "childPositionHeld": true,
+            "undoRestoresParent": true,
+            "parentLinkCleared": false
+          },
+          "ii": {
+            "childPositionHeld": true,
+            "undoRestoresParent": true,
+            "parentLinkCleared": true
+          }
+        }
+      },
+      "notes": [
+        "拆框后初代的旧父链接还在，Studio II 实际解除关系。两代均保留子对象位置，撤销恢复原父链接。"
+      ]
+    },
+    {
+      "id": "EDIT-ORG-05",
+      "steps": [
+        "在两个窗口打开同一白板",
+        "依次执行四项层序和撤销重做",
+        "再对已在顶层的对象执行置顶",
+        "重开核对顺序和持久版次"
+      ],
+      "expected": "两窗的四种层序同步、撤销与重做。边界命令的实际版次行为单独记录。",
+      "observations": {
+        "parity-undo-layer-order": "四方向、两窗、重开以及边界操作版次"
+      },
+      "versionExpectations": {
+        "parity-undo-layer-order": {
+          "initial": {
+            "directions": ["上移一层", "下移一层", "置于顶层", "置于底层"],
+            "acrossWindows": true,
+            "reopenedOrder": ["a", "c", "b"],
+            "boundaryRevisionDelta": 1
+          },
+          "ii": {
+            "directions": ["上移一层", "下移一层", "置于顶层", "置于底层"],
+            "acrossWindows": true,
+            "reopenedOrder": ["a", "c", "b"],
+            "boundaryRevisionDelta": 0
+          }
+        }
+      },
+      "notes": [
+        "对已在顶层对象再次置顶，初代保存额外一版。Studio II 顺序未变时已认可操作但无需写入新版本。"
+      ]
+    },
+    {
+      "id": "EDIT-ORG-06",
+      "steps": [
+        "从菜单复制一个位置锁定对象",
+        "在另一块白板粘贴",
+        "复制含锁定和未锁定成员的组合，再次跨板粘贴",
+        "刷新目标板核对对象、组合和锁定信息"
+      ],
+      "expected": "复制不修改源对象，剪切和删除仍受锁保护。目标板有独立对象和组合 ID，锁定属性跨重开保留。",
+      "observations": {
+        "parity-locked-copy-paste": "锁定对象、半锁组合、目标板关系及源板保持"
+      }
+    },
+    {
+      "id": "EDIT-LINE-01",
+      "steps": ["打开含右、上和底端口与反向排列的板", "对每条连线量测首末切线", "保留同状态截图"],
+      "expected": "根据端口与路由条件，记录两代真实出入方向，端点控制对应到可验证的屏幕切线。",
+      "observations": {
+        "parity-automatic-port-tangents": "各路线的实际首末切线"
+      },
+      "notes": [
+        "初代三类反例按实际切线记录，旧箭头未另取向量。Studio II 按源端口朝外、目标端口朝内的方向连线，各箭头顺着相应的路径末端。"
+      ],
+      "versionExpectations": {
+        "parity-automatic-port-tangents": {
+          "initial": {
+            "reverse": {
+              "start": "对齐",
+              "end": "反向",
+              "arrow": null
+            },
+            "perpendicular": {
+              "start": "对齐",
+              "end": "垂直",
+              "arrow": null
+            },
+            "backwards": {
+              "start": "反向",
+              "end": "反向",
+              "arrow": null
+            },
+            "upward": {
+              "start": "对齐",
+              "end": "对齐",
+              "arrow": null
+            }
+          },
+          "ii": {
+            "reverse": {
+              "start": "对齐",
+              "end": "对齐",
+              "arrow": "对齐"
+            },
+            "perpendicular": {
+              "start": "对齐",
+              "end": "对齐",
+              "arrow": "对齐"
+            },
+            "backwards": {
+              "start": "对齐",
+              "end": "对齐",
+              "arrow": "对齐"
+            },
+            "upward": {
+              "start": "对齐",
+              "end": "对齐",
+              "arrow": "对齐"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "EDIT-LINE-02",
+      "steps": ["移动已绑定的目标", "旋转对象后量测箭头方向", "拖动线端重绑另一对象并读取结果"],
+      "expected": "每次目标和绑定变化后，连线依照当前端口重算路由并保留相应几何。",
+      "observations": {
+        "parity-move-rotate-reconnect-tangents": "移动、旋转、重绑的首末方向和持久字段"
+      },
+      "notes": [
+        "两代实际旋转 42° 后检查端口。重绑分别使用其支持的命中点，初代在对象内保持左侧，Studio II 在外侧吸附上端口。"
+      ],
+      "versionExpectations": {
+        "parity-move-rotate-reconnect-tangents": {
+          "initial": {
+            "movedRays": {
+              "start": "反向",
+              "end": "反向",
+              "arrow": null
+            },
+            "rotatedRays": {
+              "start": "反向",
+              "end": "斜向",
+              "arrow": null
+            },
+            "reboundRays": {
+              "start": "对齐",
+              "end": "对齐",
+              "arrow": null
+            },
+            "reboundPort": "left",
+            "rotation": 42
+          },
+          "ii": {
+            "movedRays": {
+              "start": "对齐",
+              "end": "对齐",
+              "arrow": "对齐"
+            },
+            "rotatedRays": {
+              "start": "对齐",
+              "end": "对齐",
+              "arrow": "对齐"
+            },
+            "reboundRays": {
+              "start": "对齐",
+              "end": "对齐",
+              "arrow": "对齐"
+            },
+            "reboundPort": "top",
+            "rotation": 42
+          }
+        }
+      }
+    },
+    {
+      "id": "EDIT-LINE-03",
+      "steps": ["打开邻接覆盖和带手调折点的两条线", "观察出入方向", "刷新并核对保存的显式折点"],
+      "expected": "记录靠近或重叠时的真实路由，手动折点保留。",
+      "observations": {
+        "parity-overlap-and-manual-tangents": "邻接箭头、显式折点和持久状态"
+      },
+      "notes": [
+        "邻接重叠样板的初代末端切线垂直于指定端口，Studio II 按端口重新配路。手动折点在两代均刷新读回。"
+      ],
+      "versionExpectations": {
+        "parity-overlap-and-manual-tangents": {
+          "initial": {
+            "tight": {
+              "start": "对齐",
+              "end": "垂直",
+              "arrow": null
+            },
+            "fixed": {
+              "start": "对齐",
+              "end": "对齐",
+              "arrow": null
+            },
+            "retainedExplicitBends": true
+          },
+          "ii": {
+            "tight": {
+              "start": "对齐",
+              "end": "对齐",
+              "arrow": "对齐"
+            },
+            "fixed": {
+              "start": "对齐",
+              "end": "对齐",
+              "arrow": "对齐"
+            },
+            "retainedExplicitBends": true
+          }
+        }
+      }
+    },
+    {
+      "id": "EDIT-MENU-01",
+      "steps": [
+        "在 420×345 短窗从屏边打开右键和选区更多菜单",
+        "使用 Home、End 和滚动访问可见操作",
+        "关闭后核对画布焦点和键盘再次开启"
+      ],
+      "expected": "各操作在屏边和短窗口仍可到达，关闭后归还焦点。",
+      "observations": {
+        "parity-short-object-menu": "短窗菜单的边界、滚动和焦点"
+      },
+      "versionExpectations": {
+        "parity-short-object-menu": {
+          "initial": {
+            "contextMenuFitsAtEdge": true,
+            "homeAndEndScrollItems": true,
+            "opensSelectionMenuByKeyboard": true,
+            "tabClosesSelectionMenu": true,
+            "returnsFocusToCanvas": false
+          },
+          "ii": {
+            "contextMenuFitsAtEdge": true,
+            "homeAndEndScrollItems": true,
+            "opensSelectionMenuByKeyboard": true,
+            "tabClosesSelectionMenu": true,
+            "returnsFocusToCanvas": true
+          }
+        }
+      },
+      "notes": ["短窗右键菜单聚焦内部动作后按 Esc，两代均关闭。Studio II 还会把焦点交还画布。"]
+    },
+    {
+      "id": "EDIT-MENU-02",
+      "steps": [
+        "依次选择形状、文字、便签、分区、笔迹、连线和贴纸",
+        "逐类打开右键菜单，确认通用动作与对象专用控件",
+        "用 Shift＋右方向键移动并核对存储坐标"
+      ],
+      "expected": "7 类对象均逐项检查实际可见入口、单选禁用项和微调写入。",
+      "observations": {
+        "parity-geometric-menu-matrix": "按对象记录右键、单选禁用、专用入口和移动"
+      }
+    },
+    {
+      "id": "EDIT-MENU-03",
+      "steps": ["从菜单重复形状", "拖动副本并保存", "从菜单适应选区", "删除副本后重启"],
+      "expected": "重复、适应选区及删除由菜单触发，持久化结果只移除副本。",
+      "observations": {
+        "parity-applied-object-menu-actions": "重复、拖动、适应选区及重开后删除结果"
+      }
+    },
+    {
+      "id": "EDIT-MENU-04",
+      "steps": [
+        "分别选中 PNG、SVG、视频和独立链接",
+        "打开选区更多菜单与专用控件",
+        "实际打开 SVG 裁剪并取消，核对各自移动"
+      ],
+      "expected": "4 类媒体与链接检查通用菜单和对象专用项。SVG 裁剪弹窗可打开和取消。",
+      "observations": {
+        "parity-media-menu-matrix": "四类媒体与链接的菜单、入口和移动",
+        "parity-svg-crop-available": "SVG 裁剪入口及实际能否打开"
+      }
+    },
+    {
+      "id": "EDIT-MENU-05",
+      "steps": [
+        "分别选择表格、文档、待办、HTML、历史 diagram 与 chart",
+        "打开更多菜单，核对移动和各自专用项",
+        "实际编辑 HTML 源码入口并取消"
+      ],
+      "expected": "6 类富内容对象逐项检查。表格和文档提供相应填充入口，HTML 与带源码图解按对象类型显示源码操作。",
+      "observations": {
+        "parity-content-menu-matrix": "六类富内容对象的菜单、移动与工具",
+        "parity-html-source-action": "源代码对话框的实际可用性"
+      }
+    },
+    {
+      "id": "EDIT-VIEW-01",
+      "steps": ["从右上角打开共享计时器", "调整时间后开始与暂停", "另一页核对并刷新", "继续与重置"],
+      "expected": "开始、暂停和恢复在两个页面同步。刷新保留已确认的暂停状态。",
+      "observations": {
+        "parity-shared-timer-room-sync": "加减、两页同步与重开暂停状态"
+      }
+    },
+    {
+      "id": "EDIT-VIEW-02",
+      "steps": [
+        "对单选和混选分别进入观看",
+        "调整观看比例与适配范围",
+        "退出后读取相机、选区及触发控件焦点"
+      ],
+      "expected": "可按真实选区进入观看，返回恢复原相机和选区，以及控件焦点。",
+      "observations": {
+        "parity-viewing-selection-camera": "单选、混选、比例及回到画布的状态"
+      }
+    },
+    {
+      "id": "EDIT-VIEW-03",
+      "steps": ["在观看视图画临时荧光笔", "分别检查取消、自然淡出及清除", "退出并刷新读回白板"],
+      "expected": "只在观看会话展示临时笔迹。取消、淡出、清除以及退出均可观察，白板存储无标记。",
+      "observations": {
+        "parity-temporary-marker-lifetime": "临时笔迹生命周期与零持久化"
+      }
+    },
+    {
+      "id": "EDIT-VIEW-04",
+      "steps": [
+        "在 390×760 启动亮色和暗色",
+        "测量计时器和观看控件的显示边界",
+        "操作关键入口后退出"
+      ],
+      "expected": "两种配色中的计时器和观看工具均保留在窄窗口内，主要入口仍可操作。",
+      "observations": {
+        "parity-viewing-narrow-bounds": "窄窗、两种主题及控件边界"
+      }
+    },
+    {
+      "id": "EDIT-VIEW-05",
+      "steps": [
+        "用独立查看者打开",
+        "读取共享计时并检查改动权限",
+        "进入观看画临时标记后关闭",
+        "核对白板持久状态"
+      ],
+      "expected": "访客可观看和使用本地临时工具，计时读写及移除控件依权限显示。白板不会持久化临时标记。",
+      "observations": {
+        "parity-viewer-permissions": "只读计时、临时标记和持久化边界"
+      }
+    },
+    {
+      "id": "EDIT-ZOOM-01",
+      "steps": [
+        "导入混合对象",
+        "桌面与窄窗分别观察 5% 到 200% 多档",
+        "检查标签、内容、媒体和实际布局"
+      ],
+      "expected": "记录各倍率的可见内容与简化呈现。仅改变相机时，白板内容及版次保持。",
+      "observations": {
+        "parity-zoom-visibility-matrix": "实际分辨率与倍率下的对象呈现"
+      }
+    },
+    {
+      "id": "EDIT-ZOOM-02",
+      "steps": [
+        "在 60% 的短窄窗口选中带标题 HTML",
+        "实测选区工具及菜单边界",
+        "使用适应选区",
+        "低倍率下检查连线端点手柄"
+      ],
+      "expected": "工具栏和菜单可操作。低倍率端点手柄保持可点击尺寸。",
+      "observations": {
+        "parity-short-window-zoom-actions": "HTML 选区工具、菜单和视口边界",
+        "parity-connector-handle-size": "低倍率连线端点手柄尺寸"
+      }
+    },
+    {
+      "id": "EDIT-ZOOM-03",
+      "steps": [
+        "在 60% 移动对象并暂扣保存回执",
+        "将视图切至 25%",
+        "比较回执放行前后位置",
+        "刷新读取已保存坐标"
+      ],
+      "expected": "两档缩放之间仍保持正确世界坐标。回执等待及确认流程不应使对象跳到别处。",
+      "observations": {
+        "parity-zoom-save-stability": "缩放切换、回执确认和已保存位置"
+      }
+    },
+    {
+      "id": "EDIT-TEXT-01",
+      "steps": [
+        "切换到 150%",
+        "分别双击形状和便签进入文字编辑",
+        "确认选区只有一个格式入口",
+        "用 Ctrl＋B 设粗并读回"
+      ],
+      "expected": "格式控制集中在选区工具条，内容内保留编辑器。快捷键修改部件正文，实际样式保存。",
+      "observations": {
+        "parity-inline-format-entry": "内容内额外格式栏及保存设粗的对象数"
+      }
+    },
+    {
+      "id": "EDIT-TEXT-02",
+      "steps": [
+        "双击形状并输入正文",
+        "在 Studio II 受控持有保存及补读",
+        "停顿后直接续写",
+        "退出后刷新核对完整正文"
+      ],
+      "expected": "在等待阶段保留编辑焦点，续写无需再次点击。退出和重开读回完整正文。",
+      "observations": {
+        "parity-inline-resumes-after-pause": "无重新点击的续写和持久化"
+      }
+    },
+    {
+      "id": "EDIT-EXTRA-01",
+      "steps": ["用数字 9 进入画布备注工具", "在白板空处新建备注", "从画布针点回复并刷新"],
+      "expected": "从画布入口触发备注，不依赖顶栏按钮。针点、正文与回复重开后仍可读。"
+    },
+    {
+      "id": "EDIT-EXTRA-02",
+      "steps": [
+        "从浮动选区工具新建备注",
+        "打开针点并解决，检查针点隐去",
+        "重新定位该已解决针点，回复后核对恢复"
+      ],
+      "expected": "选区备注可保存。解决后默认隐藏针点，回复重新打开该线程。",
+      "notes": [
+        "验收使用备注列表重新定位已经隐藏的线程，结果判定取画布针点和回复。页头列表的交互属于单独范围。"
+      ]
+    },
+    {
+      "id": "EDIT-EXTRA-03",
+      "steps": [
+        "调整当前白板的视口",
+        "离开并从工作台重开",
+        "再次调整并刷新",
+        "记录两种导航路径的恢复状态"
+      ],
+      "expected": "对照同一 Web 白板工作台往返和浏览器重载的视角，记录两个入口是否保留相机。",
+      "observations": {
+        "parity-web-viewport-reopen-state": "离开重开与浏览器刷新的视口恢复"
+      },
+      "notes": [
+        "本次两代独立 Web 的往返和刷新都重新按板内容适配。该观测与此前独立验证的 Codex 面板恢复模式分开。"
+      ]
+    },
+    {
+      "id": "EDIT-EXTRA-04",
+      "steps": [
+        "使用独立查看者与房主打开同一板",
+        "移动房主光标并在两窗核对",
+        "拖住对象时观察预览，松手后读取持久结果"
+      ],
+      "expected": "查看者可见真实光标与临时拖动。拖住时存储保持，松手后更新版次和位置。",
+      "notes": ["初代侧用虚线幽灵展示预览，Studio II 暂时移动实像。两代都在松手时才写入。"]
+    },
+    {
+      "id": "EDIT-EXTRA-05",
+      "steps": [
+        "中断一次原本要保存的正文请求",
+        "重载白板并定位本机草稿",
+        "应用已比较的草稿并确认保存"
+      ],
+      "expected": "保存前中断不会改正式白板。重载后可找到并应用本机草稿，正文按真实读回校验。",
+      "notes": [
+        "初代比较后可回到文字续编并另行确认。Studio II 通过比较过的草稿恢复，随后从存储读回。"
+      ]
+    },
+    {
+      "id": "EDIT-EXTRA-06",
+      "steps": [
+        "选择矩形后移动鼠标预放置",
+        "在仍未点击时切换缩放",
+        "核对悬停预览和实际白板对象数",
+        "点击后只创建一个对象"
+      ],
+      "expected": "悬停显示半透明预览，放置状态随缩放维持。鼠标点击前存储保持，点击后只创建一个对象。"
+    },
+    {
+      "id": "EDIT-EXTRA-07",
+      "steps": [
+        "从选区备注新建线程",
+        "打开画布针点，编辑正文和单条回复",
+        "取消删除保留线程",
+        "确认删除并重开白板"
+      ],
+      "expected": "针点可支持独立备注及回复操作。取消保留实际线程，确认后刷新也不再出现，白板对象保持。"
+    },
+    {
+      "id": "EDIT-EXTRA-08",
+      "steps": [
+        "实际缩放到 36%",
+        "在空白处依次悬停文字和爱心贴纸",
+        "把表格、待办与文档的预放置移过既有 HTML",
+        "逐项量测预览并核对正式白板的对象和版次"
+      ],
+      "expected": "文字预览保持占位线，贴纸使用实际爱心图样，表格有 3×3 格线，待办保留标题和 0/0 完成，文档使用图标与虚线轮廓。悬停阶段只展示预览，不写入白板。"
+    }
+  ],
+  "excludedBasics": {
+    "WB-VIEW-02": "只涉及页头标题",
+    "WB-SELECT-06": "旧场景的输入框是页头标题"
+  }
+}

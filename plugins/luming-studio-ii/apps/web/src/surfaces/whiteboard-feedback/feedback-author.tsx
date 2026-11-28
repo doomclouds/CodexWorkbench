@@ -3,6 +3,7 @@ import type { FeedbackMessage } from '../../data/feedback/index.js';
 
 type FeedbackAuthor = Pick<FeedbackMessage, 'authorId' | 'authorName' | 'authoredByViewer'>;
 
+const viewerColor = '#257de0';
 const palette = [
   '#785ee8',
   '#dc3c3d',
@@ -10,7 +11,7 @@ const palette = [
   '#fbb315',
   '#ce447d',
   '#10a122',
-  '#257de0',
+  viewerColor,
 ] as const;
 const contrastPivot = 0.179;
 const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
@@ -25,13 +26,17 @@ function colorChannel(hex: string) {
   return channel <= 0.04045 ? channel / 12.92 : Math.pow((channel + 0.055) / 1.055, 2.4);
 }
 
-export function feedbackAuthorColors(authorId: string) {
-  let hash = 0;
-  for (const character of authorId) {
-    hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
+export function feedbackAuthorColors(author?: FeedbackAuthor) {
+  let backgroundColor: string = viewerColor;
+  if (author && !author.authoredByViewer) {
+    let hash = 0;
+    for (const character of author.authorId) {
+      hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
+    }
+
+    backgroundColor = palette[hash % palette.length] ?? palette[0];
   }
 
-  const backgroundColor = palette[hash % palette.length] ?? palette[0];
   const red = colorChannel(backgroundColor.slice(1, 3));
   const green = colorChannel(backgroundColor.slice(3, 5));
   const blue = colorChannel(backgroundColor.slice(5, 7));
@@ -41,7 +46,10 @@ export function feedbackAuthorColors(authorId: string) {
 }
 
 export function FeedbackAuthorGlyph({ author }: { readonly author?: FeedbackAuthor }) {
-  if (!author || /^\p{N}+(?:\s+\p{N}+)*$/u.test(author.authorId)) {
+  if (!author || author.authoredByViewer) {
+    return <span aria-hidden="true">我</span>;
+  }
+  if (/^\p{N}+(?:\s+\p{N}+)*$/u.test(author.authorId)) {
     return <User size={15} aria-hidden="true" />;
   }
 
@@ -64,7 +72,7 @@ export function FeedbackAvatar({ author }: { readonly author: FeedbackAuthor }) 
   return (
     <span
       className="whiteboard-feedback__avatar"
-      style={feedbackAuthorColors(author.authorId)}
+      style={feedbackAuthorColors(author)}
       aria-hidden="true"
     >
       <FeedbackAuthorGlyph author={author} />

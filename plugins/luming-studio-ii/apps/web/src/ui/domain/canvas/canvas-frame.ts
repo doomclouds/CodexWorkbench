@@ -18,6 +18,7 @@ export interface CanvasFrame {
   viewport: CanvasViewport;
   preview?: Extract<CanvasEditIntent, { changes: readonly unknown[] }>;
   draft?: CanvasCreateIntent | CanvasDuplicateIntent;
+  placementHover?: { requestId: string; point: CanvasPoint };
   marquee?: CanvasRect;
   guides?: readonly AlignmentGuide[];
   ports?: readonly CanvasPoint[];

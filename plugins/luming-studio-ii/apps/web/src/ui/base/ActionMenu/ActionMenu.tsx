@@ -14,6 +14,7 @@ export interface ActionMenuItem {
   disabled?: boolean;
   shortcut?: string;
   separatorBefore?: boolean;
+  tone?: 'danger';
 }
 
 export interface ActionMenuProps {
@@ -181,6 +182,7 @@ export function ActionMenu({
             type="button"
             role="menuitem"
             tabIndex={-1}
+            data-tone={item.tone}
             aria-label={
               item.shortcut
                 ? item.label + (announceShortcuts ? ' ' + item.shortcut : '')

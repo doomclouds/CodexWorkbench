@@ -12,6 +12,7 @@ const component = 'tests/component/Canvas.test.tsx';
 const parity = 'tests/component/CanvasParity.test.tsx';
 const fixture = 'tests/fixtures/canvas/fixture.tsx';
 const publicPackage = '@codexworkbench/luming-studio-ii-web/ui/domain/canvas';
+const connectorRoute = '@codexworkbench/luming-studio-ii-contracts/whiteboard/connector-route';
 const publicEntry = canvas + 'index.ts';
 const requiredExports = [
   "export { Canvas } from './Canvas.js';",
@@ -23,6 +24,26 @@ const readonlyExports = [
 ];
 
 const rejected = [
+  [
+    'Canvas rendering reaching shared connector geometry',
+    canvas + 'rendering/CanvasObjects.tsx',
+    `import { routeConnector } from '${connectorRoute}';`,
+  ],
+  [
+    'a connector importing the full shared geometry namespace',
+    canvas + 'connectors/path.ts',
+    `import * as connector from '${connectorRoute}';`,
+  ],
+  [
+    'a connector dynamically importing shared geometry',
+    canvas + 'connectors/geometry.ts',
+    `void import('${connectorRoute}');`,
+  ],
+  [
+    'a connector re-exporting shared geometry directly',
+    canvas + 'connectors/path.ts',
+    `export { routeConnector } from '${connectorRoute}';`,
+  ],
   [
     'Canvas invoking a private inline editor handle',
     canvas + 'rendering/CanvasRegisteredBody.tsx',
@@ -279,6 +300,8 @@ for (const [name, filePath, source, rule = boundary, messageId] of rejected) {
 }
 
 const accepted = [
+  [canvas + 'connectors/geometry.ts', `import { routeConnector } from '${connectorRoute}';`],
+  [canvas + 'connectors/path.ts', `import type { ConnectorRouteInput } from '${connectorRoute}';`],
   [
     canvas + 'rendering/CanvasRegisteredBody.tsx',
     'export function Body() { return <ObjectView formatRequest={request} />; }',

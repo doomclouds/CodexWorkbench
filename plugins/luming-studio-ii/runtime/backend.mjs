@@ -127,29 +127,29 @@ var require_polyfills = __commonJS({
         })(fs.rename);
       }
       fs.read = typeof fs.read !== "function" ? fs.read : (function(fs$read) {
-        function read(fd, buffer, offset, length, position, callback_) {
+        function read(fd, buffer, offset2, length, position, callback_) {
           var callback;
           if (callback_ && typeof callback_ === "function") {
             var eagCounter = 0;
             callback = function(er, _, __) {
               if (er && er.code === "EAGAIN" && eagCounter < 10) {
                 eagCounter++;
-                return fs$read.call(fs, fd, buffer, offset, length, position, callback);
+                return fs$read.call(fs, fd, buffer, offset2, length, position, callback);
               }
               callback_.apply(this, arguments);
             };
           }
-          return fs$read.call(fs, fd, buffer, offset, length, position, callback);
+          return fs$read.call(fs, fd, buffer, offset2, length, position, callback);
         }
         if (Object.setPrototypeOf) Object.setPrototypeOf(read, fs$read);
         return read;
       })(fs.read);
       fs.readSync = typeof fs.readSync !== "function" ? fs.readSync : /* @__PURE__ */ (function(fs$readSync) {
-        return function(fd, buffer, offset, length, position) {
+        return function(fd, buffer, offset2, length, position) {
           var eagCounter = 0;
           while (true) {
             try {
-              return fs$readSync.call(fs, fd, buffer, offset, length, position);
+              return fs$readSync.call(fs, fd, buffer, offset2, length, position);
             } catch (er) {
               if (er.code === "EAGAIN" && eagCounter < 10) {
                 eagCounter++;
@@ -3317,8 +3317,8 @@ function validBounds({ x, y, width, height }) {
 }
 function validActivityObjectIds(ids) {
   const bounded2 = ids.length <= maxAgentActivityObjects;
-  const unique = new Set(ids).size === ids.length;
-  return bounded2 && unique && ids.every(validAgentActivityId);
+  const unique2 = new Set(ids).size === ids.length;
+  return bounded2 && unique2 && ids.every(validAgentActivityId);
 }
 function validActivityPhase(phase) {
   return phases.has(phase);
@@ -3404,12 +3404,12 @@ function validViewport(viewport) {
     return true;
   }
   const { centerX, centerY, zoom, width, height } = viewport;
-  const center = [centerX, centerY].every(withinWorld);
+  const center2 = [centerX, centerY].every(withinWorld);
   const magnification = Number.isFinite(zoom) && zoom >= 1e-3 && zoom <= maximumZoom;
   const dimensions3 = [width, height].every(
     (value) => Number.isFinite(value) && value > 0 && value <= maximumScreenDimension
   );
-  return center && magnification && dimensions3;
+  return center2 && magnification && dimensions3;
 }
 function validPresence(input) {
   const freshIdentity = validViewId(input.viewId) && input.sequence > 0n;
@@ -3430,8 +3430,8 @@ function validGesture(gesture) {
   }
   const { changes } = gesture;
   const bounded2 = changes.length > 0 && changes.length <= maxGestureObjects;
-  const unique = new Set(changes.map(({ objectId }) => objectId)).size === changes.length;
-  return bounded2 && unique && changes.every(validGestureChange);
+  const unique2 = new Set(changes.map(({ objectId }) => objectId)).size === changes.length;
+  return bounded2 && unique2 && changes.every(validGestureChange);
 }
 
 // src/modules/rooms/domain/timer.ts
@@ -3462,11 +3462,11 @@ function timerView(state, now) {
   const phase = remainingMs > 0 ? "running" : "ended";
   return { ...base, phase, deadlineUnixMs, remainingMs };
 }
-function alterRemaining(state, current, now, delta) {
-  if (delta !== adjustStep && delta !== -adjustStep) {
+function alterRemaining(state, current, now, delta2) {
+  if (delta2 !== adjustStep && delta2 !== -adjustStep) {
     return void 0;
   }
-  const remaining = current.remainingMs + delta;
+  const remaining = current.remainingMs + delta2;
   if (!validDuration(remaining)) {
     return void 0;
   }
@@ -3689,9 +3689,9 @@ function createAgentActivity(options) {
     return { kind: "active", workspace: changed };
   }
   function close(board, record7, key, reason) {
-    const terminal = retire(record7.workspace.generation, reason);
-    board.set(key, terminal);
-    return resultOf(terminal);
+    const terminal2 = retire(record7.workspace.generation, reason);
+    board.set(key, terminal2);
+    return resultOf(terminal2);
   }
   function change(principal, operation) {
     const { taskId } = operation;
@@ -4407,16 +4407,350 @@ function selectExportObjects(objects, byId3, scope2) {
   return objects.filter(({ objectId }) => ids.has(objectId));
 }
 
-// src/modules/whiteboard/domain/export-geometry.ts
-var portOffsets = {
+// ../../packages/contracts/whiteboard/connector-route.ts
+var normals = {
   top: { x: 0, y: -1 },
   right: { x: 1, y: 0 },
   bottom: { x: 0, y: 1 },
   left: { x: -1, y: 0 }
 };
+var epsilon = 1e-7;
+var clearance = 18;
+var objectPadding = 8;
+var cornerRadius = 8;
+var maximumRelativeBends = 12;
+var connectorArrowHalfWidthRatio = 2.5;
+function finite({ x, y }) {
+  return Number.isFinite(x) && Number.isFinite(y);
+}
+function center({ x, y, width, height }) {
+  return { x: x + width / 2, y: y + height / 2 };
+}
+function delta(from, to) {
+  return { x: to.x - from.x, y: to.y - from.y };
+}
+function magnitude({ x, y }) {
+  return Math.hypot(x, y);
+}
+function dot(left, right) {
+  return left.x * right.x + left.y * right.y;
+}
+function rotate({ x, y }, degrees) {
+  const radians = degrees % 360 * Math.PI / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const rx = x * cos - y * sin;
+  const ry = x * sin + y * cos;
+  return { x: Math.abs(rx) < epsilon ? 0 : rx, y: Math.abs(ry) < epsilon ? 0 : ry };
+}
+function offset(point2, direction, distance) {
+  return { x: point2.x + direction.x * distance, y: point2.y + direction.y * distance };
+}
+function connectorPortPoint(geometry, port, along = 0) {
+  const normal = rotate(normals[port], geometry.rotation);
+  const half = normals[port].x ? geometry.width / 2 : geometry.height / 2;
+  return offset(center(geometry), normal, half + along);
+}
+function facingCenter(target2) {
+  const position = target2.geometry && center(target2.geometry);
+  return position && finite(position) ? position : target2.fallback;
+}
+function facingPort(geometry, other) {
+  const { x, y } = rotate(delta(center(geometry), other), -geometry.rotation);
+  if (Math.abs(x) > Math.abs(y)) {
+    return x >= 0 ? "right" : "left";
+  }
+  return y >= 0 ? "bottom" : "top";
+}
+function terminal(target2, other) {
+  const { fallback: fallback2, geometry } = target2;
+  if (!geometry) {
+    return { point: fallback2 };
+  }
+  const port = target2.port ?? facingPort(geometry, other);
+  const point2 = connectorPortPoint(geometry, port);
+  return finite(point2) ? { point: point2, normal: rotate(normals[port], geometry.rotation) } : { point: fallback2 };
+}
+function horizontal(normal) {
+  return normal && Math.abs(normal.x) >= Math.abs(normal.y);
+}
+function orthogonal(from, to, alongX, lane) {
+  return alongX ? [from, { x: lane, y: from.y }, { x: lane, y: to.y }, to] : [from, { x: from.x, y: lane }, { x: to.x, y: lane }, to];
+}
+function originalRoute(start, end2) {
+  const from = start.point;
+  const to = end2.point;
+  const { x, y } = delta(from, to);
+  if (Math.abs(x) < 1 || Math.abs(y) < 1) {
+    return [from, to];
+  }
+  const alongX = horizontal(start.normal) ?? horizontal(end2.normal) ?? Math.abs(x) >= Math.abs(y);
+  return orthogonal(from, to, alongX, alongX ? (from.x + to.x) / 2 : (from.y + to.y) / 2);
+}
+function boundsFor(target2, padding) {
+  const { geometry } = target2;
+  if (!geometry) {
+    return [];
+  }
+  const axis = rotate({ x: 1, y: 0 }, geometry.rotation);
+  const x = center(geometry);
+  const halfWidth = (Math.abs(axis.x) * geometry.width + Math.abs(axis.y) * geometry.height) / 2;
+  const halfHeight = (Math.abs(axis.y) * geometry.width + Math.abs(axis.x) * geometry.height) / 2;
+  return [
+    {
+      left: x.x - halfWidth - padding,
+      top: x.y - halfHeight - padding,
+      right: x.x + halfWidth + padding,
+      bottom: x.y + halfHeight + padding
+    }
+  ];
+}
+function inside(point2, bounds) {
+  return point2.x > bounds.left + epsilon && point2.x < bounds.right - epsilon && point2.y > bounds.top + epsilon && point2.y < bounds.bottom - epsilon;
+}
+function range(a, b, minimum, maximum) {
+  const change = b - a;
+  if (Math.abs(change) < epsilon) {
+    return a > minimum + epsilon && a < maximum - epsilon ? [0, 1] : void 0;
+  }
+  const first = (minimum + epsilon - a) / change;
+  const last = (maximum - epsilon - a) / change;
+  return [Math.min(first, last), Math.max(first, last)];
+}
+function crosses(from, to, bounds) {
+  const x = range(from.x, to.x, bounds.left, bounds.right);
+  const y = range(from.y, to.y, bounds.top, bounds.bottom);
+  return x && y && Math.max(0, x[0], y[0]) + epsilon < Math.min(1, x[1], y[1]);
+}
+function clear(points, obstacles) {
+  return points.every((point2, index) => {
+    const before = points[index - 1];
+    return !before || obstacles.every((bounds) => !crosses(before, point2, bounds));
+  });
+}
+function unique(points) {
+  return points.filter((point2, index) => {
+    const before = points[index - 1];
+    return !before || magnitude(delta(before, point2)) > epsilon;
+  });
+}
+function pointsOut(terminal2, other) {
+  if (!terminal2.normal) {
+    return true;
+  }
+  if (!other) {
+    return false;
+  }
+  const vector = delta(terminal2.point, other);
+  return dot(vector, terminal2.normal) > (1 - epsilon) * magnitude(vector);
+}
+function traceExit(point2, normal, bounds) {
+  const x = normal.x ? ((normal.x > 0 ? bounds.right : bounds.left) - point2.x) / normal.x : Infinity;
+  const y = normal.y ? ((normal.y > 0 ? bounds.bottom : bounds.top) - point2.y) / normal.y : Infinity;
+  return Math.max(0, Math.min(x, y));
+}
+function lead({ point: point2, normal }, obstacles) {
+  if (!normal) {
+    return point2;
+  }
+  let distance = clearance;
+  for (let pass = 0; pass < obstacles.length; pass += 1) {
+    const insideBox = obstacles.find((bounds) => inside(offset(point2, normal, distance), bounds));
+    if (!insideBox) {
+      break;
+    }
+    distance = traceExit(point2, normal, insideBox) + objectPadding;
+  }
+  return offset(point2, normal, distance);
+}
+function bridgeChoices(from, to, obstacles) {
+  const outer = {
+    left: Math.min(from.x, to.x, ...obstacles.map(({ left }) => left)) - objectPadding,
+    right: Math.max(from.x, to.x, ...obstacles.map(({ right }) => right)) + objectPadding,
+    top: Math.min(from.y, to.y, ...obstacles.map(({ top }) => top)) - objectPadding,
+    bottom: Math.max(from.y, to.y, ...obstacles.map(({ bottom }) => bottom)) + objectPadding
+  };
+  const xs = [(from.x + to.x) / 2, outer.left, outer.right];
+  const ys = [(from.y + to.y) / 2, outer.top, outer.bottom];
+  const choices = [
+    [from, { x: to.x, y: from.y }, to],
+    [from, { x: from.x, y: to.y }, to],
+    ...xs.map((x) => orthogonal(from, to, true, x)),
+    ...ys.map((y) => orthogonal(from, to, false, y))
+  ];
+  for (const x of xs) {
+    for (const y of ys) {
+      choices.push(
+        [from, { x: from.x, y }, { x, y }, { x, y: to.y }, to],
+        [from, { x, y: from.y }, { x, y }, { x: to.x, y }, to]
+      );
+    }
+  }
+  const spanX = [outer.left, outer.right];
+  const spanY = [outer.top, outer.bottom];
+  for (const x of spanX) {
+    for (const y of spanY) {
+      const farX = x === outer.left ? outer.right : outer.left;
+      const farY = y === outer.top ? outer.bottom : outer.top;
+      choices.push(
+        [from, { x, y: from.y }, { x, y }, { x: farX, y }, { x: farX, y: to.y }, to],
+        [from, { x: from.x, y }, { x, y }, { x, y: farY }, { x: to.x, y: farY }, to]
+      );
+    }
+  }
+  return choices;
+}
+function continues(normal, start, next) {
+  return !normal || next !== void 0 && dot(normal, delta(start, next)) >= -epsilon;
+}
+function bridge(from, to, start, end2, obstacles) {
+  let best;
+  let alternative;
+  let bestScore = Infinity;
+  let fallbackScore = Infinity;
+  for (const candidate of bridgeChoices(from, to, obstacles)) {
+    const route = unique(candidate);
+    if (route.length < 2 || !clear(route, obstacles)) {
+      continue;
+    }
+    const length = route.slice(1).reduce((sum, point2, index) => sum + magnitude(delta(route[index], point2)), 0);
+    const score = length + (route.length - 2) * objectPadding;
+    if (score < fallbackScore) {
+      fallbackScore = score;
+      alternative = route;
+    }
+    if (score < bestScore && continues(start.normal, from, route[1]) && continues(end2.normal, to, route.at(-2))) {
+      bestScore = score;
+      best = route;
+    }
+  }
+  return best ?? alternative ?? [from, { x: to.x, y: from.y }, to];
+}
+function automatic(start, end2, from, to) {
+  const original = unique(originalRoute(start, end2));
+  if (pointsOut(start, original[1]) && pointsOut(end2, original.at(-2)) && clear(original, [...boundsFor(from, 0), ...boundsFor(to, 0)])) {
+    return original;
+  }
+  const obstacles = [...boundsFor(from, objectPadding), ...boundsFor(to, objectPadding)];
+  const first = lead(start, obstacles);
+  const last = lead(end2, obstacles);
+  return unique([start.point, ...bridge(first, last, start, end2, obstacles), end2.point]);
+}
+function step(point2, coordinate2, alongX) {
+  return alongX ? { x: coordinate2, y: point2.y } : { x: point2.x, y: coordinate2 };
+}
+function relativeRoute({ firstAxis, offsets }, from, to) {
+  if (!offsets.length || offsets.length > maximumRelativeBends || !offsets.every(Number.isFinite)) {
+    return void 0;
+  }
+  const fromCenter = facingCenter(from);
+  const toCenter = facingCenter(to);
+  const firstX = firstAxis === "horizontal";
+  const lastX = firstX === (offsets.length % 2 === 0);
+  const split = Math.ceil(offsets.length / 2);
+  const coordinates = offsets.map((amount, index) => {
+    const origin = index < split ? fromCenter : toCenter;
+    return amount + (firstX === (index % 2 === 0) ? origin.x : origin.y);
+  });
+  const start = terminal(from, step(fromCenter, coordinates[0], firstX));
+  const end2 = terminal(to, step(toCenter, coordinates.at(-1), !lastX));
+  const points = [start.point];
+  let cursor = start.point;
+  coordinates.forEach((coordinate2, index) => {
+    cursor = step(cursor, coordinate2, firstX === (index % 2 === 0));
+    points.push(cursor);
+  });
+  points.push(step(cursor, lastX ? end2.point.x : end2.point.y, lastX), end2.point);
+  const clears = (tip, neighbor) => !tip.normal || neighbor !== void 0 && dot(tip.normal, delta(tip.point, neighbor)) > 0;
+  return clears(start, points[1]) && clears(end2, points.at(-2)) && points.every(finite) ? unique(points) : void 0;
+}
+function resolveConnectorRoute(from, to, bends, relative) {
+  const adjusted = relative && relativeRoute(relative, from, to);
+  if (adjusted) {
+    return adjusted;
+  }
+  const start = terminal(from, facingCenter(to));
+  const end2 = terminal(to, facingCenter(from));
+  if (!finite(start.point) || !finite(end2.point)) {
+    return [];
+  }
+  return bends?.length && bends.every(finite) ? unique([start.point, ...bends, end2.point]) : automatic(start, end2, from, to);
+}
+function interpolate(before, after, amount) {
+  return offset(before, delta(before, after), amount);
+}
+function corner(before, turn, after) {
+  const near = magnitude(delta(turn, before));
+  const far = magnitude(delta(turn, after));
+  const radius = Math.min(cornerRadius, near / 2, far / 2);
+  return {
+    start: interpolate(turn, before, near ? radius / near : 0),
+    turn,
+    end: interpolate(turn, after, far ? radius / far : 0)
+  };
+}
+function terminalRun(points, step2, index, direction) {
+  const tip = points[index];
+  for (index += step2; index > 0 && index < points.length - 1; index += step2) {
+    const turn = points[index];
+    const next = points[index + step2];
+    const onward = delta(turn, next);
+    if (dot(direction, onward) < (1 - epsilon) * magnitude(onward)) {
+      const { start } = corner(points[index - step2], turn, next);
+      return { length: magnitude(delta(tip, start)), hasTurn: true };
+    }
+  }
+  return { length: magnitude(delta(tip, points[index])), hasTurn: false };
+}
+function connectorArrowPoints(points, atStart, strokeWidth) {
+  if (points.length < 2 || strokeWidth <= 0) {
+    return void 0;
+  }
+  const step2 = atStart ? 1 : -1;
+  const index = atStart ? 0 : points.length - 1;
+  const tip = points[index];
+  const vector = delta(tip, points[index + step2]);
+  const distance = magnitude(vector);
+  if (distance <= epsilon) {
+    return void 0;
+  }
+  const direction = { x: vector.x / distance, y: vector.y / distance };
+  const { length, hasTurn } = terminalRun(points, step2, index, direction);
+  const clearance2 = hasTurn ? Math.min(strokeWidth / 2, length / 4) : 0;
+  const back = Math.min(2 * connectorArrowHalfWidthRatio * strokeWidth, length - clearance2);
+  const center2 = offset(tip, direction, back);
+  const side = { x: -direction.y, y: direction.x };
+  return [offset(center2, side, back / 2), tip, offset(center2, side, -back / 2)];
+}
+function roundedConnectorSegments(points) {
+  const first = points[0];
+  const last = points.at(-1);
+  if (!first || !last) {
+    return [];
+  }
+  const segments = [];
+  let cursor = first;
+  for (let index = 1; index < points.length - 1; index += 1) {
+    const arc = corner(points[index - 1], points[index], points[index + 1]);
+    segments.push({ start: cursor, end: arc.start }, arc);
+    cursor = arc.end;
+  }
+  segments.push({ start: cursor, end: last });
+  return segments;
+}
+function connectionPathData(points) {
+  const first = points[0];
+  if (!first) {
+    return "";
+  }
+  const parts = roundedConnectorSegments(points).map(
+    ({ turn, end: end2 }) => turn ? `Q ${turn.x} ${turn.y} ${end2.x} ${end2.y}` : `L ${end2.x} ${end2.y}`
+  );
+  return `M ${first.x} ${first.y} ${parts.join(" ")}`;
+}
+
+// src/modules/whiteboard/domain/export-geometry.ts
 var maxCoordinate = 1e9;
-var maxBends = 12;
-var straightTolerance = 1;
 function finitePoint({ x, y }) {
   return Math.abs(x) <= maxCoordinate && Math.abs(y) <= maxCoordinate;
 }
@@ -4430,17 +4764,17 @@ function geometryCenter({ x, y, width, height }) {
   return { x: x + width / 2, y: y + height / 2 };
 }
 function geometryCorners(geometry) {
-  const center = geometryCenter(geometry);
-  const horizontal = geometry.width / 2;
+  const center2 = geometryCenter(geometry);
+  const horizontal2 = geometry.width / 2;
   const vertical = geometry.height / 2;
   return [
-    { x: -horizontal, y: -vertical },
-    { x: horizontal, y: -vertical },
-    { x: horizontal, y: vertical },
-    { x: -horizontal, y: vertical }
+    { x: -horizontal2, y: -vertical },
+    { x: horizontal2, y: -vertical },
+    { x: horizontal2, y: vertical },
+    { x: -horizontal2, y: vertical }
   ].map((point2) => {
     const rotated = rotatePoint(point2, geometry.rotation);
-    return { x: center.x + rotated.x, y: center.y + rotated.y };
+    return { x: center2.x + rotated.x, y: center2.y + rotated.y };
   });
 }
 function target(endpoint2, geometry) {
@@ -4448,111 +4782,13 @@ function target(endpoint2, geometry) {
   const object3 = attachment && geometry.get(attachment.objectId);
   return { fallback: point2, geometry: object3?.geometry, port: attachment?.port };
 }
-function centerOf(entry) {
-  return entry.geometry ? geometryCenter(entry.geometry) : entry.fallback;
-}
-function facingPort(geometry, other) {
-  const center = geometryCenter(geometry);
-  const local = rotatePoint({ x: other.x - center.x, y: other.y - center.y }, -geometry.rotation);
-  if (Math.abs(local.x) > Math.abs(local.y)) {
-    return local.x >= 0 ? "right" : "left";
-  }
-  return local.y >= 0 ? "bottom" : "top";
-}
-function resolveEnd(entry, other) {
-  const { geometry } = entry;
-  if (!geometry) {
-    return { point: entry.fallback };
-  }
-  const offset = portOffsets[entry.port ?? facingPort(geometry, other)];
-  const local = rotatePoint(
-    { x: offset.x * geometry.width / 2, y: offset.y * geometry.height / 2 },
-    geometry.rotation
-  );
-  const center = geometryCenter(geometry);
-  const direction = rotatePoint(offset, geometry.rotation);
-  return {
-    point: { x: center.x + local.x, y: center.y + local.y },
-    horizontal: Math.abs(direction.x) >= Math.abs(direction.y)
-  };
-}
-function step(point2, coordinate2, horizontal) {
-  return horizontal ? { x: coordinate2, y: point2.y } : { x: point2.x, y: coordinate2 };
-}
-function clearsEndpoint(entry, tip, neighbor) {
-  if (!entry.geometry) {
-    return true;
-  }
-  if (!neighbor) {
-    return false;
-  }
-  const origin = centerOf(entry);
-  return (neighbor.x - tip.x) * (tip.x - origin.x) + (neighbor.y - tip.y) * (tip.y - origin.y) > 0;
-}
-function relativeRoute(relative, from, to) {
-  const { offsets } = relative;
-  if (!offsets.length || offsets.length > maxBends || !offsets.every(Number.isFinite)) {
-    return void 0;
-  }
-  const start = centerOf(from);
-  const end2 = centerOf(to);
-  const firstHorizontal = relative.firstAxis === "horizontal";
-  const lastHorizontal = firstHorizontal === (offsets.length % 2 === 0);
-  const split = Math.ceil(offsets.length / 2);
-  const coordinates = offsets.map((offset, index) => {
-    const center = index < split ? start : end2;
-    const horizontal = firstHorizontal === (index % 2 === 0);
-    return offset + (horizontal ? center.x : center.y);
-  });
-  const first = coordinates[0];
-  const last = coordinates.at(-1);
-  if (first === void 0 || last === void 0) {
-    return void 0;
-  }
-  const tip = resolveEnd(from, step(start, first, firstHorizontal)).point;
-  const destination = resolveEnd(to, step(end2, last, !lastHorizontal)).point;
-  const points = [tip];
-  let cursor = tip;
-  coordinates.forEach((coordinate2, index) => {
-    cursor = step(cursor, coordinate2, firstHorizontal === (index % 2 === 0));
-    points.push(cursor);
-  });
-  points.push(
-    step(cursor, lastHorizontal ? destination.x : destination.y, lastHorizontal),
-    destination
-  );
-  const clearsStart = clearsEndpoint(from, tip, points[1]);
-  const clearsEnd = clearsEndpoint(to, destination, points.at(-2));
-  const clearsTargets = clearsStart && clearsEnd;
-  return clearsTargets && points.every(finitePoint) ? points : void 0;
-}
-function automaticRoute(start, end2) {
-  const from = start.point;
-  const to = end2.point;
-  const horizontalDistance = Math.abs(to.x - from.x);
-  const verticalDistance = Math.abs(to.y - from.y);
-  if (horizontalDistance < straightTolerance || verticalDistance < straightTolerance) {
-    return [from, to];
-  }
-  const horizontal = start.horizontal ?? end2.horizontal ?? horizontalDistance >= verticalDistance;
-  const middle = horizontal ? (from.x + to.x) / 2 : (from.y + to.y) / 2;
-  return [from, step(from, middle, horizontal), step(to, middle, horizontal), to];
-}
-function route(detail, from, to) {
-  const relative = detail.relativeBends && relativeRoute(detail.relativeBends, from, to);
-  if (relative) {
-    return relative;
-  }
-  const start = resolveEnd(from, centerOf(to));
-  const end2 = resolveEnd(to, centerOf(from));
-  return detail.bends.length ? [start.point, ...detail.bends, end2.point] : automaticRoute(start, end2);
-}
 function exportConnector(detail, geometry) {
-  const raw = route(detail, target(detail.start, geometry), target(detail.end, geometry));
-  const points = raw.filter((point2, index) => {
-    const previous = raw[index - 1];
-    return !previous || previous.x !== point2.x || previous.y !== point2.y;
-  });
+  const points = resolveConnectorRoute(
+    target(detail.start, geometry),
+    target(detail.end, geometry),
+    detail.bends,
+    detail.relativeBends
+  );
   const middle = Math.floor((points.length - 1) / 2);
   const first = points[middle];
   if (!first || !points.every(finitePoint)) {
@@ -4616,12 +4852,12 @@ function documentShape(width, height) {
 }
 function personShape(width, height) {
   const radius = Math.min(width * 0.19, height * 0.16);
-  const center = width / 2;
+  const center2 = width / 2;
   const y = height * 0.17;
   const left = width * 0.12;
   const right = width - left;
   const shoulder = height * 0.55;
-  return `<circle cx="${center}" cy="${y}" r="${radius}"/><path d="M ${left} ${height} V ${shoulder} C ${left} ${height * 0.3} ${right} ${height * 0.3} ${right} ${shoulder} V ${height} Z"/>`;
+  return `<circle cx="${center2}" cy="${y}" r="${radius}"/><path d="M ${left} ${height} V ${shoulder} C ${left} ${height * 0.3} ${right} ${height * 0.3} ${right} ${shoulder} V ${height} Z"/>`;
 }
 function cloudShape(width, height) {
   const edge = height * 0.8;
@@ -4760,11 +4996,11 @@ function svgLabel(label2, width, height, data, centered) {
   const count = Math.max(1, Math.min(maxRows, Math.floor(height / rowHeight)));
   const lines = compactLines(label2, width, fontSize, count);
   const right = data.align === "TEXT_ALIGNMENT_RIGHT";
-  const center = centered || data.align === "TEXT_ALIGNMENT_CENTER";
-  const alignedX = center ? width / 2 : 0;
+  const center2 = centered || data.align === "TEXT_ALIGNMENT_CENTER";
+  const alignedX = center2 ? width / 2 : 0;
   const x = right ? width : alignedX;
   const y = centered ? Math.max(fontSize, (height - lines.length * rowHeight) / 2 + fontSize) : fontSize;
-  const alignedAnchor = center ? "middle" : "start";
+  const alignedAnchor = center2 ? "middle" : "start";
   const anchor2 = right ? "end" : alignedAnchor;
   const body = lines.map((line) => `<tspan x="${x}" dy="${rowHeight}">${escapeXml(line)}</tspan>`).join("");
   return `<text y="${y - rowHeight}" font-size="${fontSize}" text-anchor="${anchor2}" fill="${fill}">${body}</text>`;
@@ -5052,7 +5288,7 @@ function todoMarkup(value) {
   });
   return `<ul>${rows2.join("")}</ul>`;
 }
-function bridge(seed) {
+function bridge2(seed) {
   const state = JSON.stringify(seed ?? null).replaceAll("<", "\\u003c");
   return `<script>(()=>{let state=${state};const listeners=new Set();const load=()=>structuredClone(state);const save=(value)=>{const json=JSON.stringify(value);if(!value||typeof value!=='object'||Array.isArray(value)||!json||new TextEncoder().encode(json).length>65536)throw new TypeError('Invalid Studio state');state=JSON.parse(json);for(const listener of listeners)listener(load());};const onLoad=(listener)=>{listeners.add(listener);return()=>listeners.delete(listener);};Object.defineProperty(window,'studioEmbed',{value:Object.freeze({load,save,onLoad})});})()</script>`;
 }
@@ -5064,7 +5300,7 @@ function embedMarkup(data, assets, interactive = true) {
   });
   const body = source.replace(/^\s*<!doctype[^>]*>/iu, "");
   const policy = interactive ? csp : csp.replace("script-src 'unsafe-inline'", "script-src 'none'");
-  const state = interactive ? bridge(data.state) : "";
+  const state = interactive ? bridge2(data.state) : "";
   return '<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="' + policy + '">' + state + body;
 }
 
@@ -5095,26 +5331,19 @@ function expandFrame(frame, points) {
     bottom: Math.max(frame.bottom, bounds.bottom)
   };
 }
-function arrowHead(head2, tip, previous, stroke, width) {
-  if (!tip || !previous) {
-    return "";
-  }
-  if (!head2 || head2 === "none") {
+function arrowHead(head2, points, atStart, stroke, width) {
+  if (!head2 || head2 === "none" || points.length < 2) {
     return "";
   }
   if (head2 === "circle") {
-    return `<circle cx="${tip.x}" cy="${tip.y}" r="${2 * width}" fill="${stroke}"/>`;
+    const tip2 = atStart ? points[0] : points.at(-1);
+    return `<circle cx="${tip2.x}" cy="${tip2.y}" r="${2 * width}" fill="${stroke}"/>`;
   }
-  const distance = Math.hypot(tip.x - previous.x, tip.y - previous.y);
-  if (distance === 0) {
+  const arrow = connectorArrowPoints(points, atStart, width);
+  if (!arrow) {
     return "";
   }
-  const dx = (tip.x - previous.x) / distance;
-  const dy = (tip.y - previous.y) / distance;
-  const back = Math.min(distance, 5 * width);
-  const side = 2.5 * width;
-  const left = { x: tip.x - dx * back - dy * side, y: tip.y - dy * back + dx * side };
-  const right = { x: tip.x - dx * back + dy * side, y: tip.y - dy * back - dx * side };
+  const [left, tip, right] = arrow;
   return `<path d="M ${tip.x} ${tip.y} L ${left.x} ${left.y} L ${right.x} ${right.y} Z" fill="${stroke}"/>`;
 }
 function connectorMarkup(object3, geometry) {
@@ -5122,20 +5351,19 @@ function connectorMarkup(object3, geometry) {
   if (detail?.kind !== "connector") {
     return void 0;
   }
-  const route2 = exportConnector(detail, geometry);
-  if (!route2) {
+  const route = exportConnector(detail, geometry);
+  if (!route) {
     return void 0;
   }
-  const { points, label: label2 } = route2;
-  const coordinates = points.map(({ x, y }) => `${x},${y}`).join(" ");
+  const { points, label: label2 } = route;
   const stroke = svgColor(object3.appearance?.stroke, "#4f5d75");
   const width = svgStrokeWidth(object3.appearance?.strokeWidth, 2);
   const dash = object3.appearance?.dashed ? ' stroke-dasharray="6 5"' : "";
-  const start = arrowHead(detail.startHead, points[0], points[1], stroke, width);
-  const end2 = arrowHead(detail.endHead ?? "arrow", points.at(-1), points.at(-2), stroke, width);
+  const start = arrowHead(detail.startHead, points, true, stroke, width);
+  const end2 = arrowHead(detail.endHead ?? "arrow", points, false, stroke, width);
   const caption = escapeXml(object3.label);
   const text3 = caption ? `<text x="${label2.x}" y="${label2.y - 4}" text-anchor="middle" font-size="13" fill="#2d3142">${caption}</text>` : "";
-  const line = `<polyline points="${coordinates}" fill="none" stroke="${stroke}" stroke-width="${width}" stroke-linejoin="round"${dash}/>`;
+  const line = `<path d="${connectionPathData(points)}" fill="none" stroke-linecap="round" stroke="${stroke}" stroke-width="${width}" stroke-linejoin="round"${dash}/>`;
   return { value: line + start + end2 + text3, bounds: [...points, label2] };
 }
 function sectionMarkup(object3) {
@@ -5348,16 +5576,16 @@ function standaloneObject(object3, selected, geometry) {
   if (!outsideStart && !outsideEnd) {
     return object3;
   }
-  const route2 = exportConnector(detail, geometry);
-  const startPoint = route2?.points[0] ?? detail.start.point;
-  const endPoint2 = route2?.points.at(-1) ?? detail.end.point;
+  const route = exportConnector(detail, geometry);
+  const startPoint = route?.points[0] ?? detail.start.point;
+  const endPoint2 = route?.points.at(-1) ?? detail.end.point;
   return {
     ...object3,
     detail: {
       ...detail,
       start: outsideStart ? { point: startPoint } : detail.start,
       end: outsideEnd ? { point: endPoint2 } : detail.end,
-      bends: route2?.points.slice(1, -1) ?? detail.bends,
+      bends: route?.points.slice(1, -1) ?? detail.bends,
       relativeBends: void 0
     }
   };
@@ -5806,17 +6034,17 @@ function validVersion(version2) {
 function canAdvanceVersion(version2) {
   return validVersion(version2) && version2 < maxStoredVersion;
 }
-function commandSignature2({ delta, targets: targets2 }) {
+function commandSignature2({ delta: delta2, targets: targets2 }) {
   const targetKeys = targets2.map(
     ({ objectId, expectedGeometryVersion }) => JSON.stringify([objectId, expectedGeometryVersion.toString()])
   );
-  return JSON.stringify([delta.dx.toString(), delta.dy.toString(), targetKeys.sort()]);
+  return JSON.stringify([delta2.dx.toString(), delta2.dy.toString(), targetKeys.sort()]);
 }
-function hasValidMoveInput({ commandId, delta, targets: targets2 }) {
+function hasValidMoveInput({ commandId, delta: delta2, targets: targets2 }) {
   if (!commandId.trim() || !targets2.length) {
     return false;
   }
-  if (![delta.dx, delta.dy].every(Number.isFinite) || delta.dx === 0 && delta.dy === 0) {
+  if (![delta2.dx, delta2.dy].every(Number.isFinite) || delta2.dx === 0 && delta2.dy === 0) {
     return false;
   }
   const ids = /* @__PURE__ */ new Set();
@@ -5837,13 +6065,13 @@ function canTranslate({ detail }) {
 function translatePoint({ x, y }, { dx, dy }) {
   return { x: x + dx, y: y + dy };
 }
-function translateEndpoint(endpoint2, delta) {
-  return endpoint2.attachment ? endpoint2 : { point: translatePoint(endpoint2.point, delta) };
+function translateEndpoint(endpoint2, delta2) {
+  return endpoint2.attachment ? endpoint2 : { point: translatePoint(endpoint2.point, delta2) };
 }
-function translateConnector(detail, delta) {
-  const start = translateEndpoint(detail.start, delta);
-  const end2 = translateEndpoint(detail.end, delta);
-  const bends = detail.bends.map((point2) => translatePoint(point2, delta));
+function translateConnector(detail, delta2) {
+  const start = translateEndpoint(detail.start, delta2);
+  const end2 = translateEndpoint(detail.end, delta2);
+  const bends = detail.bends.map((point2) => translatePoint(point2, delta2));
   if (![start.point, end2.point, ...bends].every(
     ({ x, y }) => Number.isFinite(x) && Number.isFinite(y)
   )) {
@@ -5855,8 +6083,8 @@ function hasFiniteGeometry({ x, y, width, height, rotation }) {
   const coordinates = [x, y, width, height, rotation, x + width, y + height];
   return coordinates.every(Number.isFinite) && Math.min(width, height) >= 0;
 }
-function translateObject(object3, delta) {
-  const geometry = { ...object3.geometry, ...translatePoint(object3.geometry, delta) };
+function translateObject(object3, delta2) {
+  const geometry = { ...object3.geometry, ...translatePoint(object3.geometry, delta2) };
   if (!hasFiniteGeometry(geometry) || !canAdvanceVersion(object3.geometryVersion)) {
     return void 0;
   }
@@ -5864,7 +6092,7 @@ function translateObject(object3, delta) {
   if (object3.detail?.kind !== "connector") {
     return translated;
   }
-  const detail = translateConnector(object3.detail, delta);
+  const detail = translateConnector(object3.detail, delta2);
   return detail && { ...translated, detail };
 }
 
@@ -6083,6 +6311,7 @@ var maxColumns = 256;
 var maxCells = 2e4;
 var maxAxisIdLength = 192;
 var maxTableWidth = 1e7;
+var minimumRowHeight = 50;
 var widthTolerance = 1e-6;
 var controlCharacter2 = new RegExp("\\p{Cc}", "u");
 function validAxisId(value) {
@@ -6143,6 +6372,10 @@ function tableContentIssue(data) {
     return "tooLarge";
   }
 }
+function textRows(data) {
+  const text3 = typeof data.text === "string" ? data.text : "";
+  return text3.replace(/\r\n?/gu, "\n").replace(/\n$/u, "").split("\n");
+}
 function existingColumns(data, grid) {
   if (Array.isArray(grid?.rows) && grid.rows.length > 0) {
     return grid.rows.reduce((count, row) => {
@@ -6150,10 +6383,20 @@ function existingColumns(data, grid) {
       return Array.isArray(cells) ? Math.max(count, cells.length) : count;
     }, 1);
   }
-  if (typeof data.text === "string" && data.text) {
-    return data.text.replace(/\r\n?/gu, "\n").replace(/\n$/u, "").split("\n").reduce((columns, row) => Math.max(columns, row.split("	").length), 1);
+  return textRows(data).reduce((columns, row) => Math.max(columns, row.split("	").length), 1);
+}
+function rowCount(data) {
+  const rows2 = contentRecord(data.grid)?.rows;
+  return Array.isArray(rows2) && rows2.length ? rows2.length : textRows(data).length;
+}
+function tableHeight(frameHeight, current, data, locked) {
+  const before = rowCount(current);
+  const after = rowCount(data);
+  if (locked || before === after) {
+    return void 0;
   }
-  return 1;
+  const height = Math.max(minimumRowHeight, frameHeight / before) * after;
+  return height === frameHeight ? void 0 : height;
 }
 function columnShares(widths) {
   const scale = widths.reduce((maximum, width) => Math.max(maximum, width), 0);
@@ -6196,7 +6439,7 @@ function layoutChanges(objectId, current, next) {
 function validWidth(width) {
   return Number.isFinite(width) && width > 0 && width <= maxTableWidth;
 }
-function editTableContent(object3, current, { data, widthChange }) {
+function editTableContent(object3, current, { data, widthChange }, locked) {
   const issue = tableContentIssue(data);
   if (issue) {
     return { kind: "rejected", reason: issue };
@@ -6215,12 +6458,14 @@ function editTableContent(object3, current, { data, widthChange }) {
   const width = widthChange?.width ?? object3.geometry.width;
   const resizedFrame = width !== object3.geometry.width;
   const geometryChanged = changesLayout || resizedFrame;
+  const height = tableHeight(object3.geometry.height, current, data, locked);
   const label2 = typeof data.text === "string" ? data.text : object3.label;
   return {
     kind: "updated",
     label: label2,
     data,
     geometryWidth: geometryChanged ? width : void 0,
+    geometryHeight: height,
     requiresGeometryUnlock: columnsResized || resizedFrame
   };
 }
@@ -6405,17 +6650,17 @@ function adjacentShapeConnector(source, target2, { sourcePort, targetPort, conne
     [source.objectId, source],
     [target2.objectId, target2]
   ]);
-  const route2 = exportConnector(detail, objects);
-  if (!route2) {
+  const route = exportConnector(detail, objects);
+  if (!route) {
     return void 0;
   }
-  const [first, second] = route2.points;
-  const last = route2.points.at(-1);
+  const [first, second] = route.points;
+  const last = route.points.at(-1);
   if (!first || !second || !last) {
     return void 0;
   }
-  const x = route2.points.map((point2) => point2.x);
-  const y = route2.points.map((point2) => point2.y);
+  const x = route.points.map((point2) => point2.x);
+  const y = route.points.map((point2) => point2.y);
   const left = Math.min(...x);
   const top = Math.min(...y);
   return {
@@ -6940,32 +7185,32 @@ function hasSignature(view) {
   return version2 === 14177 || version2 === 14689;
 }
 function skipSubBlocks(bytes, start) {
-  for (let offset = start; offset < bytes.byteLength; ) {
-    const count = bytes[offset];
+  for (let offset2 = start; offset2 < bytes.byteLength; ) {
+    const count = bytes[offset2];
     if (count === 0) {
-      return offset + 1;
+      return offset2 + 1;
     }
     if (count === void 0) {
       return void 0;
     }
-    offset += count + 1;
+    offset2 += count + 1;
   }
 }
-function readFrame(view, offset, screen) {
-  if (offset + frameDescriptorSize >= view.byteLength) {
+function readFrame(view, offset2, screen) {
+  if (offset2 + frameDescriptorSize >= view.byteLength) {
     return void 0;
   }
-  const left = view.getUint16(offset + 1, true);
-  const top = view.getUint16(offset + 3, true);
-  const width = view.getUint16(offset + 5, true);
-  const height = view.getUint16(offset + 7, true);
+  const left = view.getUint16(offset2 + 1, true);
+  const top = view.getUint16(offset2 + 3, true);
+  const width = view.getUint16(offset2 + 5, true);
+  const height = view.getUint16(offset2 + 7, true);
   const emptyFrame = width === 0 || height === 0;
   const outsideScreen = left + width > screen.width || top + height > screen.height;
   if (emptyFrame || outsideScreen) {
     return void 0;
   }
-  const flags = view.getUint8(offset + 9);
-  const data = offset + frameDescriptorSize + colorTableBytes(flags);
+  const flags = view.getUint8(offset2 + 9);
+  const data = offset2 + frameDescriptorSize + colorTableBytes(flags);
   if (data + 1 >= view.byteLength) {
     return void 0;
   }
@@ -6981,16 +7226,16 @@ function readGifSize(bytes) {
     return void 0;
   }
   const screen = { width: view.getUint16(6, true), height: view.getUint16(8, true) };
-  let offset = screenDescriptorSize + colorTableBytes(view.getUint8(10));
+  let offset2 = screenDescriptorSize + colorTableBytes(view.getUint8(10));
   let frames = 0;
-  while (offset < bytes.byteLength) {
-    const tag2 = bytes[offset];
+  while (offset2 < bytes.byteLength) {
+    const tag2 = bytes[offset2];
     if (tag2 === trailer) {
-      return frames > 0 && offset + 1 === bytes.byteLength ? screen : void 0;
+      return frames > 0 && offset2 + 1 === bytes.byteLength ? screen : void 0;
     }
-    let data = offset + 2;
+    let data = offset2 + 2;
     if (tag2 === imageBlock) {
-      const frame = readFrame(view, offset, screen);
+      const frame = readFrame(view, offset2, screen);
       if (frame === void 0) {
         return void 0;
       }
@@ -7004,7 +7249,7 @@ function readGifSize(bytes) {
     if (next === void 0 || frames > maximumFrames || pixels > maximumFramePixels) {
       return void 0;
     }
-    offset = next;
+    offset2 = next;
   }
 }
 
@@ -7083,12 +7328,12 @@ function safeAttribute(name, value) {
 function readAttributes(tail) {
   const attributes2 = /* @__PURE__ */ new Map();
   const assignment = /[\t\n\r ]+([A-Za-z_][\w:-]*)[\t\n\r ]*=[\t\n\r ]*(?:"([^"]*)"|'([^']*)')/uy;
-  let offset = 0;
-  while (offset < tail.length) {
-    assignment.lastIndex = offset;
+  let offset2 = 0;
+  while (offset2 < tail.length) {
+    assignment.lastIndex = offset2;
     const match = assignment.exec(tail);
     if (!match) {
-      xmlWhitespace2.lastIndex = offset;
+      xmlWhitespace2.lastIndex = offset2;
       return xmlWhitespace2.test(tail) && xmlWhitespace2.lastIndex === tail.length ? attributes2 : void 0;
     }
     const name = match[1];
@@ -7103,7 +7348,7 @@ function readAttributes(tail) {
       return void 0;
     }
     attributes2.set(name, value);
-    offset = assignment.lastIndex;
+    offset2 = assignment.lastIndex;
   }
   return attributes2;
 }
@@ -7132,7 +7377,7 @@ function safeText(text3, parent) {
 function readSvgRoot(source) {
   const stack = [];
   const token2 = /<(\/?)([A-Za-z][\w:-]*)([^<>]*)>/gu;
-  let offset = 0;
+  let offset2 = 0;
   let elements2 = 0;
   let root;
   for (const match of source.matchAll(token2)) {
@@ -7140,10 +7385,10 @@ function readSvgRoot(source) {
     if (!name || tail === void 0 || !svgElements.has(name)) {
       return void 0;
     }
-    if (!safeText(source.slice(offset, match.index), stack.at(-1))) {
+    if (!safeText(source.slice(offset2, match.index), stack.at(-1))) {
       return void 0;
     }
-    offset = match.index + markup.length;
+    offset2 = match.index + markup.length;
     if (closing) {
       if (!/^[\t\n\r ]*$/u.test(tail) || stack.pop() !== name) {
         return void 0;
@@ -7160,13 +7405,13 @@ function readSvgRoot(source) {
       if (root || name !== "svg") {
         return void 0;
       }
-      root = { attributes: parameters, end: offset, empty };
+      root = { attributes: parameters, end: offset2, empty };
     }
     if (!empty) {
       stack.push(name);
     }
   }
-  return stack.length === 0 && safeText(source.slice(offset), void 0) ? root : void 0;
+  return stack.length === 0 && safeText(source.slice(offset2), void 0) ? root : void 0;
 }
 function dimensions2(attributes2) {
   const viewBox = attributes2.get("viewBox")?.trim().split(/[\s,]+/u).map(Number);
@@ -7259,12 +7504,12 @@ var riffChunkHeaderSize = 8;
 var vp8DimensionMask = 16383;
 var vp8StartCode = 10289450;
 var vp8HeaderSize = 10;
-function fourCc(view, offset) {
+function fourCc(view, offset2) {
   return String.fromCharCode(
-    view.getUint8(offset),
-    view.getUint8(offset + 1),
-    view.getUint8(offset + 2),
-    view.getUint8(offset + 3)
+    view.getUint8(offset2),
+    view.getUint8(offset2 + 1),
+    view.getUint8(offset2 + 2),
+    view.getUint8(offset2 + 3)
   );
 }
 function validDimensions({ width, height }) {
@@ -7289,10 +7534,10 @@ function hasCompletePngData(view) {
   const needsPalette = view.getUint8(25) === 3;
   let hasPalette = false;
   let imageDataClosed = false;
-  for (let offset = pngFirstDataOffset; offset + pngChunkOverhead <= view.byteLength; ) {
-    const length = view.getUint32(offset);
-    const type = fourCc(view, offset + 4);
-    const end2 = offset + pngChunkOverhead + length;
+  for (let offset2 = pngFirstDataOffset; offset2 + pngChunkOverhead <= view.byteLength; ) {
+    const length = view.getUint32(offset2);
+    const type = fourCc(view, offset2 + 4);
+    const end2 = offset2 + pngChunkOverhead + length;
     if (end2 > view.byteLength || type === "IHDR" || type === "acTL") {
       return false;
     }
@@ -7317,7 +7562,7 @@ function hasCompletePngData(view) {
     } else {
       imageDataClosed ||= hasImageData;
     }
-    offset = end2;
+    offset2 = end2;
   }
   return false;
 }
@@ -7329,11 +7574,11 @@ function readPngSize(view) {
   return validDimensions(size) && hasCompletePngData(view) ? size : void 0;
 }
 function jpegMarkerOffset(bytes, prefix) {
-  let offset = prefix + 1;
-  while (bytes[offset] === jpegMarkerPrefix) {
-    offset += 1;
+  let offset2 = prefix + 1;
+  while (bytes[offset2] === jpegMarkerPrefix) {
+    offset2 += 1;
   }
-  return offset;
+  return offset2;
 }
 function isRestartMarker(marker) {
   return marker >= 208 && marker <= 215;
@@ -7341,15 +7586,15 @@ function isRestartMarker(marker) {
 function findJpegScanEnd(bytes, start) {
   let prefix = bytes.indexOf(jpegMarkerPrefix, start);
   while (prefix !== -1) {
-    const offset = jpegMarkerOffset(bytes, prefix);
-    const marker = bytes[offset];
+    const offset2 = jpegMarkerOffset(bytes, prefix);
+    const marker = bytes[offset2];
     if (marker === void 0) {
       return -1;
     }
     if (marker !== 0 && !isRestartMarker(marker)) {
       return prefix;
     }
-    prefix = bytes.indexOf(jpegMarkerPrefix, offset + 1);
+    prefix = bytes.indexOf(jpegMarkerPrefix, offset2 + 1);
   }
   return -1;
 }
@@ -7374,8 +7619,8 @@ function validJpegScanHeader(view, segment2, length) {
 function readJpegSize(view, bytes) {
   let size;
   let hasScan = false;
-  for (let offset = 2; bytes[offset] === jpegMarkerPrefix; ) {
-    const markerOffset = jpegMarkerOffset(bytes, offset);
+  for (let offset2 = 2; bytes[offset2] === jpegMarkerPrefix; ) {
+    const markerOffset = jpegMarkerOffset(bytes, offset2);
     const marker = bytes[markerOffset];
     const segment2 = markerOffset + 1;
     if (marker === jpegEnd) {
@@ -7400,53 +7645,53 @@ function readJpegSize(view, bytes) {
       }
     }
     if (marker !== jpegScan) {
-      offset = end2;
+      offset2 = end2;
       continue;
     }
     if (!size || !validJpegScanHeader(view, segment2, length)) {
       return void 0;
     }
-    offset = findJpegScanEnd(bytes, end2);
-    if (offset <= end2) {
+    offset2 = findJpegScanEnd(bytes, end2);
+    if (offset2 <= end2) {
       return void 0;
     }
     hasScan = true;
   }
   return void 0;
 }
-function uint24le(view, offset) {
-  return view.getUint16(offset, true) + view.getUint8(offset + 2) * 65536;
+function uint24le(view, offset2) {
+  return view.getUint16(offset2, true) + view.getUint8(offset2 + 2) * 65536;
 }
-function readWebpCanvas(view, offset, length) {
-  if (length !== 10 || (view.getUint32(offset, true) & 4294967235) !== 0) {
+function readWebpCanvas(view, offset2, length) {
+  if (length !== 10 || (view.getUint32(offset2, true) & 4294967235) !== 0) {
     return void 0;
   }
-  const width = uint24le(view, offset + 4) + 1;
-  const height = uint24le(view, offset + 7) + 1;
+  const width = uint24le(view, offset2 + 4) + 1;
+  const height = uint24le(view, offset2 + 7) + 1;
   const size = { width, height };
   return validDimensions(size) ? size : void 0;
 }
-function readVp8Size(view, offset, length) {
+function readVp8Size(view, offset2, length) {
   if (length <= vp8HeaderSize) {
     return void 0;
   }
-  const frameTag = uint24le(view, offset);
+  const frameTag = uint24le(view, offset2);
   const partitionSize = frameTag >>> 5;
-  const startCode = view.getUint32(offset + 2) & 16777215;
+  const startCode = view.getUint32(offset2 + 2) & 16777215;
   const invalidPartition = partitionSize === 0 || partitionSize > length - vp8HeaderSize;
   if ((frameTag & 1) !== 0 || invalidPartition || startCode !== vp8StartCode) {
     return void 0;
   }
   return {
-    width: view.getUint16(offset + 6, true) & vp8DimensionMask,
-    height: view.getUint16(offset + 8, true) & vp8DimensionMask
+    width: view.getUint16(offset2 + 6, true) & vp8DimensionMask,
+    height: view.getUint16(offset2 + 8, true) & vp8DimensionMask
   };
 }
-function readVp8LosslessSize(view, offset, length) {
-  if (length <= 5 || view.getUint8(offset) !== 47) {
+function readVp8LosslessSize(view, offset2, length) {
+  if (length <= 5 || view.getUint8(offset2) !== 47) {
     return void 0;
   }
-  const header = view.getUint32(offset + 1, true);
+  const header = view.getUint32(offset2 + 1, true);
   if (header >>> 29 !== 0) {
     return void 0;
   }
@@ -7461,10 +7706,10 @@ function matchingSize(left, right) {
 function hasWebpSignature(view) {
   return view.byteLength >= riffHeaderSize && fourCc(view, 0) === "RIFF" && fourCc(view, 8) === "WEBP";
 }
-function readWebpChunk(view, offset) {
-  const type = fourCc(view, offset);
-  const length = view.getUint32(offset + 4, true);
-  const start = offset + riffChunkHeaderSize;
+function readWebpChunk(view, offset2) {
+  const type = fourCc(view, offset2);
+  const length = view.getUint32(offset2 + 4, true);
+  const start = offset2 + riffChunkHeaderSize;
   const end2 = start + length + length % 2;
   const animation = type === "ANIM" || type === "ANMF";
   if (end2 > view.byteLength || animation) {
@@ -7481,16 +7726,16 @@ function readWebpSize(view) {
   }
   let canvas;
   let size;
-  let offset = riffHeaderSize;
-  while (offset + riffChunkHeaderSize <= view.byteLength) {
-    const chunk = readWebpChunk(view, offset);
+  let offset2 = riffHeaderSize;
+  while (offset2 + riffChunkHeaderSize <= view.byteLength) {
+    const chunk = readWebpChunk(view, offset2);
     if (!chunk) {
       return void 0;
     }
     const { type, length, start, end: end2 } = chunk;
     if (type === "VP8X") {
       canvas = readWebpCanvas(view, start, length);
-      if (offset !== riffHeaderSize || !canvas) {
+      if (offset2 !== riffHeaderSize || !canvas) {
         return void 0;
       }
     } else if (type === "VP8 " || type === "VP8L") {
@@ -7504,9 +7749,9 @@ function readWebpSize(view) {
     } else if (!canvas) {
       return void 0;
     }
-    offset = end2;
+    offset2 = end2;
   }
-  if (offset !== view.byteLength || !size) {
+  if (offset2 !== view.byteLength || !size) {
     return void 0;
   }
   return !canvas || matchingSize(canvas, size) ? size : void 0;
@@ -7617,39 +7862,39 @@ var compatibleBrands = /* @__PURE__ */ new Set([
   "M4V ",
   "dash"
 ]);
-function tag(view, offset) {
+function tag(view, offset2) {
   return String.fromCharCode(
-    view.getUint8(offset),
-    view.getUint8(offset + 1),
-    view.getUint8(offset + 2),
-    view.getUint8(offset + 3)
+    view.getUint8(offset2),
+    view.getUint8(offset2 + 1),
+    view.getUint8(offset2 + 2),
+    view.getUint8(offset2 + 3)
   );
 }
-function readBox(view, offset, bound) {
-  if (bound - offset < basicHeaderSize) {
+function readBox(view, offset2, bound) {
+  if (bound - offset2 < basicHeaderSize) {
     return void 0;
   }
-  const declared = view.getUint32(offset);
+  const declared = view.getUint32(offset2);
   const header = declared === 1 ? extendedHeaderSize : basicHeaderSize;
-  if (bound - offset < header) {
+  if (bound - offset2 < header) {
     return void 0;
   }
-  const size = declared === 1 ? Number(view.getBigUint64(offset + basicHeaderSize)) : declared;
-  const end2 = size === 0 ? bound : offset + size;
-  if (end2 < offset + header || end2 > bound) {
+  const size = declared === 1 ? Number(view.getBigUint64(offset2 + basicHeaderSize)) : declared;
+  const end2 = size === 0 ? bound : offset2 + size;
+  if (end2 < offset2 + header || end2 > bound) {
     return void 0;
   }
-  return { name: tag(view, offset + 4), data: offset + header, end: end2 };
+  return { name: tag(view, offset2 + 4), data: offset2 + header, end: end2 };
 }
 function* boxes(view, start, end2) {
-  let offset = start;
-  for (let count = 0; count < maximumBoxes && offset < end2; count += 1) {
-    const box = readBox(view, offset, end2);
+  let offset2 = start;
+  for (let count = 0; count < maximumBoxes && offset2 < end2; count += 1) {
+    const box = readBox(view, offset2, end2);
     if (!box) {
       return;
     }
     yield box;
-    offset = box.end;
+    offset2 = box.end;
   }
 }
 function child(view, parent, name) {
@@ -7686,8 +7931,8 @@ function classifyBrand(view, box) {
   if (compatibleBrands.has(major)) {
     return "video/mp4";
   }
-  for (let offset = box.data + 8; offset + 4 <= box.end; offset += 4) {
-    if (compatibleBrands.has(tag(view, offset))) {
+  for (let offset2 = box.data + 8; offset2 + 4 <= box.end; offset2 += 4) {
+    if (compatibleBrands.has(tag(view, offset2))) {
       return "video/mp4";
     }
   }
@@ -7724,8 +7969,8 @@ var cluster = 524531317;
 var videoTrackType = 1;
 var maximumElements2 = 65536;
 var decoder = new TextDecoder();
-function vint(bytes, offset, maximumWidth, isSize) {
-  const first = bytes[offset];
+function vint(bytes, offset2, maximumWidth, isSize) {
+  const first = bytes[offset2];
   if (!first) {
     return void 0;
   }
@@ -7735,21 +7980,21 @@ function vint(bytes, offset, maximumWidth, isSize) {
     mask >>= 1;
     width += 1;
   }
-  const end2 = offset + width;
+  const end2 = offset2 + width;
   if (width > maximumWidth || end2 > bytes.length) {
     return void 0;
   }
   let value = isSize ? first & mask - 1 : first;
   let allOnes = isSize && value === mask - 1;
-  for (let index = offset + 1; index < end2; index += 1) {
+  for (let index = offset2 + 1; index < end2; index += 1) {
     const byte = bytes[index];
     value = value * 256 + byte;
     allOnes &&= byte === 255;
   }
   return { value, end: end2, allOnes };
 }
-function readElement(bytes, offset, bound) {
-  const id = vint(bytes, offset, 4, false);
+function readElement(bytes, offset2, bound) {
+  const id = vint(bytes, offset2, 4, false);
   const size = id && vint(bytes, id.end, 8, true);
   if (!id || !size || size.end > bound) {
     return void 0;
@@ -7761,14 +8006,14 @@ function readElement(bytes, offset, bound) {
   return { id: id.value, data: size.end, end: end2 };
 }
 function* elements(bytes, start, end2) {
-  let offset = start;
-  for (let count = 0; count < maximumElements2 && offset < end2; count += 1) {
-    const element = readElement(bytes, offset, end2);
+  let offset2 = start;
+  for (let count = 0; count < maximumElements2 && offset2 < end2; count += 1) {
+    const element = readElement(bytes, offset2, end2);
     if (!element) {
       return;
     }
     yield element;
-    offset = element.end;
+    offset2 = element.end;
   }
 }
 function child2(bytes, parent, id) {
@@ -7981,10 +8226,10 @@ function arrangeSelection(selection, movable, preset) {
   const target2 = selectionFrame(selection);
   const offsets = preset === "tidy" ? tidyUnits(units) : units.map(({ bounds, ids }) => ({ ids, delta: alignDelta(target2, bounds, preset) }));
   const result = /* @__PURE__ */ new Map();
-  for (const { ids, delta } of offsets) {
-    if (delta.dx !== 0 || delta.dy !== 0) {
+  for (const { ids, delta: delta2 } of offsets) {
+    if (delta2.dx !== 0 || delta2.dy !== 0) {
       for (const id of ids) {
-        result.set(id, delta);
+        result.set(id, delta2);
       }
     }
   }
@@ -8279,8 +8524,8 @@ function safeVectorAsset(asset) {
   }
   const bytes = new TextEncoder().encode(svg.markup);
   const encoded = [];
-  for (let offset = 0; offset < bytes.length; offset += encodingChunkBytes) {
-    const chunk = bytes.subarray(offset, offset + encodingChunkBytes);
+  for (let offset2 = 0; offset2 < bytes.length; offset2 += encodingChunkBytes) {
+    const chunk = bytes.subarray(offset2, offset2 + encodingChunkBytes);
     encoded.push(btoa(String.fromCharCode(...chunk)));
   }
   return { mimeType: asset.mimeType, byteLength: bytes.length, base64: encoded.join("") };
@@ -8480,10 +8725,10 @@ function receiptFor({ boardId, commandId }, outcome) {
 function conflict(reason, boardRevision, currentObjects, missingObjectIds = []) {
   return { kind: "conflict", reason, boardRevision, currentObjects, missingObjectIds };
 }
-function translatedObjects(current, delta) {
+function translatedObjects(current, delta2) {
   const translated = [];
   for (const object3 of current) {
-    const next = translateObject(object3, delta);
+    const next = translateObject(object3, delta2);
     if (!next) {
       return void 0;
     }
@@ -9347,11 +9592,11 @@ function arrangeGeometry(scope2, selected, operation) {
   }
   const objects = [];
   for (const object3 of movable) {
-    const delta = offsets.get(object3.objectId);
-    if (!delta) {
+    const delta2 = offsets.get(object3.objectId);
+    if (!delta2) {
       continue;
     }
-    const moved2 = translateObject(object3, delta);
+    const moved2 = translateObject(object3, delta2);
     if (!moved2 || !geometryInWorld(moved2.geometry)) {
       return { kind: "rejected", reason: "invalidEdit" };
     }
@@ -9383,11 +9628,12 @@ function createGeometryScope(writer2, board) {
   }
   return { board, writer: writer2, object: object3, objects };
 }
-function isLocked(scope2, object3) {
+function isLocked(scope2, object3, unlocking) {
   const visited = /* @__PURE__ */ new Set();
   let current = object3;
   while (current) {
-    if (current.locked || visited.has(current.objectId)) {
+    const remainsLocked = current.locked && !unlocking?.has(current.objectId);
+    if (remainsLocked || visited.has(current.objectId)) {
       return true;
     }
     visited.add(current.objectId);
@@ -9395,8 +9641,8 @@ function isLocked(scope2, object3) {
   }
   return false;
 }
-function lockedParent(scope2, object3) {
-  return object3.parentId !== void 0 && isLocked(scope2, scope2.object(object3.parentId));
+function lockedParent(scope2, object3, unlocking) {
+  return object3.parentId !== void 0 && isLocked(scope2, scope2.object(object3.parentId), unlocking);
 }
 function conflict2(scope2, objects) {
   return { kind: "conflict", boardRevision: scope2.board.revision, objects };
@@ -9562,7 +9808,8 @@ function changeLock(scope2, operation) {
   if (objects.length === 0) {
     return reject("invalidEdit");
   }
-  if (objects.some((object3) => lockedParent(scope2, object3))) {
+  const unlocking = operation.locked ? void 0 : new Set(objects.map(({ objectId }) => objectId));
+  if (objects.some((object3) => lockedParent(scope2, object3, unlocking))) {
     return reject("geometryLocked");
   }
   if (objects.some(({ geometryVersion }) => !canAdvanceVersion(geometryVersion))) {
@@ -9678,9 +9925,9 @@ function reorderObjects(scope2, operation) {
   const order = scope2.writer.listObjects(scope2.board.boardId).map(({ objectId }) => objectId);
   const selected = new Set(targets2.objects.map(({ objectId }) => objectId));
   const next = reorder(order, selected, operation.direction);
-  return next.order.some((id, index) => order[index] !== id) ? { kind: "changes", ...next } : reject("invalidEdit");
+  return next.order.some((id, index) => order[index] !== id) ? { kind: "changes", ...next } : { kind: "changes" };
 }
-function copiedEndpoint2(endpoint2, { ids, delta }) {
+function copiedEndpoint2(endpoint2, { ids, delta: delta2 }) {
   if (!endpoint2.attachment) {
     return endpoint2;
   }
@@ -9689,7 +9936,7 @@ function copiedEndpoint2(endpoint2, { ids, delta }) {
     return endpoint2;
   }
   return {
-    point: { x: endpoint2.point.x + delta.dx, y: endpoint2.point.y + delta.dy },
+    point: { x: endpoint2.point.x + delta2.dx, y: endpoint2.point.y + delta2.dy },
     attachment: { ...endpoint2.attachment, objectId }
   };
 }
@@ -9974,7 +10221,12 @@ function updatedPayload({ writer: writer2, boardId, object: object3, current }, 
     case "text":
       return editTextContent(operation.data, current.data);
     case "table":
-      return editTableContent(object3, current.data, operation);
+      return editTableContent(
+        object3,
+        current.data,
+        operation,
+        contentGeometryLocked(writer2, boardId, object3)
+      );
     case "embedSource":
       return editEmbedSource(current, operation);
     case "embedState":
@@ -9998,14 +10250,18 @@ function contentVersionConflict(board, object3, current) {
     payloads: [current]
   };
 }
-function withTableWidth({ writer: writer2, boardId, object: object3 }, width, requiresUnlock) {
+function withTableFrame({ writer: writer2, boardId, object: object3 }, width, height, requiresUnlock) {
   if (requiresUnlock && contentGeometryLocked(writer2, boardId, object3)) {
     return { kind: "rejected", reason: "geometryLocked" };
   }
   if (!canAdvanceVersion(object3.geometryVersion)) {
     return { kind: "rejected", reason: "versionUnavailable" };
   }
-  const geometry = { ...object3.geometry, width };
+  const geometry = {
+    ...object3.geometry,
+    width: width ?? object3.geometry.width,
+    height: height ?? object3.geometry.height
+  };
   if (!geometryInWorld(geometry)) {
     return { kind: "rejected", reason: "invalidEdit" };
   }
@@ -10058,7 +10314,12 @@ function planContentEdit(writer2, board, operation) {
   if (planned.kind === "conflict") {
     return contentVersionConflict(board, object3, current);
   }
-  const revised = planned.geometryWidth === void 0 ? object3 : withTableWidth(scope2, planned.geometryWidth, Boolean(planned.requiresGeometryUnlock));
+  const revised = planned.geometryWidth === void 0 && planned.geometryHeight === void 0 ? object3 : withTableFrame(
+    scope2,
+    planned.geometryWidth,
+    planned.geometryHeight,
+    Boolean(planned.requiresGeometryUnlock)
+  );
   if ("reason" in revised) {
     return revised;
   }
@@ -10640,11 +10901,11 @@ function requireOwner2(reader2, actor, boardId, kind) {
   return board;
 }
 function sourceTargets(ids) {
-  const unique = [...new Set(ids)];
-  if (!unique.length || unique.length > 120 || !unique.every((id) => suggestionIdentifier.test(id))) {
+  const unique2 = [...new Set(ids)];
+  if (!unique2.length || unique2.length > 120 || !unique2.every((id) => suggestionIdentifier.test(id))) {
     throw new BoardSuggestionError(400, "\u8BF7\u9644\u52A0\u6709\u6548\u7684\u767D\u677F\u5BF9\u8C61\u9009\u533A\u3002");
   }
-  return unique;
+  return unique2;
 }
 function commandReplay(writer2, actor, request, kind) {
   const { boardId, commandId, signature } = request;
@@ -11203,8 +11464,8 @@ function pasteObjects({ scope: scope2, source }) {
 }
 function pasteBoardObjects(writer2, board, actor, operation, signature) {
   const { boardId } = board;
-  const { targets: targets2, delta, sourceBoardId } = operation;
-  if (!targets2.length || ![delta.dx, delta.dy].every(Number.isFinite)) {
+  const { targets: targets2, delta: delta2, sourceBoardId } = operation;
+  if (!targets2.length || ![delta2.dx, delta2.dy].every(Number.isFinite)) {
     return rejected4("invalidEdit");
   }
   if (targets2.length > clipboardObjectLimit) {
@@ -11226,7 +11487,7 @@ function pasteBoardObjects(writer2, board, actor, operation, signature) {
   const sameBoard = sourceBoardId === boardId;
   const liveAttachments = sameBoard ? writer2.getObjects(boardId, clipboardAttachments(source.objects)) : [];
   const attachableObjects = new Set(liveAttachments.map(({ objectId }) => objectId));
-  const scope2 = { ids, groups, geometry: source.geometry, delta, attachableObjects };
+  const scope2 = { ids, groups, geometry: source.geometry, delta: delta2, attachableObjects };
   const objects = pasteObjects({ scope: scope2, source });
   if (!objects) {
     return rejected4("invalidEdit");
@@ -11501,7 +11762,7 @@ function planRestoredPayload(context, before, source) {
   const version2 = advanceVersion(context.revision, previousVersion, saved.payloadVersion);
   return version2 === void 0 ? { kind: "rejected", reason: "invalidEdit" } : { changed: true, version: version2, row: { ...saved, payloadVersion: version2 } };
 }
-function restoredObject(context, source, delta) {
+function restoredObject(context, source, delta2) {
   const { objectId } = source;
   const before = context.currentObjects.get(objectId);
   const payload = planRestoredPayload(context, before, source);
@@ -11514,19 +11775,19 @@ function restoredObject(context, source, delta) {
     return { kind: "rejected", reason: "invalidEdit" };
   }
   if (payload.changed || geometryChanged || before?.label !== source.label) {
-    delta.objects.push({ ...source, geometryVersion, payloadVersion: payload.version });
+    delta2.objects.push({ ...source, geometryVersion, payloadVersion: payload.version });
   }
   if (payload.row) {
-    delta.payloads.push(payload.row);
+    delta2.payloads.push(payload.row);
   } else if (payload.changed) {
-    delta.removedPayloadObjectIds.push(objectId);
+    delta2.removedPayloadObjectIds.push(objectId);
   }
   return void 0;
 }
 function collectRestoredChanges(context, scope2, removedObjectIds, order) {
-  const delta = { objects: [], payloads: [], removedPayloadObjectIds: [] };
+  const delta2 = { objects: [], payloads: [], removedPayloadObjectIds: [] };
   for (const object3 of scope2.objects) {
-    const rejection3 = scope2.targets.has(object3.objectId) ? restoredObject(context, object3, delta) : void 0;
+    const rejection3 = scope2.targets.has(object3.objectId) ? restoredObject(context, object3, delta2) : void 0;
     if (rejection3) {
       return rejection3;
     }
@@ -11534,7 +11795,7 @@ function collectRestoredChanges(context, scope2, removedObjectIds, order) {
   const previous = [...context.currentObjects.keys()];
   return {
     kind: "changes",
-    ...delta,
+    ...delta2,
     removedObjectIds,
     order: same(previous, order) ? void 0 : order
   };
@@ -11775,7 +12036,7 @@ function validPayloadSnapshot(change, state) {
   const current = change.current?.payloadVersion === state.current?.payloadVersion;
   return before && after && current;
 }
-function reversePayload(board, change, state, delta) {
+function reversePayload(board, change, state, delta2) {
   if (!state) {
     return true;
   }
@@ -11792,7 +12053,7 @@ function reversePayload(board, change, state, delta) {
     return true;
   }
   if (!state.before) {
-    delta.removedPayloadObjectIds.push(change.objectId);
+    delta2.removedPayloadObjectIds.push(change.objectId);
     return true;
   }
   const { payloadVersion } = state.before;
@@ -11800,16 +12061,16 @@ function reversePayload(board, change, state, delta) {
   if (clock === void 0) {
     return false;
   }
-  delta.payloads.push({ ...state.before, payloadVersion: clock });
+  delta2.payloads.push({ ...state.before, payloadVersion: clock });
   return true;
 }
-function reverseObject(board, change, delta) {
+function reverseObject(board, change, delta2) {
   const { before, after, current, objectId } = change;
   if (!before && after) {
     if (!current || !sameObjectContent(current, after)) {
       return false;
     }
-    delta.removedObjectIds.push(objectId);
+    delta2.removedObjectIds.push(objectId);
     return true;
   }
   if (!before || Boolean(after) !== Boolean(current)) {
@@ -11830,7 +12091,7 @@ function reverseObject(board, change, delta) {
   if (geometryVersion === void 0) {
     return false;
   }
-  delta.objects.push({ ...next, geometryVersion });
+  delta2.objects.push({ ...next, geometryVersion });
   return true;
 }
 function buildChanges(board, targets2, payloads) {
@@ -11848,7 +12109,7 @@ function buildChanges(board, targets2, payloads) {
   }
   return changes;
 }
-function reverseScene(reader2, board, source, delta) {
+function reverseScene(reader2, board, source, delta2) {
   const { boardId, revision } = board;
   const live = reader2.listObjects(boardId, maxSceneObjects + 1);
   if (live.length > maxSceneObjects) {
@@ -11856,27 +12117,27 @@ function reverseScene(reader2, board, source, delta) {
   }
   const current = byId2(live);
   const next = new Map(current);
-  for (const id of delta.removedObjectIds) {
+  for (const id of delta2.removedObjectIds) {
     next.delete(id);
   }
-  for (const object3 of delta.objects) {
+  for (const object3 of delta2.objects) {
     next.set(object3.objectId, object3);
   }
   const targets2 = /* @__PURE__ */ new Set([...source.targets, ...source.layerTargets ?? []]);
-  const needsOrder = source.ordered || delta.objects.some(({ objectId }) => !current.has(objectId));
+  const needsOrder = source.ordered || delta2.objects.some(({ objectId }) => !current.has(objectId));
   const order = needsOrder ? readReverseOrder(reader2, boardId, source, current, next) : void 0;
   if (needsOrder && !order) {
     return { kind: "conflict", boardRevision: revision };
   }
   const payloadIds = [
-    ...delta.payloads.map(({ objectId }) => objectId),
-    ...delta.removedPayloadObjectIds
+    ...delta2.payloads.map(({ objectId }) => objectId),
+    ...delta2.removedPayloadObjectIds
   ];
   const invalid = validateReversedScene(current, next, targets2, order, payloadIds);
   if (invalid) {
     return invalid;
   }
-  return { kind: "changes", ...delta, order };
+  return { kind: "changes", ...delta2, order };
 }
 function translationOnly({ before, after }) {
   if (!before || !after || before.payloadVersion !== after.payloadVersion) {
@@ -17597,10 +17858,10 @@ function compileScalarFieldReader2(field) {
       };
     };
   }
-  const clear = compileClear(field);
+  const clear2 = compileClear(field);
   return (message, json) => {
     if (json === null) {
-      clear(message);
+      clear2(message);
     } else {
       message[localName] = readScalar(json);
     }
@@ -17651,10 +17912,10 @@ function compileEnumFieldReader2(field) {
       message[oneofLocalName] = { case: localName, value };
     };
   }
-  const clear = compileClear(field);
+  const clear2 = compileClear(field);
   return (message, json, ctx) => {
     if (json === null && nullResets) {
-      clear(message);
+      clear2(message);
       return;
     }
     const value = readEnumValue(json, ctx.ignoreUnknownFields);
@@ -19297,8 +19558,8 @@ function readGeometryOperation({ operation }) {
         targets: operation.value.targets.map(readTarget)
       };
     case "duplicate": {
-      const { delta, targets: targets2 } = operation.value;
-      const { dx, dy } = requireField(delta, "Duplicate offset");
+      const { delta: delta2, targets: targets2 } = operation.value;
+      const { dx, dy } = requireField(delta2, "Duplicate offset");
       return {
         kind: "duplicate",
         delta: { dx, dy },
@@ -19342,8 +19603,8 @@ function readGeometryOperation({ operation }) {
     case "removeCustomColor":
       return { kind: "removeCustomColor", color: operation.value.color };
     case "paste": {
-      const { sourceBoardId, sourceRevision, targets: targets2, delta } = operation.value;
-      const { dx, dy } = requireField(delta, "Paste offset");
+      const { sourceBoardId, sourceRevision, targets: targets2, delta: delta2 } = operation.value;
+      const { dx, dy } = requireField(delta2, "Paste offset");
       return {
         kind: "paste",
         sourceBoardId: requireId(sourceBoardId),
@@ -20327,12 +20588,12 @@ var RoomStream = class {
       return;
     }
     const last = this.last;
-    const terminal = last && eventFrame({
+    const terminal2 = last && eventFrame({
       ...last,
       sequence: last.sequence + 1n,
       payload: { kind: "accessLost" }
     });
-    this.end(terminal);
+    this.end(terminal2);
     const { application, boardId, key } = this.options;
     application.revokeView(boardId, key);
   }
@@ -21177,16 +21438,16 @@ var EnvelopeDecoderImpl = class {
     if (this.byteLength < wantLength) {
       return false;
     }
-    let offset = 0;
-    while (offset < wantLength) {
+    let offset2 = 0;
+    while (offset2 < wantLength) {
       const chunk = this.buf.shift();
-      if (chunk.byteLength > wantLength - offset) {
-        target2.set(chunk.subarray(0, wantLength - offset), offset);
-        this.buf.unshift(chunk.subarray(wantLength - offset));
-        offset += wantLength - offset;
+      if (chunk.byteLength > wantLength - offset2) {
+        target2.set(chunk.subarray(0, wantLength - offset2), offset2);
+        this.buf.unshift(chunk.subarray(wantLength - offset2));
+        offset2 += wantLength - offset2;
       } else {
-        target2.set(chunk, offset);
-        offset += chunk.byteLength;
+        target2.set(chunk, offset2);
+        offset2 += chunk.byteLength;
       }
     }
     return true;
@@ -21620,17 +21881,17 @@ async function readAllBytes(iterable, readMaxBytes, lengthHint) {
       assertReadMaxBytes(readMaxBytes, hint, true);
     }
     const buffer = new Uint8Array(hint);
-    let offset2 = 0;
+    let offset3 = 0;
     try {
       for (var _g = true, iterable_12 = __asyncValues(iterable), iterable_12_1; iterable_12_1 = await iterable_12.next(), _a = iterable_12_1.done, !_a; _g = true) {
         _c = iterable_12_1.value;
         _g = false;
         const chunk = _c;
-        if (offset2 + chunk.byteLength > hint) {
-          throw new ConnectError(`protocol error: promised ${hint} bytes, received ${offset2 + chunk.byteLength}`, Code.InvalidArgument);
+        if (offset3 + chunk.byteLength > hint) {
+          throw new ConnectError(`protocol error: promised ${hint} bytes, received ${offset3 + chunk.byteLength}`, Code.InvalidArgument);
         }
-        buffer.set(chunk, offset2);
-        offset2 += chunk.byteLength;
+        buffer.set(chunk, offset3);
+        offset3 += chunk.byteLength;
       }
     } catch (e_12_1) {
       e_12 = { error: e_12_1 };
@@ -21641,8 +21902,8 @@ async function readAllBytes(iterable, readMaxBytes, lengthHint) {
         if (e_12) throw e_12.error;
       }
     }
-    if (offset2 < hint) {
-      throw new ConnectError(`protocol error: promised ${hint} bytes, received ${offset2}`, Code.InvalidArgument);
+    if (offset3 < hint) {
+      throw new ConnectError(`protocol error: promised ${hint} bytes, received ${offset3}`, Code.InvalidArgument);
     }
     return buffer;
   }
@@ -21667,10 +21928,10 @@ async function readAllBytes(iterable, readMaxBytes, lengthHint) {
     }
   }
   const all = new Uint8Array(count);
-  let offset = 0;
+  let offset2 = 0;
   for (let chunk = chunks.shift(); chunk; chunk = chunks.shift()) {
-    all.set(chunk, offset);
-    offset += chunk.byteLength;
+    all.set(chunk, offset2);
+    offset2 += chunk.byteLength;
   }
   return all;
 }
@@ -24115,14 +24376,14 @@ function toCommandTarget(target2) {
   return { objectId, expectedGeometryVersion };
 }
 function toMoveCommand(request) {
-  const { boardId, commandId, delta, targets: targets2 } = request;
-  if (!delta) {
+  const { boardId, commandId, delta: delta2, targets: targets2 } = request;
+  if (!delta2) {
     throw new HttpRequestError(400, "Move delta is required");
   }
   return {
     boardId: requireId(boardId),
     commandId: requireId(commandId),
-    delta: { dx: delta.dx, dy: delta.dy },
+    delta: { dx: delta2.dx, dy: delta2.dy },
     targets: targets2.map(toCommandTarget)
   };
 }
@@ -24594,10 +24855,10 @@ async function handleRequest(request, response, routes, options) {
   const { archiveApplication, features, resolveActor, agentSuggestionPath } = options;
   const path3 = request.url ?? "";
   const rooms = features?.rooms;
-  const route2 = routes.unary.get(path3);
+  const route = routes.unary.get(path3);
   const rawRoute = archiveRoute(path3, archiveApplication);
   const waitForRoom = path3 === roomEventWaitPath && rooms;
-  if (!route2 && !rawRoute && !waitForRoom) {
+  if (!route && !rawRoute && !waitForRoom) {
     sendStatus(response, 404);
     return;
   }
@@ -24628,9 +24889,9 @@ async function handleRequest(request, response, routes, options) {
     await serveRoomEventWait(waitForRoom, request, response, actor, () => resolveActor(request));
     return;
   }
-  if (route2) {
+  if (route) {
     const limit = requestLimits.get(path3);
-    sendProtobuf(response, await route2(actor, await readBody(request, limit)));
+    sendProtobuf(response, await route(actor, await readBody(request, limit)));
   }
 }
 function handleError(response, error, onError) {
@@ -24834,24 +25095,24 @@ function passStringToWasm0(arg, malloc, realloc) {
   let len = arg.length;
   let ptr = malloc(len, 1) >>> 0;
   const mem = getUint8Memory0();
-  let offset = 0;
-  for (; offset < len; offset++) {
-    const code = arg.charCodeAt(offset);
+  let offset2 = 0;
+  for (; offset2 < len; offset2++) {
+    const code = arg.charCodeAt(offset2);
     if (code > 127)
       break;
-    mem[ptr + offset] = code;
+    mem[ptr + offset2] = code;
   }
-  if (offset !== len) {
-    if (offset !== 0) {
-      arg = arg.slice(offset);
+  if (offset2 !== len) {
+    if (offset2 !== 0) {
+      arg = arg.slice(offset2);
     }
-    ptr = realloc(ptr, len, len = offset + arg.length * 3, 1) >>> 0;
-    const view = getUint8Memory0().subarray(ptr + offset, ptr + len);
+    ptr = realloc(ptr, len, len = offset2 + arg.length * 3, 1) >>> 0;
+    const view = getUint8Memory0().subarray(ptr + offset2, ptr + len);
     const ret = encodeString(arg, view);
-    offset += ret.written;
-    ptr = realloc(ptr, len, offset, 1) >>> 0;
+    offset2 += ret.written;
+    ptr = realloc(ptr, len, offset2, 1) >>> 0;
   }
-  WASM_VECTOR_LEN = offset;
+  WASM_VECTOR_LEN = offset2;
   return ptr;
 }
 function isLikeNone(x) {
@@ -26160,11 +26421,11 @@ function requireEntryLimit(name, limitForName) {
   }
   return limit;
 }
-async function readBytes(file, size, offset) {
+async function readBytes(file, size, offset2) {
   const buffer = Buffer6.allocUnsafe(size);
   let read = 0;
   while (read < size) {
-    const block = await file.read(buffer, read, size - read, offset + read);
+    const block = await file.read(buffer, read, size - read, offset2 + read);
     if (!block.bytesRead) {
       throw invalidZip();
     }
@@ -26193,15 +26454,15 @@ async function locateDirectory(file) {
     if (count !== onDisk || diskNumbers !== 0) {
       throw invalidZip("Invalid ZIP directory");
     }
-    const offset = tail.readUInt32LE(index + 16);
+    const offset2 = tail.readUInt32LE(index + 16);
     const end2 = size - length + index;
-    if (offset + tail.readUInt32LE(index + 12) !== end2) {
+    if (offset2 + tail.readUInt32LE(index + 12) !== end2) {
       throw invalidZip("Invalid ZIP directory");
     }
     if (count > MAX_ARCHIVE_ENTRIES) {
       throw tooLargeZip();
     }
-    return { count, offset, end: end2 };
+    return { count, offset: offset2, end: end2 };
   }
   throw invalidZip("Invalid ZIP directory");
 }
@@ -26252,26 +26513,26 @@ async function centralEntry(file, cursor, end2, limitForName) {
     next
   };
 }
-function fileSizesMatch(raw, offset, entry) {
-  return raw.readUInt32LE(offset) === entry.checksum && raw.readUInt32LE(offset + 4) === entry.compressed && raw.readUInt32LE(offset + 8) === entry.size;
+function fileSizesMatch(raw, offset2, entry) {
+  return raw.readUInt32LE(offset2) === entry.checksum && raw.readUInt32LE(offset2 + 4) === entry.compressed && raw.readUInt32LE(offset2 + 8) === entry.size;
 }
 async function localEntry(file, entry, next) {
-  const { offset } = entry;
-  if (offset + LOCAL_HEADER_LENGTH > next) {
+  const { offset: offset2 } = entry;
+  if (offset2 + LOCAL_HEADER_LENGTH > next) {
     throw invalidZip();
   }
-  const raw = await readBytes(file, LOCAL_HEADER_LENGTH, offset);
+  const raw = await readBytes(file, LOCAL_HEADER_LENGTH, offset2);
   if (raw.readUInt32LE(0) !== LOCAL_FILE || raw.readUInt16LE(6) !== entry.flags) {
     throw invalidZip();
   }
   if (raw.readUInt16LE(8) !== entry.encoding || raw.readUInt16LE(26) !== entry.name.length) {
     throw invalidZip();
   }
-  const name = await readBytes(file, entry.name.length, offset + LOCAL_HEADER_LENGTH);
+  const name = await readBytes(file, entry.name.length, offset2 + LOCAL_HEADER_LENGTH);
   if (entryName(name) !== entry.name) {
     throw invalidZip();
   }
-  const dataOffset = offset + LOCAL_HEADER_LENGTH + name.length + raw.readUInt16LE(28);
+  const dataOffset = offset2 + LOCAL_HEADER_LENGTH + name.length + raw.readUInt16LE(28);
   const dataEnd = dataOffset + entry.compressed;
   const trailer2 = next - dataEnd;
   if (entry.flags & DESCRIPTOR_FLAG) {
@@ -26418,7 +26679,7 @@ function compress(source) {
     });
   });
 }
-function headers2(entry, bytes, offset) {
+function headers2(entry, bytes, offset2) {
   const name = Buffer7.from(entry.name);
   const method4 = entry.compressed ? 8 : 0;
   const crc = crc322(entry.body);
@@ -26440,7 +26701,7 @@ function headers2(entry, bytes, offset) {
   central.writeUInt32LE(bytes.length, 20);
   central.writeUInt32LE(entry.body.length, 24);
   central.writeUInt16LE(name.length, 28);
-  central.writeUInt32LE(offset, 42);
+  central.writeUInt32LE(offset2, 42);
   name.copy(central, centralHeaderBytes);
   return { local, central };
 }
@@ -26456,20 +26717,20 @@ function end(count, directoryLength, start) {
 async function writeZip(entries, limit) {
   const bodies = [];
   const directory = [];
-  let offset = 0;
+  let offset2 = 0;
   let directoryLength = 0;
   for (const entry of entries) {
     const bytes = entry.compressed ? await compress(entry.body) : entry.body;
-    const { local, central } = headers2(entry, bytes, offset);
-    offset += local.length + bytes.length;
+    const { local, central } = headers2(entry, bytes, offset2);
+    offset2 += local.length + bytes.length;
     directoryLength += central.length;
-    if (offset + directoryLength + endHeaderBytes > limit) {
+    if (offset2 + directoryLength + endHeaderBytes > limit) {
       return void 0;
     }
     bodies.push(local, bytes);
     directory.push(central);
   }
-  return Buffer7.concat([...bodies, ...directory, end(entries.length, directoryLength, offset)]);
+  return Buffer7.concat([...bodies, ...directory, end(entries.length, directoryLength, offset2)]);
 }
 
 // src/infrastructure/platform/archives/backup-archive.ts
@@ -27043,7 +27304,7 @@ function connectorBends(value) {
       bends: [],
       relativeBends: {
         firstAxis: axis === "h" ? "horizontal" : "vertical",
-        offsets: bends.slice(1).map((offset) => numberValue(offset, "connector bend offset"))
+        offsets: bends.slice(1).map((offset2) => numberValue(offset2, "connector bend offset"))
       }
     };
   }
@@ -27071,8 +27332,8 @@ function connectorLabelOffset(value) {
   if (value === void 0) {
     return;
   }
-  const offset = record4(value, "connector label offset");
-  return { x: numberValue(offset.x, "label x offset"), y: numberValue(offset.y, "label y offset") };
+  const offset2 = record4(value, "connector label offset");
+  return { x: numberValue(offset2.x, "label x offset"), y: numberValue(offset2.y, "label y offset") };
 }
 function connector(element, geometry, ids) {
   const { x, y, width, height } = geometry;
@@ -29004,9 +29265,9 @@ var Preprocessor = class {
     return this.droppedBufferSize + this.codePointStart;
   }
   getError(code, cpOffset) {
-    const { line, col, offset } = this;
+    const { line, col, offset: offset2 } = this;
     const startCol = col + cpOffset;
-    const startOffset = offset + cpOffset;
+    const startOffset = offset2 + cpOffset;
     return {
       code,
       startLine: line,
@@ -29091,8 +29352,8 @@ var Preprocessor = class {
     }
     return true;
   }
-  peek(offset) {
-    const pos = this.pos + offset;
+  peek(offset2) {
+    const pos = this.pos + offset2;
     if (pos >= this.html.length) {
       this.endOfChunkHit = !this.lastChunkWritten;
       return CODE_POINTS.EOF;
@@ -29455,17 +29716,17 @@ var EntityDecoderBase = class {
    * @param offset The current offset.
    * @returns The number of characters that were consumed, or -1 if the entity is incomplete.
    */
-  stateNumericStart(input, offset) {
-    if (offset >= input.length) {
+  stateNumericStart(input, offset2) {
+    if (offset2 >= input.length) {
       return -1;
     }
-    if ((input.charCodeAt(offset) | TO_LOWER_BIT) === CHAR_LOWER_X) {
+    if ((input.charCodeAt(offset2) | TO_LOWER_BIT) === CHAR_LOWER_X) {
       this.state = STATE_NUMERIC_HEX;
       this.consumed += 1;
-      return this.stateNumericHex(input, offset + 1);
+      return this.stateNumericHex(input, offset2 + 1);
     }
     this.state = STATE_NUMERIC_DECIMAL;
-    return this.stateNumericDecimal(input, offset);
+    return this.stateNumericDecimal(input, offset2);
   }
   /**
    * Parses a hexadecimal numeric entity.
@@ -29475,10 +29736,10 @@ var EntityDecoderBase = class {
    * @param offset The current offset.
    * @returns The number of characters that were consumed, or -1 if the entity is incomplete.
    */
-  stateNumericHex(input, offset) {
+  stateNumericHex(input, offset2) {
     const inputLength = input.length;
     let { result, consumed } = this;
-    let index = offset;
+    let index = offset2;
     while (index < inputLength) {
       const char = input.charCodeAt(index);
       const digit = numericDigits[char];
@@ -29504,10 +29765,10 @@ var EntityDecoderBase = class {
    * @param offset The current offset.
    * @returns The number of characters that were consumed, or -1 if the entity is incomplete.
    */
-  stateNumericDecimal(input, offset) {
+  stateNumericDecimal(input, offset2) {
     const inputLength = input.length;
     let { result, consumed } = this;
-    let index = offset;
+    let index = offset2;
     while (index < inputLength) {
       const digit = input.charCodeAt(index) - CHAR_ZERO;
       if (digit >>> 0 > 9) {
@@ -29571,28 +29832,28 @@ var EntityDecoderBase = class {
    * @param offset The offset at which the entity begins. Should be 0 if this is not the first call.
    * @returns The number of characters that were consumed, or -1 if the entity is incomplete.
    */
-  write(input, offset) {
+  write(input, offset2) {
     switch (this.state) {
       case STATE_ENTITY_START: {
-        if (input.charCodeAt(offset) === CHAR_NUM) {
+        if (input.charCodeAt(offset2) === CHAR_NUM) {
           this.state = STATE_NUMERIC_START;
           this.consumed += 1;
-          return this.stateNumericStart(input, offset + 1);
+          return this.stateNumericStart(input, offset2 + 1);
         }
         this.state = STATE_NAMED_ENTITY;
-        return this.stateNamedEntity(input, offset);
+        return this.stateNamedEntity(input, offset2);
       }
       case STATE_NUMERIC_START: {
-        return this.stateNumericStart(input, offset);
+        return this.stateNumericStart(input, offset2);
       }
       case STATE_NUMERIC_DECIMAL: {
-        return this.stateNumericDecimal(input, offset);
+        return this.stateNumericDecimal(input, offset2);
       }
       case STATE_NUMERIC_HEX: {
-        return this.stateNumericHex(input, offset);
+        return this.stateNumericHex(input, offset2);
       }
       default: {
-        return this.stateNamedEntity(input, offset);
+        return this.stateNamedEntity(input, offset2);
       }
     }
   }
@@ -29647,19 +29908,19 @@ var HtmlEntityDecoder = class extends EntityDecoderBase {
     super.startEntity(decodeMode);
     this.runLength = 0;
   }
-  stateNamedEntity(input, offset) {
+  stateNamedEntity(input, offset2) {
     const inputLength = input.length;
-    if (this.runLength === 0 && offset + 17 <= inputLength) {
-      const c0 = input.charCodeAt(offset);
-      const pair = pairIndex(c0, input.charCodeAt(offset + 1));
+    if (this.runLength === 0 && offset2 + 17 <= inputLength) {
+      const c0 = input.charCodeAt(offset2);
+      const pair = pairIndex(c0, input.charCodeAt(offset2 + 1));
       const bits = htmlLengthBits[pair];
-      if ((bits & 32768) !== 0 && offset + 32 <= inputLength) {
-        const packed = findLongClassMatch(input, offset, this.decodeMode);
+      if ((bits & 32768) !== 0 && offset2 + 32 <= inputLength) {
+        const packed = findLongClassMatch(input, offset2, this.decodeMode);
         if (packed >= 0) {
           const length = packed & 63;
           this.consumed = length + 1;
           this.emitSlot(packed >> 6);
-          if (input.charCodeAt(offset + length - 1) !== CHAR_SEMI) {
+          if (input.charCodeAt(offset2 + length - 1) !== CHAR_SEMI) {
             this.errors?.missingSemicolonAfterCharacterReference();
           }
           return this.consumed;
@@ -29671,8 +29932,8 @@ var HtmlEntityDecoder = class extends EntityDecoderBase {
         const low = probed & -probed;
         probed ^= low;
         const length = 33 - Math.clz32(low);
-        if (input.charCodeAt(offset + length) === CHAR_SEMI) {
-          const slot = findSlotHtml(input, offset, length);
+        if (input.charCodeAt(offset2 + length) === CHAR_SEMI) {
+          const slot = findSlotHtml(input, offset2, length);
           if (slot >= 0) {
             this.consumed = length + 2;
             this.emitSlot(slot);
@@ -29682,10 +29943,10 @@ var HtmlEntityDecoder = class extends EntityDecoderBase {
       }
       if ((bits & 32768) === 0) {
         if (this.decodeMode !== DecodingMode.Strict) {
-          const packed = findLegacySlot(input, offset, 31);
+          const packed = findLegacySlot(input, offset2, 31);
           if (packed >= 0) {
             const matchLength = packed & 7;
-            const next = input.charCodeAt(offset + matchLength);
+            const next = input.charCodeAt(offset2 + matchLength);
             if (this.decodeMode === DecodingMode.Attribute && isEntityInAttributeInvalidEnd(next)) {
               return 0;
             }
@@ -29698,10 +29959,10 @@ var HtmlEntityDecoder = class extends EntityDecoderBase {
         return 0;
       }
     }
-    let index = offset;
+    let index = offset2;
     let { runLength } = this;
     let terminator = -1;
-    const scanEnd = Math.min(inputLength, offset + 32 - runLength);
+    const scanEnd = Math.min(inputLength, offset2 + 32 - runLength);
     while (index < scanEnd) {
       const char = input.charCodeAt(index);
       if (!isAlphaNumeric(char)) {
@@ -30476,14 +30737,14 @@ var Tokenizer = class {
     (_b = (_a = this.handler).onParseError) === null || _b === void 0 ? void 0 : _b.call(_a, this.preprocessor.getError(code, cpOffset));
   }
   // NOTE: `offset` may never run across line boundaries.
-  getCurrentLocation(offset) {
+  getCurrentLocation(offset2) {
     if (!this.options.sourceCodeLocationInfo) {
       return null;
     }
     return {
       startLine: this.preprocessor.line,
-      startCol: this.preprocessor.col - offset,
-      startOffset: this.preprocessor.offset - offset,
+      startCol: this.preprocessor.col - offset2,
+      startOffset: this.preprocessor.offset - offset2,
       endLine: -1,
       endCol: -1,
       endOffset: -1
@@ -30684,12 +30945,12 @@ var Tokenizer = class {
       location: this.getCurrentLocation(2)
     };
   }
-  _createCommentToken(offset) {
+  _createCommentToken(offset2) {
     this._flushRun("");
     this.currentToken = {
       type: TokenType.COMMENT,
       data: "",
-      location: this.getCurrentLocation(offset)
+      location: this.getCurrentLocation(offset2)
     };
   }
   _createDoctypeToken(initialName) {
@@ -33153,13 +33414,13 @@ var LIST_ITEM_SCOPE = 8;
 var BUTTON_SCOPE = 16;
 var TABLE_SCOPE = 32;
 var KEY_CLASSES = new Uint8Array(NAME_KEYS);
-for (const [ns, offset] of [
+for (const [ns, offset2] of [
   [NS.HTML, 0],
   [NS.SVG, SVG_KEYS],
   [NS.MATHML, MATHML_KEYS]
 ]) {
   for (const tn of SPECIAL_ELEMENTS[ns]) {
-    KEY_CLASSES[offset + tn] = ns === NS.HTML && (tn === TAG_ID.ADDRESS || tn === TAG_ID.DIV || tn === TAG_ID.P) ? SPECIAL : SPECIAL | LIST_ITEM_BOUNDARY;
+    KEY_CLASSES[offset2 + tn] = ns === NS.HTML && (tn === TAG_ID.ADDRESS || tn === TAG_ID.DIV || tn === TAG_ID.P) ? SPECIAL : SPECIAL | LIST_ITEM_BOUNDARY;
   }
 }
 for (const key of [
@@ -39075,7 +39336,7 @@ function decodeRelativeBends(value) {
   }
   return {
     firstAxis,
-    offsets: storedArray(offsets, "offsets").map((offset) => storedNumber(offset, "offset"))
+    offsets: storedArray(offsets, "offsets").map((offset2) => storedNumber(offset2, "offset"))
   };
 }
 function decodeConnector(value) {

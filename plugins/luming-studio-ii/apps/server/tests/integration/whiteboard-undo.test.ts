@@ -222,6 +222,7 @@ test('rejects conflicting target edits, a different actor and read-only callers 
 
 test('does not turn a no-op layer receipt into an undo of another operation', async () => {
   await move(editorId, 'move-before-layer-noop', documentId, 40);
+  const moved = await scene();
   const { receipt } = await callWhiteboard(server.address, editorId, editBoardGeometry, {
     ...board,
     commandId: 'layer-noop',
@@ -235,12 +236,12 @@ test('does not turn a no-op layer receipt into an undo of another operation', as
     },
   });
   expect(receipt?.outcome).toMatchObject({
-    case: 'rejected',
-    value: { reason: BoardEditRejectionReason.INVALID_EDIT },
+    case: 'applied',
+    value: { boardRevision: 1n, changedObjects: [], objectOrder: [] },
   });
   expect((await reverse('undo-layer-noop', 'layer-noop')).receipt?.outcome).toMatchObject({
     case: 'rejected',
     value: { reason: BoardEditRejectionReason.VERSION_UNAVAILABLE },
   });
-  expect((await scene()).boardRevision).toBe(1n);
+  expect(await scene()).toEqual(moved);
 });

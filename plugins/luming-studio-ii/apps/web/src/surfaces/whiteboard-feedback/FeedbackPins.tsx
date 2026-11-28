@@ -93,7 +93,7 @@ export function FeedbackPins({
               ),
               viewport,
             ),
-            ...feedbackAuthorColors(thread.first.authorId),
+            ...feedbackAuthorColors(thread.first),
           }}
           onPointerDown={(event) => event.stopPropagation()}
           onDoubleClick={(event) => event.stopPropagation()}
@@ -110,7 +110,7 @@ export function FeedbackPins({
       {draftPoint && (
         <span
           className="whiteboard-feedback__pin whiteboard-feedback__draft-pin"
-          style={screenPoint(draftPoint, viewport)}
+          style={{ ...screenPoint(draftPoint, viewport), ...feedbackAuthorColors() }}
           aria-hidden="true"
         >
           <FeedbackAuthorGlyph />

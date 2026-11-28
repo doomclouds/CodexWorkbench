@@ -36,6 +36,8 @@ export interface DocumentDraft {
   readonly document: DocumentContent;
 }
 
+export type DocumentExportFormat = 'md' | 'html' | 'json';
+
 export interface DocumentValue extends DocumentDraft {
   readonly version: number;
 }
@@ -90,7 +92,7 @@ export interface DocumentObjectProps {
   readonly onCommit?: (commit: DocumentCommit) => Promise<DocumentCommitResult>;
   readonly onActivity?: (activity: DocumentActivity) => void;
   readonly onExport?: (
-    format: 'html' | 'json',
+    format: DocumentExportFormat,
     value: DocumentDraft,
     signal: AbortSignal,
   ) => void | Promise<void>;

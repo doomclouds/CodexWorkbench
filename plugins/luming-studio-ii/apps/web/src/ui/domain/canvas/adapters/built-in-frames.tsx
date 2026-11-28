@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { CanvasConnectorPath, connectorLabelLift } from '../connectors/CanvasConnectorPath.js';
 import type { ResolvedConnection } from '../connectors/geometry.js';
 import type { CanvasGeometry, CanvasObjectDraft } from '../contracts.js';
@@ -16,8 +16,16 @@ export interface CanvasPrimitiveFrameProps {
 }
 
 const sectionHitWidth = 8;
+const sectionCaptionFontSize = 17;
+const sectionOverview = { fontSize: 12, height: 16, gap: 4 };
 const connectorCaptionFontSize = 13;
 const minimumConnectorCaptionPixels = 8;
+
+interface SectionOverviewStyle extends CSSProperties {
+  '--studio-ui-section-overview-font'?: string;
+  '--studio-ui-section-overview-line'?: string;
+  '--studio-ui-section-overview-gap'?: string;
+}
 
 export function CanvasShapeFrame({
   object,
@@ -68,11 +76,27 @@ export function CanvasSectionFrame({
   }
 
   const { width, height } = geometry;
+  const overview = zoom < 1 && sectionCaptionFontSize * zoom < sectionOverview.fontSize;
+  const captionFits = width * zoom >= 30 && height * zoom >= 12;
+  const overviewStyle: SectionOverviewStyle | undefined = overview
+    ? {
+        '--studio-ui-section-overview-font': `${sectionOverview.fontSize / zoom}px`,
+        '--studio-ui-section-overview-line': `${sectionOverview.height / zoom}px`,
+        '--studio-ui-section-overview-gap': `${sectionOverview.gap / zoom}px`,
+      }
+    : undefined;
 
   return (
     <>
       {showCaption && (
-        <div className="studio-ui-canvas-section-title" data-canvas-section-title="">
+        <div
+          className="studio-ui-canvas-section-title"
+          data-canvas-section-title=""
+          data-canvas-caption-below-threshold={(overview && !captionFits) || undefined}
+          data-overview={overview || undefined}
+          style={overviewStyle}
+          title={overview ? object.label : undefined}
+        >
           {content ?? object.label}
         </div>
       )}

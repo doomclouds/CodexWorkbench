@@ -13,6 +13,9 @@ const platform = 'src/platform/transport/index.ts';
 const integration = 'tests/integration/whiteboard-editor.test.tsx';
 const support = 'tests/support/app-mock.tsx';
 const protocol = '@codexworkbench/luming-studio-ii-contracts/whiteboard/service';
+const connectorRoute = '@codexworkbench/luming-studio-ii-contracts/whiteboard/connector-route';
+const connectorGeometry = 'src/ui/domain/canvas/connectors/geometry.ts';
+const connectorPath = 'src/ui/domain/canvas/connectors/path.ts';
 const workbench = 'src/surfaces/workbench/Workbench.tsx';
 const workbenchPage = 'src/pages/workbench/WorkbenchPage.tsx';
 const workbenchMount = 'src/surfaces/workbench/WorkbenchSurface.tsx';
@@ -72,6 +75,8 @@ const actualPages = [
 ].join('\n');
 
 const accepted = [
+  [connectorGeometry, `import { routeConnector } from '${connectorRoute}';`],
+  [connectorPath, `import { routeConnector, type ConnectorRouteInput } from '${connectorRoute}';`],
   [
     suggestionsData,
     "import { readBoardEditChanges, readBoardEditReceipt, type WhiteboardEditService } from '../whiteboard/index.js';",
@@ -251,6 +256,31 @@ const accepted = [
 ];
 
 const rejected = [
+  [
+    'a whiteboard surface consumes the shared connector geometry directly',
+    surface,
+    `import { routeConnector } from '${connectorRoute}';`,
+  ],
+  [
+    'whiteboard data imports the shared connector geometry',
+    data,
+    `import type { ConnectorRouteInput } from '${connectorRoute}';`,
+  ],
+  [
+    'a connector publishes an imported shared geometry alias',
+    connectorGeometry,
+    `import { routeConnector } from '${connectorRoute}';\nexport { routeConnector as constructPath };`,
+  ],
+  [
+    'a connector publishes an imported shared geometry type',
+    connectorPath,
+    `import type { ConnectorRouteInput } from '${connectorRoute}';\nexport type { ConnectorRouteInput };`,
+  ],
+  [
+    'a connector reads the raw shared geometry package',
+    connectorPath,
+    `import { routeConnector } from '${connectorRoute}?raw';`,
+  ],
   [
     'room data constructs a browser transport',
     roomStreamData,

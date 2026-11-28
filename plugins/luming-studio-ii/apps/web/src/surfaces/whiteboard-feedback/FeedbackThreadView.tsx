@@ -8,7 +8,14 @@ import type {
   FeedbackThread,
   FeedbackThreadPage,
 } from '../../data/feedback/index.js';
-import { ActionMenu, Button, Dialog, StatusText, type ButtonHandle } from '../../ui/base/index.js';
+import {
+  ActionMenu,
+  Button,
+  Dialog,
+  StatusText,
+  type ActionMenuItem,
+  type ButtonHandle,
+} from '../../ui/base/index.js';
 import { FeedbackComposer } from './FeedbackComposer.js';
 import { FeedbackAvatar, feedbackAuthorName } from './feedback-author.js';
 import { hasDraftChanges, type ThreadDraft } from './thread-draft.js';
@@ -42,9 +49,7 @@ const displayTime = new Intl.DateTimeFormat('zh-CN', {
   minute: '2-digit',
 });
 
-interface MenuAction {
-  readonly id: string;
-  readonly label: string;
+interface MenuAction extends ActionMenuItem {
   readonly run: () => void;
 }
 
@@ -215,7 +220,7 @@ function threadMenu(
     });
   }
   if (thread.canDelete && canEdit) {
-    menu.push({ id: 'delete', label: '删除备注线程', run: onDelete });
+    menu.push({ id: 'delete', label: '删除备注线程', tone: 'danger', run: onDelete });
   }
 
   return menu;
@@ -372,6 +377,7 @@ function ThreadContents(props: ThreadContentsProps) {
             <Button
               label="确认删除"
               variant="primary"
+              tone="danger"
               disabled={!canWrite}
               onActivate={handleDelete}
             />

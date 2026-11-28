@@ -23,6 +23,7 @@ interface ClipboardOptions {
   readonly selection: readonly string[];
   readonly active: boolean;
   readonly canEdit: boolean;
+  readonly hasLockedSelection: boolean;
   readonly onSelectionAction: (action: GeometrySelectionAction, ids: readonly string[]) => void;
   readonly onObjects: (source: BoardClipboardSelection) => void;
   readonly onText: (text: string) => void;
@@ -32,7 +33,8 @@ interface ClipboardOptions {
 const textLimit = 20_000;
 
 export function useBoardClipboard(options: ClipboardOptions) {
-  const { clipboard, selection, active, canEdit } = options;
+  const { clipboard, selection, active, canEdit, hasLockedSelection } = options;
+  const canCut = canEdit && !hasLockedSelection;
   const [remembered, setRemembered] = useState<string>();
   const [issue, setIssue] = useState<string>();
   const latest = useRef(0);
@@ -47,9 +49,10 @@ export function useBoardClipboard(options: ClipboardOptions) {
     setIssue(error instanceof Error ? error.message : '白板剪贴板操作失败。');
   }
 
-  function content() {
+  function content(cut: boolean) {
     const { sourceBoardId, sourceRevision, objects } = options;
-    const objectIds = expandCanvasSelection(objects, selection);
+    const objectIds = expandCanvasSelection(objects, selection, cut ? 'move' : 'copy');
+
     return encodeBoardSelection({ sourceBoardId, sourceRevision, objectIds });
   }
 
@@ -73,24 +76,29 @@ export function useBoardClipboard(options: ClipboardOptions) {
       return;
     }
 
-    const value = content();
+    const cut = kind === 'cut';
+    if (cut && !canCut) {
+      return;
+    }
+
+    const value = content(cut);
     await clipboard?.writeText(boardClipboardText(value));
     if (latest.current === request) {
       setRemembered(value);
-      if (kind === 'cut') {
+      if (cut) {
         options.onSelectionAction({ kind: 'delete' }, selection);
       }
     }
   }
 
   function onCopy(event: ClipboardEvent<HTMLDivElement>, cut = false) {
-    const unrestricted = active && (!cut || canEdit);
+    const unrestricted = active && (!cut || canCut);
     if (!unrestricted || selection.length === 0 || !canvasOwnsClipboard(event)) {
       return;
     }
 
     try {
-      const value = content();
+      const value = content(cut);
       writeClipboardEvent(event, value);
       setIssue(undefined);
       setRemembered(value);
@@ -136,7 +144,7 @@ export function useBoardClipboard(options: ClipboardOptions) {
             void menuAction('copy').catch(report);
           }
         : undefined,
-      cut: canEdit
+      cut: canCut
         ? () => {
             void menuAction('cut').catch(report);
           }

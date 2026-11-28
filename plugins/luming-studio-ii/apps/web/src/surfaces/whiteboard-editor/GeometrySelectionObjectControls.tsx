@@ -10,9 +10,9 @@ import {
   List,
 } from 'lucide-react';
 import {
+  Fragment,
   useState,
   type ChangeEvent,
-  type FocusEvent,
   type KeyboardEvent,
   type PointerEvent,
   type ReactNode,
@@ -218,7 +218,6 @@ function TextControls({
   textStyleById,
   disabled,
   onStyle,
-  theme,
   inks,
   inlineControls,
 }: TextControlsProps) {
@@ -298,9 +297,8 @@ function TextControls({
       <FormatPopover label="文字颜色" icon="A" disabled={disabled}>
         {() => (
           <FormatPalette
-            kind="ink"
+            kind="text"
             value={color}
-            theme={theme}
             shared={inks}
             onSelect={(textColor, rememberColor) => onStyle({ textColor }, rememberColor)}
             disabled={disabled}
@@ -383,22 +381,29 @@ function StrokeWidth({
   readonly disabled: boolean;
   readonly onCommit: (width: number) => void;
 }) {
-  const [draft, setDraft] = useState(String(value));
+  const [draft, setDraft] = useState({ saved: value, text: String(value) });
+  if (draft.saved !== value) {
+    setDraft({ saved: value, text: String(value) });
+  }
 
-  function handleCommit(event: FocusEvent<HTMLInputElement>) {
-    const next = event.currentTarget.valueAsNumber;
+  function handleCommit(input: HTMLInputElement) {
+    if (disabled) {
+      return;
+    }
+
+    const next = input.valueAsNumber;
     const valid = Number.isFinite(next) && next >= minStrokeWidth && next <= maxStrokeWidth;
-    if (!disabled && valid && next !== value) {
+    if (valid && next !== value) {
       onCommit(next);
     } else {
-      setDraft(String(value));
+      setDraft({ saved: value, text: String(value) });
     }
   }
 
   function handleKey(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
       event.preventDefault();
-      event.currentTarget.blur();
+      handleCommit(event.currentTarget);
     }
   }
 
@@ -411,10 +416,11 @@ function StrokeWidth({
         min={minStrokeWidth}
         max={maxStrokeWidth}
         step={0.5}
-        value={draft}
-        disabled={disabled}
-        onChange={(event) => setDraft(event.currentTarget.value)}
-        onBlur={handleCommit}
+        value={draft.text}
+        readOnly={disabled}
+        aria-disabled={disabled || undefined}
+        onChange={(event) => setDraft({ saved: value, text: event.currentTarget.value })}
+        onBlur={(event) => handleCommit(event.currentTarget)}
         onKeyDown={handleKey}
       />
     </label>
@@ -462,7 +468,6 @@ function BorderControl({ selection, selected, disabled, theme, inks, onStyle }: 
             onSelect={(stroke, rememberColor) => onStyle({ stroke }, rememberColor)}
           />
           <StrokeWidth
-            key={width}
             value={width}
             disabled={disabled}
             onCommit={(strokeWidth) => onStyle({ strokeWidth })}
@@ -685,7 +690,7 @@ export function GeometrySelectionObjectControls({
   );
 
   return (
-    <>
+    <Fragment key={JSON.stringify(ids)}>
       {supportsForm && (
         <FormControl
           {...format}
@@ -708,6 +713,6 @@ export function GeometrySelectionObjectControls({
         />
       )}
       {supportsFill && <FillControl {...format} />}
-    </>
+    </Fragment>
   );
 }

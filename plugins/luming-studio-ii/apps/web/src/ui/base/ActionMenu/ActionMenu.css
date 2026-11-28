@@ -55,6 +55,10 @@
   cursor: default;
 }
 
+.studio-ui-action-menu__item[data-tone='danger']:not([aria-disabled='true']) {
+  color: var(--studio-ui-danger, light-dark(#a53131, #ff9b9b));
+}
+
 .studio-ui-action-menu__item:not([aria-disabled='true']):hover {
   background: var(--studio-ui-hover, ButtonFace);
 }

@@ -6,13 +6,14 @@ import type { TodoEditorSession } from './useTodoEditor.js';
 interface TodoTextEditorProps {
   label: string;
   session: TodoEditorSession;
+  paused?: boolean;
 }
 
 function plainKey(event: KeyboardEvent) {
   return !event.ctrlKey && !event.metaKey && !event.shiftKey;
 }
 
-export function TodoTextEditor({ label, session }: TodoTextEditorProps) {
+export function TodoTextEditor({ label, session, paused }: TodoTextEditorProps) {
   const input = useRef<HTMLInputElement>(null);
   useLayoutEffect(() => {
     input.current?.focus({ preventScroll: true });
@@ -20,7 +21,7 @@ export function TodoTextEditor({ label, session }: TodoTextEditorProps) {
   }, []);
 
   function handleKey(event: KeyboardEvent<HTMLInputElement>) {
-    if (event.nativeEvent.isComposing || event.key === 'Process') {
+    if (paused || event.nativeEvent.isComposing || event.key === 'Process') {
       return;
     }
 

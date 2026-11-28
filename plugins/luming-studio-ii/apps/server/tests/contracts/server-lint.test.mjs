@@ -22,6 +22,9 @@ const roomsAdapter = 'src/infrastructure/adapters/rooms/';
 const authorizationAdapter = 'src/infrastructure/adapters/authorization/';
 const archivesPlatform = 'src/infrastructure/platform/archives/';
 const protocol = '@codexworkbench/luming-studio-ii-contracts/whiteboard/service';
+const connectorRoute = '@codexworkbench/luming-studio-ii-contracts/whiteboard/connector-route';
+const connectorGeometry = whiteboard + 'domain/export-geometry.ts';
+const connectorVector = whiteboard + 'domain/export-svg.ts';
 const catalogProtocol = '@codexworkbench/luming-studio-ii-contracts/catalog/service';
 const archivesProtocol = '@codexworkbench/luming-studio-ii-contracts/archives/service';
 const editingProtocol = '@codexworkbench/luming-studio-ii-contracts/whiteboard/edits';
@@ -136,6 +139,11 @@ async function inspect(filePath, code) {
 }
 
 const permitted = [
+  [connectorGeometry, `import { routeConnector } from '${connectorRoute}';`],
+  [
+    connectorVector,
+    `import { routeConnector, type ConnectorRouteInput } from '${connectorRoute}';`,
+  ],
   [
     'src/infrastructure/adapters/board-custom-colors.ts',
     "import type { SqliteConnection } from '../platform/index.js';",
@@ -436,6 +444,36 @@ for (const [file, code] of permitted) {
 }
 
 const rejected = [
+  [
+    'the whiteboard application imports shared connector geometry directly',
+    whiteboard + 'application/index.ts',
+    `import { routeConnector } from '${connectorRoute}';`,
+  ],
+  [
+    'a different board export module imports shared connector geometry',
+    whiteboard + 'domain/export-html.ts',
+    `import { routeConnector } from '${connectorRoute}';`,
+  ],
+  [
+    'the SVG exporter imports the full connector namespace',
+    connectorVector,
+    `import * as connector from '${connectorRoute}';`,
+  ],
+  [
+    'the SVG exporter dynamically imports shared connector geometry',
+    connectorVector,
+    `void import('${connectorRoute}');`,
+  ],
+  [
+    'the geometry exporter exposes the shared connector route',
+    connectorGeometry,
+    `export { routeConnector } from '${connectorRoute}';`,
+  ],
+  [
+    'the SVG exporter publishes an imported shared geometry type',
+    connectorVector,
+    `import type { ConnectorRouteInput } from '${connectorRoute}';\nexport type { ConnectorRouteInput };`,
+  ],
   [
     'whiteboard HTTP reaches palette persistence directly',
     'src/entrypoints/http/geometry-edits.ts',

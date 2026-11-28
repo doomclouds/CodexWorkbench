@@ -6,6 +6,25 @@ const c = "shape-c";
 const section = "section-transparent";
 const boxTolerance = 4;
 
+const shapeSelectionBoard = {
+  title: "形状选择白板",
+  objects: [
+    {
+      id: section,
+      kind: "section",
+      label: "透明分区",
+      x: 450,
+      y: 100,
+      width: 300,
+      height: 240,
+      transparent: true,
+    },
+    { id: a, kind: "shape", label: "A", x: 120, y: 120, width: 160, height: 100 },
+    { id: b, kind: "shape", label: "B", x: 210, y: 155, width: 160, height: 100 },
+    { id: c, kind: "shape", label: "C", x: 500, y: 150, width: 160, height: 100 },
+  ],
+};
+
 function titleField(page) {
   return page.getByRole("textbox", { name: "白板名称", exact: true });
 }
@@ -18,8 +37,8 @@ function boardMenu(page) {
   return page.getByRole("menu", { name: "白板操作", exact: true });
 }
 
-async function bootstrap(page, studio) {
-  const board = await studio.seedBasicBoard();
+async function bootstrap(page, studio, fixture = "basic") {
+  const board = await studio.seedBasicBoard(fixture);
   await page.goto(board.url);
   await expect(titleField(page)).toHaveValue(board.title);
   await expect
@@ -128,7 +147,7 @@ test("[WB-SELECT-01] 点选、Shift 增减、全选以及 Esc 和空白清除", 
   page,
   studio,
 }, testInfo) => {
-  await bootstrap(page, studio);
+  await bootstrap(page, studio, shapeSelectionBoard);
   const scene = await readCanvas(page, studio);
   await clickPoint(page, aOnly(scene));
   await expectSelection(page, studio, [a]);
@@ -153,7 +172,7 @@ test("[WB-SELECT-01] 点选、Shift 增减、全选以及 Esc 和空白清除", 
 });
 
 test("[WB-SELECT-02] 正反框选等价，透明分区内部可精确框选", async ({ page, studio }, testInfo) => {
-  await bootstrap(page, studio);
+  await bootstrap(page, studio, shapeSelectionBoard);
   const scene = await readCanvas(page, studio);
   const pair = merge([objectBox(scene, a), objectBox(scene, b)]);
   const from = corner(pair, 14, false);

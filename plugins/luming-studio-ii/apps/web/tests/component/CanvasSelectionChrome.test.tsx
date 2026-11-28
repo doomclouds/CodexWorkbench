@@ -2,6 +2,7 @@ import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Canvas, type CanvasProps, type CanvasScene } from '../../src/ui/domain/canvas/index.js';
+import { studioObjectExtensions } from '../../src/ui/domain/objects/index.js';
 import { createControlFixture } from '../support/render-control.js';
 
 const scene: CanvasScene = {
@@ -23,29 +24,41 @@ describe('Canvas selection chrome', () => {
   let controlBounds: DOMRect;
   let titleBounds: DOMRect;
   let handleBounds: DOMRect;
+  let dockBounds: DOMRect;
+  let canvasBounds: DOMRect;
+  let toolbarWidth: number;
 
   beforeEach(() => {
     fixture = createControlFixture();
     controlBounds = new DOMRect();
     titleBounds = new DOMRect();
     handleBounds = new DOMRect();
+    dockBounds = new DOMRect();
+    canvasBounds = new DOMRect(0, 0, 640, 480);
+    toolbarWidth = 100;
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function bounds(
       this: HTMLElement,
     ) {
       if (this.hasAttribute('data-canvas-selection-actions')) {
-        return new DOMRect(0, 0, 100, 42);
+        return new DOMRect(0, 0, toolbarWidth, 42);
       }
       if (this.hasAttribute('data-canvas-root')) {
-        return new DOMRect(0, 0, 640, 480);
+        return canvasBounds;
       }
       if (this.hasAttribute('data-canvas-toolbar-obstacle')) {
-        return controlBounds;
+        return this.hasAttribute('data-test-dock') ? dockBounds : controlBounds;
       }
       if (this.hasAttribute('data-canvas-section-title')) {
         return titleBounds;
       }
+      if (
+        this.hasAttribute('data-canvas-external-title') ||
+        this.getAttribute('aria-label') === '移动 HTML 图解'
+      ) {
+        return titleBounds;
+      }
 
-      return this.getAttribute('data-canvas-handle') === 'rotate' ? handleBounds : new DOMRect();
+      return this.hasAttribute('data-canvas-handle') ? handleBounds : new DOMRect();
     });
   });
 
@@ -75,6 +88,7 @@ describe('Canvas selection chrome', () => {
         <div data-canvas-toolbar-obstacle="">
           <button type="button">缩放</button>
         </div>
+        <div data-canvas-toolbar-obstacle="" data-test-dock="" />
       </div>,
     );
     onViewportChange.mockClear();
@@ -171,6 +185,70 @@ describe('Canvas selection chrome', () => {
     expect(toolbar?.style.visibility).toBe('visible');
     expect(toolbar?.style.left).toBe('382px');
     expect(toolbar?.style.top).toBe('70px');
+  });
+
+  it('keeps the external HTML grip clear when its caption text is below the readable scale', () => {
+    titleBounds = new DOMRect(80, 88, 24, 24);
+    renderCanvas({
+      scene: {
+        ...scene,
+        objects: [
+          {
+            id: 'card',
+            kind: 'html',
+            label: '缩略图解',
+            geometry: { x: 0, y: 0, width: 360, height: 280, rotation: 0 },
+            version: 1,
+          },
+        ],
+      },
+      initialViewport: { x: 80, y: 120, zoom: 0.05 },
+      objectExtensions: studioObjectExtensions,
+      payloadById: new Map([
+        [
+          'card',
+          { version: 1, value: { id: 'card', version: 1, html: '<input type="checkbox">' } },
+        ],
+      ]),
+      selectionActions: <button>观看选区</button>,
+    });
+    const toolbar = fixture.host.querySelector<HTMLElement>('[data-canvas-selection-actions]');
+    const grip = fixture.host.querySelector('[aria-label="移动 HTML 图解"]');
+    expect(grip).not.toBeNull();
+    expect(grip?.parentElement?.textContent).toBe('');
+    expect(toolbar?.style.top).toBe('38px');
+  });
+
+  it('uses the space above the selected HTML grip in a short viewport', () => {
+    canvasBounds = new DOMRect(0, 0, 420, 290);
+    controlBounds = new DOMRect(274, 12, 132, 38);
+    dockBounds = new DOMRect(65, 229, 289, 45);
+    handleBounds = new DOMRect(126, 80, 168, 132);
+    titleBounds = new DOMRect(137, 59, 118, 22);
+    toolbarWidth = 298;
+    renderCanvas({
+      scene: {
+        ...scene,
+        objects: [
+          {
+            id: 'card',
+            kind: 'html',
+            label: '缩略图解',
+            geometry: { x: 137, y: 91, width: 144, height: 108, rotation: 0 },
+            version: 1,
+          },
+        ],
+      },
+      objectExtensions: studioObjectExtensions,
+      payloadById: new Map([
+        ['card', { version: 1, value: { id: 'card', version: 1, html: '<p>图解</p>' } }],
+      ]),
+      selectionActions: <button>更多操作</button>,
+    });
+    const toolbar = fixture.host.querySelector<HTMLElement>('[data-canvas-selection-actions]');
+    expect(toolbar?.style.visibility).toBe('visible');
+    expect(toolbar?.style.top).toBe('13px');
+    expect(toolbar?.style.maxInlineSize).toBe('258px');
   });
 
   it('keeps neighboring section titles and the selected object handles clear', () => {

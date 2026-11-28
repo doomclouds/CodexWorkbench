@@ -1,13 +1,18 @@
+import {
+  connectorArrowHalfWidthRatio,
+  connectorPortPoint,
+  resolveConnectorRoute,
+  type ConnectorTarget,
+} from '@codexworkbench/luming-studio-ii-contracts/whiteboard/connector-route';
 import type {
   CanvasConnection,
   CanvasConnectionEndpoint,
   CanvasGeometry,
   CanvasPoint,
   CanvasPort,
-  CanvasRelativeBends,
 } from '../contracts.js';
 import { containsPoint, normalizeViewport } from '../viewport/index.js';
-import { connectionHeadHalfWidth, connectionLineWidth, hitRoundedConnection } from './path.js';
+import { connectionLineWidth, hitRoundedConnection } from './path.js';
 
 export interface ResolvedConnection {
   readonly points: readonly CanvasPoint[];
@@ -21,33 +26,13 @@ interface PortCandidate {
   readonly geometry: CanvasGeometry;
 }
 
-interface ResolvedEndpoint {
-  readonly point: CanvasPoint;
-  readonly horizontal?: boolean;
-}
-
-interface EndpointTarget {
-  readonly fallback: CanvasPoint;
-  readonly geometry: CanvasGeometry | undefined;
-  readonly port: CanvasPort | undefined;
-}
-
 type FindGeometry = (id: string) => CanvasGeometry | undefined;
 
 export const connectionPorts: readonly CanvasPort[] = ['top', 'right', 'bottom', 'left'];
 
-const portDirections: Record<CanvasPort, CanvasPoint> = {
-  top: { x: 0, y: -1 },
-  right: { x: 1, y: 0 },
-  bottom: { x: 0, y: 1 },
-  left: { x: -1, y: 0 },
-};
-
 const screenPortOffset = 12;
 const screenPortReach = 12;
 const screenHitReach = 8;
-const straightTolerance = 1;
-const maximumRelativeBends = 12;
 const degreesPerTurn = 360;
 const radiansPerDegree = Math.PI / 180;
 const emptyGeometry: CanvasGeometry = { x: 0, y: 0, width: 0, height: 0, rotation: 0 };
@@ -86,18 +71,7 @@ function geometryCenter({ x, y, width, height }: CanvasGeometry): CanvasPoint {
   return { x: x + width / 2, y: y + height / 2 };
 }
 
-export function portPoint(geometry: CanvasGeometry, port: CanvasPort, offset = 0): CanvasPoint {
-  const { width, height, rotation } = geometry;
-  const center = geometryCenter(geometry);
-  const direction = portDirections[port];
-  const local = {
-    x: direction.x * (width / 2 + offset),
-    y: direction.y * (height / 2 + offset),
-  };
-  const rotated = rotateVector(local, rotationAngle(rotation));
-
-  return { x: center.x + rotated.x, y: center.y + rotated.y };
-}
+export const portPoint = connectorPortPoint;
 
 function squaredDistance(left: CanvasPoint, right: CanvasPoint) {
   return (left.x - right.x) ** 2 + (left.y - right.y) ** 2;
@@ -168,144 +142,11 @@ function isFinitePoint(point: CanvasPoint) {
 function endpointTarget(
   endpoint: CanvasConnectionEndpoint,
   findGeometry: FindGeometry | undefined,
-): EndpointTarget {
+): ConnectorTarget {
   const { attachment } = endpoint;
   const geometry = attachment && findGeometry?.(attachment.objectId);
 
   return { fallback: endpoint.point, geometry, port: attachment?.port };
-}
-
-function facingPoint({ geometry, fallback }: EndpointTarget): CanvasPoint {
-  const center = geometry && geometryCenter(geometry);
-
-  return center && isFinitePoint(center) ? center : fallback;
-}
-
-function facingPort(geometry: CanvasGeometry, other: CanvasPoint): CanvasPort {
-  const center = geometryCenter(geometry);
-  const direction = { x: other.x - center.x, y: other.y - center.y };
-  const local = rotateVector(direction, -rotationAngle(geometry.rotation));
-  if (Math.abs(local.x) > Math.abs(local.y)) {
-    return local.x >= 0 ? 'right' : 'left';
-  }
-
-  return local.y >= 0 ? 'bottom' : 'top';
-}
-
-function resolveEndpoint(target: EndpointTarget, other: CanvasPoint): ResolvedEndpoint {
-  const { fallback, geometry } = target;
-  if (!geometry) {
-    return { point: fallback };
-  }
-
-  const port = target.port ?? facingPort(geometry, other);
-  const point = portPoint(geometry, port);
-  if (!isFinitePoint(point)) {
-    return { point: fallback };
-  }
-
-  const direction = rotateVector(portDirections[port], rotationAngle(geometry.rotation));
-
-  return { point, horizontal: Math.abs(direction.x) >= Math.abs(direction.y) };
-}
-
-function automaticRoute(start: ResolvedEndpoint, end: ResolvedEndpoint) {
-  const from = start.point;
-  const to = end.point;
-  const distanceX = Math.abs(to.x - from.x);
-  const distanceY = Math.abs(to.y - from.y);
-  if (distanceX < straightTolerance || distanceY < straightTolerance) {
-    return [from, to];
-  }
-
-  const horizontal = start.horizontal ?? end.horizontal ?? distanceX >= distanceY;
-  if (horizontal) {
-    const middle = (from.x + to.x) / 2;
-
-    return [from, { x: middle, y: from.y }, { x: middle, y: to.y }, to];
-  }
-
-  const middle = (from.y + to.y) / 2;
-
-  return [from, { x: from.x, y: middle }, { x: to.x, y: middle }, to];
-}
-
-function stepAlong(point: CanvasPoint, coordinate: number, horizontal: boolean): CanvasPoint {
-  return horizontal ? { x: coordinate, y: point.y } : { x: point.x, y: coordinate };
-}
-
-function clearsEndpoint(target: EndpointTarget, tip: CanvasPoint, neighbor?: CanvasPoint) {
-  if (!target.geometry) {
-    return true;
-  }
-  if (!neighbor) {
-    return false;
-  }
-
-  const center = geometryCenter(target.geometry);
-  const outwardX = (neighbor.x - tip.x) * (tip.x - center.x);
-  const outwardY = (neighbor.y - tip.y) * (tip.y - center.y);
-
-  return outwardX + outwardY > 0;
-}
-
-function relativeRoute(bends: CanvasRelativeBends, from: EndpointTarget, to: EndpointTarget) {
-  const { offsets } = bends;
-  if (!offsets.length || offsets.length > maximumRelativeBends || !offsets.every(Number.isFinite)) {
-    return undefined;
-  }
-
-  const fromCenter = facingPoint(from);
-  const toCenter = facingPoint(to);
-  const firstHorizontal = bends.firstAxis === 'horizontal';
-  const lastHorizontal = firstHorizontal === (offsets.length % 2 === 0);
-  const split = Math.ceil(offsets.length / 2);
-  const coordinates = offsets.map((offset, index) => {
-    const center = index < split ? fromCenter : toCenter;
-    const horizontal = firstHorizontal === (index % 2 === 0);
-
-    return offset + (horizontal ? center.x : center.y);
-  });
-  const first = coordinates[0];
-  const last = coordinates.at(-1);
-  if (first === undefined || last === undefined) {
-    return undefined;
-  }
-
-  const start = resolveEndpoint(from, stepAlong(fromCenter, first, firstHorizontal)).point;
-  const end = resolveEndpoint(to, stepAlong(toCenter, last, !lastHorizontal)).point;
-  const points = [start];
-  let cursor = start;
-
-  coordinates.forEach((coordinate, index) => {
-    cursor = stepAlong(cursor, coordinate, firstHorizontal === (index % 2 === 0));
-    points.push(cursor);
-  });
-
-  points.push(stepAlong(cursor, lastHorizontal ? end.x : end.y, lastHorizontal), end);
-  const clearsStart = clearsEndpoint(from, start, points[1]);
-  const clearsEnd = clearsEndpoint(to, end, points.at(-2));
-
-  return clearsStart && clearsEnd && points.every(isFinitePoint) ? points : undefined;
-}
-
-function connectionPoints(connection: CanvasConnection, from: EndpointTarget, to: EndpointTarget) {
-  const relative = connection.relativeBends && relativeRoute(connection.relativeBends, from, to);
-  if (relative) {
-    return relative;
-  }
-
-  const start = resolveEndpoint(from, facingPoint(to));
-  const end = resolveEndpoint(to, facingPoint(from));
-  if (!isFinitePoint(start.point) || !isFinitePoint(end.point)) {
-    return [];
-  }
-
-  const bends = connection.bends;
-
-  return bends?.length && bends.every(isFinitePoint)
-    ? [start.point, ...bends, end.point]
-    : automaticRoute(start, end);
 }
 
 function getLabelPosition(
@@ -345,7 +186,7 @@ function routeBounds(
     bottom = Math.max(bottom, y);
   }
 
-  const inset = (connectionHeadHalfWidth * strokeWidth) / connectionLineWidth + strokeWidth / 2;
+  const inset = (connectorArrowHalfWidthRatio + 0.5) * strokeWidth;
 
   return {
     x: left - inset,
@@ -364,12 +205,7 @@ export function resolveConnection(
   const strokeWidth = Number.isFinite(width) && width > 0 ? width : connectionLineWidth;
   const from = endpointTarget(connection.start, findGeometry);
   const to = endpointTarget(connection.end, findGeometry);
-  const route = connectionPoints(connection, from, to);
-  const points = route.filter((point, index) => {
-    const previous = route[index - 1];
-
-    return !previous || squaredDistance(previous, point) !== 0;
-  });
+  const points = resolveConnectorRoute(from, to, connection.bends, connection.relativeBends);
   const labelPosition = getLabelPosition(points, connection.labelOffset);
 
   return {

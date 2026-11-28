@@ -1,4 +1,11 @@
-import { expect, observe, readCanvas, screenshot, test } from "../support/studio.mjs";
+import {
+  controlNextCanvasSave,
+  expect,
+  observe,
+  readCanvas,
+  screenshot,
+  test,
+} from "../support/studio.mjs";
 
 const shapes = [
   "圆角矩形",
@@ -73,11 +80,13 @@ async function changeFill(page, color) {
   }
 }
 
-async function lineWidth(page, width) {
+async function lineWidth(page, width, key = "Tab") {
   const input = page.getByRole("spinbutton", { name: "线条宽度" });
   await expect(input).toBeVisible();
   await input.fill(String(width));
-  await input.press("Tab");
+  await input.press(key);
+
+  return input;
 }
 
 async function selectCanvasObject(page, studio, kind) {
@@ -113,9 +122,23 @@ test("[WB-OBJECT-01] 形状轮廓和填充线宽随对象保存", async ({ page,
   await changeFill(page, "绿色");
   await savedObject(studio, board, { kind: "shape", fill: "#AEE2AB" });
   await button(page, "边框与线条").click();
-  await lineWidth(page, 7);
+  if (studio.edition === "ii") {
+    const input = await lineWidth(page, 6, "Enter");
+    await savedObject(studio, board, { kind: "shape", strokeWidth: 6 });
+    await expect(input).toBeEditable();
+    await expect(input).toBeFocused();
+    await input.fill("7");
+    await input.press("Enter");
+  } else {
+    await lineWidth(page, 7);
+  }
   await savedObject(studio, board, { kind: "shape", outline: "document", strokeWidth: 7 });
-  if (!(await button(page, "虚线").isVisible())) {
+  if (studio.edition === "ii") {
+    const input = page.getByRole("spinbutton", { name: "线条宽度" });
+    await expect(input).toBeEditable();
+    await expect(input).toBeFocused();
+    await expect(button(page, "虚线")).toBeVisible();
+  } else if (!(await button(page, "虚线").isVisible())) {
     await button(page, "边框与线条").click();
   }
   const beforeDash = (await studio.readBoard(board)).revision;
@@ -213,12 +236,45 @@ test("[WB-OBJECT-03] 笔迹自由曲线与直线保存墨色和宽度", async ({
   const viewport = canvas(page, studio, board);
   await tool(page, "画笔").click();
   await button(page, "墨色 蓝色").click();
-  await drawStroke(page, viewport, false);
-  await expect.poll(async () => (await studio.readBoard(board)).objects.length).toBe(1);
-  await tool(page, "画笔").click();
-  await button(page, "墨色 蓝色").click();
-  await drawStroke(page, viewport, true);
+  const save =
+    studio.edition === "ii"
+      ? await controlNextCanvasSave(page, studio, {
+          boardId: board.id,
+          action: "create",
+          mode: "hold",
+        })
+      : undefined;
+
+  try {
+    await drawStroke(page, viewport, false);
+    if (save) {
+      await save.observed;
+      await expect(tool(page, "画笔")).toHaveAttribute("aria-pressed", "true");
+    } else {
+      await expect.poll(async () => (await studio.readBoard(board)).objects.length).toBe(1);
+      await tool(page, "画笔").click();
+      await button(page, "墨色 蓝色").click();
+    }
+    await drawStroke(page, viewport, true);
+    if (save) {
+      await expect(tool(page, "画笔")).toHaveAttribute("aria-pressed", "true");
+      expect((await studio.readBoard(board)).objects).toHaveLength(1);
+      await page.keyboard.press("Escape");
+      await expect(tool(page, "选择")).toHaveAttribute("aria-pressed", "true");
+    }
+  } finally {
+    save?.release();
+  }
   await expect.poll(async () => (await studio.readBoard(board)).objects.length).toBe(2);
+  if (save) {
+    const { objects } = await studio.readBoard(board);
+    const id = objects[1].id;
+    const strokeMidpoint = async () =>
+      (await readCanvas(page, studio)).objects.find((object) => object.id === id)?.pathPoints[2];
+    await expect.poll(strokeMidpoint).toBeDefined();
+    const point = await strokeMidpoint();
+    await page.mouse.click(point.x, point.y);
+  }
   await expect(button(page, "边框与线条")).toBeVisible();
   await button(page, "边框与线条").click();
   await lineWidth(page, 6);
@@ -227,7 +283,11 @@ test("[WB-OBJECT-03] 笔迹自由曲线与直线保存墨色和宽度", async ({
   expect(saved.objects.map(({ kind }) => kind)).toEqual(["ink", "ink"]);
   expect(saved.objects[0].stroke?.toUpperCase()).toBe("#2F7CC4");
   expect(saved.objects[1].stroke).toBe(saved.objects[0].stroke);
-  await observe(testInfo, "saved-ink", { strokes: saved.objects.length, sameInk: true, width: 6 });
+  await observe(testInfo, "saved-ink", {
+    strokes: saved.objects.length,
+    sameInk: true,
+    width: 6,
+  });
   await page.reload();
   await expect(viewport).toBeVisible();
   await expect
@@ -255,11 +315,19 @@ test("[WB-OBJECT-04] 连线端点样式和分区标题从菜单真实写回", as
   await label(page, "验收分区").click();
   await button(page, "更多操作").click();
   await page.getByRole("menuitem", { name: "重命名分区" }).click();
-  await editor(page).fill("研发分区");
-  await tool(page, "选择").click();
-  await savedObject(studio, board, { id: section.id, text: "研发分区" });
+  await expect(editor(page)).toBeFocused();
+  await page.keyboard.press("Control+a");
+  await page.keyboard.type("QA", { delay: 40 });
+  if (studio.edition === "ii") {
+    await savedObject(studio, board, { id: section.id, text: "QA" });
+  }
+  await expect(editor(page)).toBeFocused();
+  await page.keyboard.insertText(" 验收分区");
+  await page.keyboard.press("Enter");
+  const renamed = "QA 验收分区";
+  await savedObject(studio, board, { id: section.id, text: renamed });
   await page.reload();
-  await expect(label(page, "研发分区")).toBeVisible();
+  await expect(label(page, renamed)).toBeVisible();
   await clickBoardPoint(page, studio, 220, 270);
   await expect(select(page, "连接线起点")).toHaveValue("circle");
   await expect(select(page, "连接线终点")).toHaveValue("none");
@@ -341,6 +409,37 @@ async function waitForTableSave(page, studio, board, previousRevision) {
   return (await studio.readBoard(board)).revision;
 }
 
+async function expectTableBounds(page, studio, grid) {
+  if (studio.edition === "initial") {
+    return;
+  }
+
+  const controls = page.getByRole("toolbar", { name: "表格操作", exact: true });
+  await expect
+    .poll(async () => {
+      const { selection } = await readCanvas(page, studio);
+      const body = await grid.boundingBox();
+      const toolbar = await controls.boundingBox();
+      if (!selection || !body || !toolbar) {
+        return false;
+      }
+
+      const heightMatches = Math.abs(body.height - selection.height) < 1;
+      const widthMatches = Math.abs(body.width - selection.width) < 1;
+      const leftEdgesMatch = Math.abs(body.x - selection.x) < 1 && Math.abs(toolbar.x - body.x) < 1;
+      const topEdgesMatch = Math.abs(body.y - selection.y) < 1;
+
+      return (
+        heightMatches &&
+        widthMatches &&
+        leftEdgesMatch &&
+        topEdgesMatch &&
+        toolbar.y >= body.y + body.height
+      );
+    })
+    .toBe(true);
+}
+
 test("[WB-OBJECT-06] 表格行列单元格焦点和列宽重开后保留", async ({ page, studio }, testInfo) => {
   const board = await blank(page, studio, "原生表格");
   let revision = (await studio.readBoard(board)).revision;
@@ -353,9 +452,11 @@ test("[WB-OBJECT-06] 表格行列单元格焦点和列宽重开后保留", async
   await button(page, "添加表格行").click();
   await expect(table.getByRole("row")).toHaveCount(4);
   revision = await waitForTableSave(page, studio, board, revision);
+  await expectTableBounds(page, studio, table);
   await button(page, "添加表格列").click();
   await expect(table.getByRole("columnheader")).toHaveCount(4);
   revision = await waitForTableSave(page, studio, board, revision);
+  await expectTableBounds(page, studio, table);
   await expect(button(page, "添加表格列")).toBeEnabled();
   await table.getByText("项目 A", { exact: true }).dblclick();
   await expect(cellEditor(page, 2, 1)).toBeFocused();
@@ -384,6 +485,13 @@ test("[WB-OBJECT-06] 表格行列单元格焦点和列宽重开后保留", async
   await removeFromGrid(page, table.getByRole("columnheader").last(), "删除列");
   await expect(table.getByRole("columnheader")).toHaveCount(3);
   await waitForTableSave(page, studio, board, revision);
+  await expectTableBounds(page, studio, table);
+  if (studio.edition === "ii") {
+    await button(page, "缩放菜单").click();
+    await page.getByRole("menuitem", { name: "75%", exact: true }).click();
+    await expectTableBounds(page, studio, table);
+  }
+
   await page.reload();
   await expect(table.getByRole("row")).toHaveCount(3);
   await expect(table.getByRole("columnheader")).toHaveCount(3);

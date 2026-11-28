@@ -437,7 +437,7 @@ it('retains unsaved source after a rejected update and applies only the confirme
   const draft = { title: '', html: nextHtml };
   expect(onSaveSource).toHaveBeenNthCalledWith(1, draft, region.sourceRevision);
   expect(doc.querySelector('textarea')?.value).toBe(nextHtml);
-  expect(doc.body.textContent).toContain('已有新的源码版本。');
+  expect(doc.querySelector('dialog[open] [role="alert"]')?.textContent).toBe('已有新的源码版本。');
   expect(frame.srcdoc).toBe(originalDocument);
 
   await act(async () => clickEditorButton(doc, '保存源码'));

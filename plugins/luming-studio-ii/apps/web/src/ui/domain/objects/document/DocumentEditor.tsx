@@ -1,9 +1,20 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { BlockNoteView } from '@blocknote/ariakit';
-import { BlockNoteSchema, createHeadingBlockSpec, defaultBlockSpecs } from '@blocknote/core';
+import { components as blockNoteComponents } from '@blocknote/ariakit';
+import {
+  BlockNoteSchema,
+  createHeadingBlockSpec,
+  defaultBlockSpecs,
+  mergeCSSClasses,
+} from '@blocknote/core';
 import { zh } from '@blocknote/core/locales';
-import { useCreateBlockNote } from '@blocknote/react';
+import {
+  BlockNoteViewRaw,
+  ComponentsContext,
+  type ComponentProps as BlockNoteComponentProps,
+  useCreateBlockNote,
+} from '@blocknote/react';
 import '@blocknote/ariakit/style.css';
+import './document-formatting-toolbar.css';
 import type { DocumentBlock, DocumentContent, DocumentObjectProps } from './contracts.js';
 import { applyEditorChange } from './document-replay.js';
 import {
@@ -30,8 +41,43 @@ const schema = BlockNoteSchema.create({
   },
 });
 
+const destructiveMenuLabels = new Set<string>([
+  zh.drag_handle.delete_menuitem,
+  zh.table_handle.delete_row_menuitem,
+  zh.table_handle.delete_column_menuitem,
+]);
+const destructiveButtonLabels = new Set<string>([
+  zh.link_toolbar.delete.tooltip,
+  ...Object.values(zh.formatting_toolbar.file_delete.tooltip),
+]);
+
+function DocumentMenuItem(props: BlockNoteComponentProps['Generic']['Menu']['Item']) {
+  const danger = typeof props.children === 'string' && destructiveMenuLabels.has(props.children);
+  const className = mergeCSSClasses(props.className ?? '', danger ? 'studio-document-delete' : '');
+
+  return <blockNoteComponents.Generic.Menu.Item {...props} className={className} />;
+}
+
+function DocumentToolbarButton(props: BlockNoteComponentProps['Generic']['Toolbar']['Button']) {
+  const danger = props.label !== undefined && destructiveButtonLabels.has(props.label);
+  const className = mergeCSSClasses(props.className ?? '', danger ? 'studio-document-delete' : '');
+
+  return <blockNoteComponents.Generic.Toolbar.Button {...props} className={className} />;
+}
+
+const documentComponents = {
+  ...blockNoteComponents,
+  Generic: {
+    ...blockNoteComponents.Generic,
+    Menu: { ...blockNoteComponents.Generic.Menu, Item: DocumentMenuItem },
+  },
+  FormattingToolbar: { ...blockNoteComponents.FormattingToolbar, Button: DocumentToolbarButton },
+  LinkToolbar: { ...blockNoteComponents.LinkToolbar, Button: DocumentToolbarButton },
+};
+
 type DocumentEditorInstance = typeof schema.BlockNoteEditor;
 type EditableBlock = typeof schema.PartialBlock;
+type EditorBlock = typeof schema.Block;
 
 export interface DocumentEditorProps {
   readonly value: DocumentContent;
@@ -53,8 +99,26 @@ function editableBlocks(value: DocumentContent): EditableBlock[] {
   return blocks as unknown as EditableBlock[];
 }
 
+function portableBlock(block: EditorBlock): DocumentBlock {
+  const stored = block as unknown as DocumentBlock;
+  const children = block.children.length ? block.children.map(portableBlock) : undefined;
+  if (block.type !== 'table') {
+    return children ? { ...stored, children } : stored;
+  }
+
+  const { headerRows, headerCols, columnWidths, ...content } = block.content;
+  const tableContent = {
+    ...content,
+    columnWidths: columnWidths.map((width) => width ?? null),
+    ...(headerRows === undefined ? {} : { headerRows }),
+    ...(headerCols === undefined ? {} : { headerCols }),
+  } as unknown as DocumentBlock['content'];
+
+  return { ...stored, content: tableContent, ...(children ? { children } : {}) };
+}
+
 function editorValue(editor: DocumentEditorInstance): DocumentContent {
-  return { schemaVersion: 1, blocks: editor.document as unknown as DocumentBlock[] };
+  return { schemaVersion: 1, blocks: editor.document.map(portableBlock) };
 }
 
 function insidePaper(element: HTMLElement, event: PointerEvent) {
@@ -128,6 +192,7 @@ function useEditorDraft(
   { value, editable, focusBlockId, onChange, onCompositionChange }: DocumentEditorProps,
 ) {
   const applied = useRef(value);
+  const initiallyFocused = useRef<DocumentEditorInstance | undefined>(undefined);
   const [initialEditorValue] = useState(() => editorValue(editor));
   const editorSnapshot = useRef(initialEditorValue);
   const emitted = useRef(new WeakSet<DocumentContent>());
@@ -143,10 +208,11 @@ function useEditorDraft(
   }, [onChange, onCompositionChange]);
 
   useLayoutEffect(() => {
-    if (!editable) {
+    if (!editable || initiallyFocused.current === editor) {
       return;
     }
 
+    initiallyFocused.current = editor;
     const target = pendingFocus.current;
     pendingFocus.current = undefined;
     if (target && editor.getBlock(target)) {
@@ -292,13 +358,16 @@ export default function DocumentEditor(props: DocumentEditorProps) {
       onCompositionStartCapture={draft.handleCompositionStart}
       onCompositionEndCapture={draft.handleCompositionEnd}
     >
-      <BlockNoteView
-        editor={editor}
-        editable={editable}
-        theme={theme}
-        comments={false}
-        onChange={draft.handleChange}
-      />
+      <ComponentsContext.Provider value={documentComponents}>
+        <BlockNoteViewRaw
+          className="bn-ariakit"
+          editor={editor}
+          editable={editable}
+          theme={theme}
+          comments={false}
+          onChange={draft.handleChange}
+        />
+      </ComponentsContext.Provider>
     </div>
   );
 }

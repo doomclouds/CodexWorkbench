@@ -7,7 +7,7 @@ import type {
   SharingRole,
 } from '../../data/sharing/index.js';
 import { invitationRoles, roleLabels } from './sharing-labels.js';
-import { SharingMenu } from './sharing-menu.js';
+import { SharingMenu, type SharingMenuItem } from './sharing-menu.js';
 
 export interface SharingConfirmation {
   readonly title: string;
@@ -91,10 +91,11 @@ function MemberRow({
       }
     },
   }));
-  const remove = {
+  const remove: SharingMenuItem = {
     id: 'removeMember',
     label: '移除访问权限',
     separatorBefore: true,
+    tone: 'danger',
     run: (trigger: HTMLButtonElement) => actions.onConfirm(memberRemoval(member, trigger)),
   };
 

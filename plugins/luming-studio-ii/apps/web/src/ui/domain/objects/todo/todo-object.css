@@ -28,6 +28,7 @@
   --studio-ui-text: #111111;
   --studio-ui-muted: #4f5d75;
   --studio-ui-accent: #6d33d3;
+  --studio-ui-danger: #a53131;
   --todo-rule: #a8b0bd;
 }
 
@@ -35,6 +36,7 @@
   --studio-ui-text: #f7f4ed;
   --studio-ui-muted: #b7c0cd;
   --studio-ui-accent: #c5adff;
+  --studio-ui-danger: #ff9b9b;
   --todo-rule: #5e6570;
 }
 
@@ -163,6 +165,49 @@
   background: var(--studio-ui-accent);
 }
 
+.studio-object-todo__overview-rows {
+  min-block-size: 0;
+  margin: 0;
+  padding: 0 min(6%, calc(10px * var(--todo-ui-scale)));
+  overflow: hidden;
+  list-style: none;
+  font-size: calc(12px * var(--todo-ui-scale));
+  line-height: 1.2;
+}
+
+.studio-object-todo__overview-rows > li {
+  display: flex;
+  min-block-size: calc(18px * var(--todo-ui-scale));
+  align-items: center;
+  gap: calc(6px * var(--todo-ui-scale));
+}
+
+.studio-object-todo__overview-rows [data-checked] {
+  display: grid;
+  flex: none;
+  box-sizing: border-box;
+  inline-size: calc(11px * var(--todo-ui-scale));
+  block-size: calc(11px * var(--todo-ui-scale));
+  place-items: center;
+  border: 1px solid var(--studio-ui-muted, GrayText);
+  border-radius: 3px;
+  font-size: calc(9px * var(--todo-ui-scale));
+  font-weight: 700;
+}
+
+.studio-object-todo__overview-rows [data-checked='true'] {
+  border-color: var(--studio-ui-accent);
+  background: var(--studio-ui-accent);
+  color: var(--todo-paper);
+}
+
+.studio-object-todo__overview-text {
+  min-inline-size: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .studio-object-todo__title,
 .studio-object-todo__task,
 .studio-object-todo__editor {
@@ -258,6 +303,10 @@
   opacity: 0;
 }
 
+.studio-object-todo__remove:not(:disabled) {
+  color: var(--studio-ui-danger, light-dark(#a53131, #ff9b9b));
+}
+
 .studio-object-todo__row:is(:hover, :focus-within) .studio-object-todo__remove {
   opacity: 1;
 }
@@ -316,8 +365,23 @@
   font-size: inherit;
 }
 
+.studio-object-todo__task > .studio-object-todo__note-target {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: inherit;
+}
+
+.studio-object-todo[data-todo-annotating] .studio-object-todo__row :disabled {
+  pointer-events: none;
+}
+
 .studio-object-todo__title > button .studio-ui-button__icon,
 .studio-object-todo__task > button .studio-ui-button__icon,
+.studio-object-todo__note-target > span,
 .studio-object-todo__task > span,
 .studio-object-todo__source > span {
   display: block;
@@ -327,6 +391,7 @@
 }
 
 .studio-object-todo[data-todo-expanded] .studio-object-todo__task > span,
+.studio-object-todo[data-todo-expanded] .studio-object-todo__note-target > span,
 .studio-object-todo[data-todo-expanded] .studio-object-todo__task > button .studio-ui-button__icon {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -420,4 +485,25 @@
 .studio-object-todo__pin > *,
 .studio-object-todo__outside-rows > * {
   pointer-events: auto;
+}
+
+.studio-object-todo__placement-heading {
+  position: absolute;
+  inset: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5em;
+  padding: 0.3em 0.5em;
+  border-block-end: 1px solid #a8b0bd;
+  background: #efefef;
+  color: #2d3142;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.studio-object-todo__placement-heading > strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

@@ -245,16 +245,39 @@ test("[WB-SAVE-03] 删除后撤销重做使用真实历史，重启保持最后�
   await selectObject(page, studio, shapeA.id);
   await page.keyboard.press("Delete");
   await expectSavedObjects(studio, board, [shapeB.id]);
+  const deleted = await studio.readBoard(board);
+  expect(deleted.revision).toBeGreaterThan(original.revision);
+  expect(deleted.objects).toEqual([savedObject(original, shapeB.id)]);
 
   await historyAction(page, "撤销");
   await expectSavedObjects(studio, board, [shapeA.id, shapeB.id]);
   await expectVisibleObject(page, studio, shapeA.id);
-  expect((await studio.readBoard(board)).objects).toEqual(original.objects);
+  const undone = await studio.readBoard(board);
+  const originalShape = savedObject(original, shapeA.id);
+  const restoredShape = savedObject(undone, shapeA.id);
+  expect(undone.revision).toBeGreaterThan(deleted.revision);
+  expect(restoredShape.geometryVersion).toBeGreaterThan(originalShape.geometryVersion);
+  expect(restoredShape.payloadVersion).toBeGreaterThan(originalShape.payloadVersion);
+  expect(restoredShape.version).toBeGreaterThan(originalShape.version);
+  expect(undone.objects).toEqual(
+    original.objects.map((object) =>
+      object.id === shapeA.id
+        ? {
+            ...object,
+            geometryVersion: restoredShape.geometryVersion,
+            payloadVersion: restoredShape.payloadVersion,
+            version: restoredShape.version,
+          }
+        : object,
+    ),
+  );
   await screenshot(page, testInfo, "restored-by-undo");
 
   await historyAction(page, "重做");
   await expectSavedObjects(studio, board, [shapeB.id]);
   const redone = await studio.readBoard(board);
+  expect(redone.revision).toBeGreaterThan(undone.revision);
+  expect(redone.objects).toEqual(deleted.objects);
   await reopenAndConfirm(page, studio, board, redone);
   expect(hasObject(await readCanvas(page, studio), shapeA.id)).toBe(false);
   await screenshot(page, testInfo, "redone-deletion-after-restart");

@@ -161,6 +161,7 @@ export function RecycleBinToolbar({
         <button
           type="button"
           className="studio-recycle-icon"
+          data-tone="danger"
           aria-label="清空回收站"
           title="清空回收站"
           disabled={busy || !available}

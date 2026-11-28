@@ -6,9 +6,11 @@ import {
 } from '../../ui/base/index.js';
 import type { CanvasObject } from '../../ui/domain/canvas/index.js';
 import type { GeometrySelectionAction } from './geometry-commands.js';
+import type { SelectionLocks } from './organization-selection.js';
 
 export interface GeometryActionContext {
   readonly selection: readonly CanvasObject[];
+  readonly locks: SelectionLocks;
   readonly canEdit: boolean;
   readonly onAction: (action: GeometrySelectionAction, ids: readonly string[]) => void;
   readonly onFit?: (scope: 'board' | 'selection') => void;
@@ -45,8 +47,17 @@ export function layerDirection(id: string) {
   return geometryLayerRows.find((row) => row.id === id)?.id;
 }
 
+function lockMenuLabel(locks: SelectionLocks): string {
+  if (!locks.change) {
+    return '由分区锁定';
+  }
+
+  return locks.change.locked ? '锁定位置与尺寸' : '解锁位置与尺寸';
+}
+
 function boardMenuItems({
   selection,
+  locks,
   canEdit,
   onFit,
   onSelectAll,
@@ -68,7 +79,7 @@ function boardMenuItems({
     return [paste, ...general];
   }
 
-  const locked = selection.some((object) => object.locked);
+  const locked = locks.ids.size > 0;
   const blockGeometry = !canEdit || locked;
   const multiple = selection.length >= 2;
   const onlySection = !multiple && selection[0]?.kind === 'section';
@@ -99,24 +110,17 @@ function boardMenuItems({
     { id: 'tidy', label: '整理', disabled: blockGeometry || !multiple },
     {
       id: 'lock',
-      label: selection.every((object) => object.locked) ? '解锁位置与尺寸' : '锁定位置与尺寸',
+      label: lockMenuLabel(locks),
       shortcut: 'Ctrl/⌘ Shift L',
-      disabled: !canEdit,
+      disabled: !canEdit || !locks.change,
     },
-    { id: 'delete', label: '删除', shortcut: 'Delete', disabled: blockGeometry },
+    { id: 'delete', label: '删除', shortcut: 'Delete', disabled: blockGeometry, tone: 'danger' },
     ...general,
     { id: 'fit-selection', label: '适应选区', shortcut: 'Shift 2', disabled: !onFit },
   ];
 }
 
-function selectionAction(
-  id: string,
-  selection: readonly CanvasObject[],
-): GeometrySelectionAction | undefined {
-  if (id === 'lock') {
-    return { kind: 'changeLock', locked: !selection.every((object) => object.locked) };
-  }
-
+function selectionAction(id: string): GeometrySelectionAction | undefined {
   switch (id) {
     case 'delete':
     case 'duplicate':
@@ -136,6 +140,7 @@ export function GeometryBoardMenu(props: BoardMenuProps) {
   const {
     anchor,
     selection,
+    locks,
     onAction,
     onFit,
     onSelectAll,
@@ -163,7 +168,12 @@ export function GeometryBoardMenu(props: BoardMenuProps) {
       return;
     }
 
-    const action = selectionAction(id, selection);
+    if (id === 'lock' && locks.change) {
+      onAction({ kind: 'changeLock', locked: locks.change.locked }, locks.change.ids);
+      return;
+    }
+
+    const action = selectionAction(id);
     if (action) {
       onAction(
         action,

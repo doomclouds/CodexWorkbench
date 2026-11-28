@@ -224,7 +224,7 @@ function BoardCardMenu({
           <button
             type="button"
             role="menuitem"
-            className="studio-workbench-danger-text"
+            data-tone="danger"
             title={actionsAvailable ? undefined : unsupported}
             disabled={!actionsAvailable || managementBlocked}
             onClick={() => runAction('trash')}

@@ -98,6 +98,7 @@ export function CanvasRegisteredBody({
       annotate: onAnnotateContent,
       upload: readOnly ? undefined : uploadDocumentImage,
     };
+    publishRetention();
 
     return () => {
       authority.current = null;
@@ -109,6 +110,7 @@ export function CanvasRegisteredBody({
     onObjectNavigation,
     onAnnotateContent,
     uploadDocumentImage,
+    publishRetention,
   ]);
 
   const request = useCallback(
@@ -139,8 +141,13 @@ export function CanvasRegisteredBody({
   );
   const retain = useCallback(
     (value: boolean) => {
-      if (authority.current?.target === target) {
-        explicitRetention.current = value;
+      const active = authority.current;
+      if (active && active.target !== target) {
+        return;
+      }
+
+      explicitRetention.current = value;
+      if (active) {
         publishRetention();
       }
     },

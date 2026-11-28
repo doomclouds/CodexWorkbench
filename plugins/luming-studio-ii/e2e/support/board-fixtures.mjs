@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
+import { materializeBoardAssets } from "./board-fixture-assets.mjs";
+import {
+  createIiContentReader,
+  initialContent,
+  portableContent,
+} from "./board-fixture-content.mjs";
+import { mixedBoard } from "./board-fixture-presets.mjs";
 import { createIiFixtureProtocol, initialPost } from "./boards.mjs";
 
 const requireInitial = createRequire(
@@ -69,7 +76,7 @@ function portableEndpoint(endpoint) {
   return [endpoint.x, endpoint.y];
 }
 
-function portableObject(object) {
+function portableObject(object, sourceBoardId) {
   const {
     id,
     kind,
@@ -95,6 +102,7 @@ function portableObject(object) {
   const section = kind === "section";
   const connector = kind === "connector";
   const shape = kind === "shape";
+  const video = kind === "video";
   const common = {
     id,
     x,
@@ -107,12 +115,13 @@ function portableObject(object) {
     groupId,
     stroke,
     strokeWidth,
-    type: legacyTypes.get(kind) ?? kind,
+    type: video ? "image" : (legacyTypes.get(kind) ?? kind),
     version: 1,
     text: label,
     fill: transparent ? "transparent" : fill,
     hollow: section ? transparent : undefined,
     kind: shape ? (outline ?? "rounded") : undefined,
+    ...portableContent(object, sourceBoardId),
   };
 
   return connector
@@ -144,9 +153,15 @@ function archiveValue(value) {
   return value;
 }
 
-function boardArchive(preset) {
-  const { title, objects } = preset === "basic" ? defaultBoard : preset;
+const boardPresets = new Map([
+  ["basic", defaultBoard],
+  ["mixed", mixedBoard],
+]);
+
+async function boardArchive(preset) {
+  const { title, objects: descriptors } = boardPresets.get(preset) ?? preset;
   const artifactId = "basic-whiteboard-e2e";
+  const { objects, entries, index: assets } = await materializeBoardAssets(descriptors, artifactId);
   const date = "2026-01-01T00:00:00.000Z";
   const artifact = {
     id: artifactId,
@@ -171,10 +186,15 @@ function boardArchive(preset) {
     feedback: [],
     sources: {},
     operations: [],
-    assets: {},
+    assets,
     sharing: { enabled: false, generation: 0, tokens: {} },
   };
-  const payloads = [entry, artifact, { style }, ...objects.map(portableObject)];
+  const payloads = [
+    entry,
+    artifact,
+    { style },
+    ...objects.map((object) => portableObject(object, artifactId)),
+  ];
   const index = [["artifact", 1]];
   for (const [field, value] of Object.entries(properties)) {
     index.push([field, payloads.length]);
@@ -198,6 +218,7 @@ function boardArchive(preset) {
   return zipSync({
     "manifest.json": strToU8(JSON.stringify(manifest)),
     [state]: strToU8(records.join("\n") + "\n"),
+    ...entries,
   });
 }
 
@@ -243,9 +264,11 @@ function initialObject(object) {
     hollow,
     stroke,
     strokeWidth,
+    version,
     kind: outline,
   } = object;
-  const kind = nativeKinds.get(type) ?? type;
+  const video = type === "image" && typeof object.video === "string";
+  const kind = video ? "video" : (nativeKinds.get(type) ?? type);
   return {
     id,
     kind,
@@ -262,9 +285,13 @@ function initialObject(object) {
     fill,
     stroke,
     strokeWidth,
+    version,
+    geometryVersion: version,
+    payloadVersion: version,
     outline: kind === "shape" ? outline : undefined,
     transparent: kind === "section" ? Boolean(hollow || fill === "transparent") : undefined,
     ...(kind === "connector" && initialConnector(object)),
+    ...initialContent(object, kind),
   };
 }
 
@@ -292,7 +319,7 @@ function iiConnector({ start, end, startHead, endHead, bends, relativeBends }) {
   };
 }
 
-function iiObject(object, payload) {
+function iiObject(object, payload, content) {
   const { objectId: id, kind, label, geometry, locked, parentId, groupId, geometryDetail } = object;
   const { x, y, width, height, rotation } = geometry;
   const { fill, stroke, strokeWidth } = object.appearance ?? {};
@@ -315,32 +342,52 @@ function iiObject(object, payload) {
     fill,
     stroke,
     strokeWidth,
+    version: Number(object.payloadVersion ?? object.geometryVersion),
+    geometryVersion: Number(object.geometryVersion),
+    payloadVersion: object.payloadVersion === undefined ? undefined : Number(object.payloadVersion),
     outline,
     transparent,
     text: payload?.body.case === "text" ? payload.body.value.text : label,
     ...(geometryDetail.case === "connector" && iiConnector(geometryDetail.value)),
+    ...content(payload, geometry),
   };
 }
 
 function initialBoardFixtures(runtime) {
+  let session;
+  function readSession() {
+    session ??= runtime.request("/api/session", { method: "GET" }).then(async (response) => {
+      assert.equal(response.status, 200, "Expected the isolated Studio session.");
+      return response.json();
+    });
+
+    return session;
+  }
+
   return {
     async importBoard(archive) {
       const { artifact } = await initialPost(runtime, "/api/import", zipType, archive);
       return { id: artifact.id, title: artifact.title };
     },
     async readBoard({ id }) {
-      const { artifact, elements } = await initialPost(
-        runtime,
-        "/api/tools/artifact_read",
-        "application/json",
-        JSON.stringify({ artifactId: id, mode: "board" }),
-      );
+      const [{ artifact, elements }, { actor }] = await Promise.all([
+        initialPost(
+          runtime,
+          "/api/tools/artifact_read",
+          "application/json",
+          JSON.stringify({ artifactId: id, mode: "board" }),
+        ),
+        readSession(),
+      ]);
       assert.equal(artifact.id, id);
       assert.ok(Array.isArray(elements), "Expected the saved whiteboard projection.");
+      const trashed = Boolean(artifact.trashedAt);
+      const canEdit = !trashed && (actor.role === "owner" || actor.role === "editor");
 
       return {
         title: artifact.title,
         revision: artifact.revision,
+        access: { canEdit, trashed },
         objects: elements.map(initialObject),
       };
     },
@@ -351,11 +398,54 @@ function iiBoardFixtures(runtime) {
   const { BoardArchiveService, ImportBoardArchiveResponseSchema } = requireServer(
     "@codexworkbench/luming-studio-ii-contracts/archives/service",
   );
-  const { WhiteboardService } = requireServer(
+  const { ObjectPayloadUnavailableReason, WhiteboardService } = requireServer(
     "@codexworkbench/luming-studio-ii-contracts/whiteboard/service",
   );
   const { getBoardScene, getObjectPayloads } = WhiteboardService.method;
   const { post, call, outcome } = createIiFixtureProtocol(runtime);
+  const content = createIiContentReader();
+  async function readPayloads(boardId, objects) {
+    const requested = objects.filter(({ payloadVersion }) => payloadVersion !== undefined);
+    const payloads = new Map();
+    if (!requested.length) {
+      return payloads;
+    }
+
+    const objectIds = requested.map(({ objectId }) => objectId);
+    const { results } = await call(getObjectPayloads, { boardId, objectIds });
+    const received = new Map(results.map(({ objectId, result }) => [objectId, result]));
+    for (const { objectId, payloadVersion } of requested) {
+      const result = received.get(objectId);
+      if (result?.case === "payload" && result.value.payloadVersion === payloadVersion) {
+        payloads.set(objectId, result.value);
+        continue;
+      }
+      const unsupported =
+        result?.case === "unavailable" &&
+        result.value.reason === ObjectPayloadUnavailableReason.UNSUPPORTED_KIND;
+
+      if (!unsupported) {
+        return undefined;
+      }
+    }
+
+    return payloads;
+  }
+
+  async function readSnapshot(boardId) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const { scene } = await call(getBoardScene, { boardId });
+      assert.equal(scene?.boardId, boardId, "Expected the saved whiteboard scene.");
+      assert.notEqual(scene.boardRevision, undefined, "Expected the saved whiteboard revision.");
+      const payloads = await readPayloads(boardId, scene.objects);
+      if (payloads) {
+        return { scene, payloads };
+      }
+    }
+
+    throw new Error("The synthetic board changed while reading its saved content.");
+  }
+
   return {
     async importBoard(archive) {
       const result = await post(
@@ -369,22 +459,7 @@ function iiBoardFixtures(runtime) {
       return { id: boardId, title };
     },
     async readBoard({ id: boardId }) {
-      const { scene } = await call(getBoardScene, { boardId });
-      assert.equal(scene?.boardId, boardId, "Expected the saved whiteboard scene.");
-      assert.notEqual(scene.boardRevision, undefined, "Expected the saved whiteboard revision.");
-      const objectIds = scene.objects
-        .filter(({ payloadVersion }) => payloadVersion !== undefined)
-        .map(({ objectId }) => objectId);
-      const payloads = new Map();
-      if (objectIds.length) {
-        const { results } = await call(getObjectPayloads, { boardId, objectIds });
-        for (const { objectId, result } of results) {
-          if (result.case === "payload") {
-            payloads.set(objectId, result.value);
-          }
-        }
-      }
-
+      const { scene, payloads } = await readSnapshot(boardId);
       const revision = Number(scene.boardRevision);
       assert.ok(
         Number.isSafeInteger(revision),
@@ -394,7 +469,10 @@ function iiBoardFixtures(runtime) {
       return {
         title: scene.title,
         revision,
-        objects: scene.objects.map((object) => iiObject(object, payloads.get(object.objectId))),
+        access: { canEdit: scene.access?.canEdit, trashed: scene.access?.trashed },
+        objects: scene.objects.map((object) =>
+          iiObject(object, payloads.get(object.objectId), content),
+        ),
       };
     },
   };
@@ -406,7 +484,7 @@ export function createBoardFixtures(edition, runtime) {
 
   return {
     async seedBasicBoard(preset = "basic") {
-      const board = await importBoard(boardArchive(preset));
+      const board = await importBoard(await boardArchive(preset));
       const url = new URL(runtime.url);
       url.searchParams.set(edition === "initial" ? "artifactId" : "board", board.id);
 

@@ -212,7 +212,13 @@ test('creates an anchored note and retains the identical command when the write 
     operation: {
       kind: 'create',
       text: '请复核箭头',
-      anchor: { kind: 'object', objectId: 'card', geometryVersion: 7n, u: 0.5, v: 0.5 },
+      anchor: {
+        kind: 'object',
+        objectId: 'card',
+        geometryVersion: 7n,
+        u: expect.closeTo(0.08),
+        v: expect.closeTo(0.2),
+      },
     },
   });
   expect(retry?.[0]).toBe(first?.[0]);
@@ -220,6 +226,60 @@ test('creates an anchored note and retains the identical command when the write 
     expect.objectContaining({ threadId: 'thread' }),
     expect.any(AbortSignal),
   );
+});
+
+test('anchors a selected large object inside its visible corner and keeps the same author badge after posting', async () => {
+  const object = {
+    ...card,
+    geometry: { x: -300, y: -200, width: 2000, height: 1500, rotation: 0 },
+  };
+  const anchor = {
+    kind: 'object',
+    objectId: object.id,
+    geometryVersion: 7n,
+    u: 0.834,
+    v: 0.088,
+  } as const;
+  const thread = { ...sample, anchor: { ...sample.anchor, target: anchor } };
+  const service = testService(thread);
+  service.listThreads.mockResolvedValue({ items: [], canWrite: true });
+  service.apply.mockImplementationOnce(async () => {
+    service.listThreads.mockResolvedValue({ items: [thread], canWrite: true });
+
+    return { kind: 'applied', threadId: thread.id, threadVersion: 2n, deleted: false };
+  });
+  const view = { objects: [object], viewport: { x: 100, y: 50, zoom: 0.5 } };
+  await render(service, view);
+  vi.spyOn(element('.whiteboard-feedback'), 'getBoundingClientRect').mockReturnValue(
+    new DOMRect(40, 60, 800, 600),
+  );
+  await render(service, { ...view, annotationRequest: { objectId: card.id, sequence: 1 } });
+  const draft = element('.whiteboard-feedback__draft-pin');
+  expect(draft.textContent).toBe('我');
+  expect(draft.style.left).toBe('784px');
+  expect(draft.style.top).toBe('16px');
+
+  await typeMessage('可见位置已复核');
+  await click('保存备注');
+
+  expect(service.apply).toHaveBeenCalledExactlyOnceWith(
+    {
+      boardId,
+      commandId: 'feedback-command',
+      operation: {
+        kind: 'create',
+        anchor: { ...anchor, u: expect.closeTo(anchor.u), v: expect.closeTo(anchor.v) },
+        text: '可见位置已复核',
+      },
+    },
+    expect.any(AbortSignal),
+  );
+  const posted = element('[data-feedback-pin="thread"]');
+  expect(posted.textContent).toBe(draft.textContent);
+  expect(posted.style.backgroundColor).toBe(draft.style.backgroundColor);
+  expect(posted.style.left).toBe(draft.style.left);
+  expect(posted.style.top).toBe(draft.style.top);
+  expect(fixture.host.querySelector('.whiteboard-feedback__draft-pin')).toBeNull();
 });
 
 test('saves before attaching, then retries the original attachment without saving again', async () => {

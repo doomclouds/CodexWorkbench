@@ -14,12 +14,73 @@ interface CanvasObjectContentProps {
   readonly inert: boolean;
   readonly ownsFrame: boolean;
   readonly canEdit: boolean;
+  readonly locked: boolean;
   readonly selected: boolean;
   readonly mode: CanvasObjectCapabilities['content'];
   readonly Frame?: ComponentType<CanvasPrimitiveFrameProps>;
 }
 
 const draggableBodyKinds = new Set<CanvasObjectDraft['kind']>(['link', 'image', 'table']);
+
+function EmbeddedCaption({
+  object,
+  geometry,
+  zoom,
+  selected,
+  canEdit,
+  locked,
+}: Pick<
+  CanvasObjectContentProps,
+  'object' | 'geometry' | 'zoom' | 'selected' | 'canEdit' | 'locked'
+>) {
+  const captionVisible = object.kind === 'html' && zoom >= 0.5 && geometry.width * zoom >= 96;
+  if (!selected && !captionVisible) {
+    return null;
+  }
+
+  const scale = selected ? 1 / zoom : Math.min(1 / zoom, 1);
+  const width = geometry.width / scale;
+  const name = object.kind === 'html' ? 'HTML 图解' : '嵌入对象';
+
+  return (
+    <div
+      className="studio-ui-canvas-embedded-title"
+      data-canvas-external-title=""
+      style={{
+        width: selected ? Math.max(width, 24) : width,
+        bottom: `calc(100% + ${8 * scale}px)`,
+        transform: `scale(${scale})`,
+      }}
+    >
+      {selected && (
+        <button
+          className="studio-ui-canvas-embedded-grip"
+          data-canvas-drag-surface="title"
+          type="button"
+          aria-label={`移动 ${name}`}
+          title={locked ? `${name}位置已锁定` : `拖动把手移动 ${name}`}
+          disabled={!canEdit || locked}
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            aria-hidden="true"
+          >
+            <circle cx="9" cy="6" r="1" />
+            <circle cx="15" cy="6" r="1" />
+            <circle cx="9" cy="12" r="1" />
+            <circle cx="15" cy="12" r="1" />
+            <circle cx="9" cy="18" r="1" />
+            <circle cx="15" cy="18" r="1" />
+          </svg>
+        </button>
+      )}
+      {captionVisible && <strong title={object.label}>{object.label}</strong>}
+    </div>
+  );
+}
 
 export function CanvasObjectContent({
   object,
@@ -31,6 +92,7 @@ export function CanvasObjectContent({
   inert,
   ownsFrame,
   canEdit,
+  locked,
   selected,
   mode,
   Frame,
@@ -49,8 +111,6 @@ export function CanvasObjectContent({
   );
 
   const embedded = ownsFrame && mode === 'embedded';
-  const captionVisible = object.kind === 'html' && zoom >= 0.5 && geometry.width * zoom >= 96;
-  const captionScale = Math.min(1 / zoom, 1);
   const canDragBody = ownsFrame && draggableBodyKinds.has(object.kind);
 
   if (showCaption) {
@@ -72,25 +132,14 @@ export function CanvasObjectContent({
       >
         {content}
       </div>
-      {embedded && captionVisible && (
-        <div
-          className="studio-ui-canvas-embedded-title"
-          data-canvas-external-title=""
-          style={{
-            width: geometry.width / captionScale,
-            bottom: `calc(100% + ${8 * captionScale}px)`,
-            transform: `scale(${captionScale})`,
-          }}
-        >
-          <strong title={object.label}>{object.label}</strong>
-        </div>
-      )}
-      {embedded && interactive && canEdit && (
-        <div
-          className="studio-ui-canvas-embedded-move-edge"
-          data-canvas-drag-surface="title"
-          aria-hidden="true"
-          style={{ height: Math.min(6 / zoom, geometry.height / 4) }}
+      {embedded && (
+        <EmbeddedCaption
+          object={object}
+          geometry={geometry}
+          zoom={zoom}
+          selected={selected}
+          canEdit={canEdit}
+          locked={locked}
         />
       )}
     </>

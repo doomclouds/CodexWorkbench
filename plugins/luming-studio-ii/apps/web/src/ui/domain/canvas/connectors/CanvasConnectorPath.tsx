@@ -2,10 +2,9 @@ import type { CanvasConnection, CanvasConnectorHead, CanvasPoint } from '../cont
 import type { ResolvedConnection } from './geometry.js';
 import {
   connectionCircleRadius,
-  connectionHeadHalfWidth,
-  connectionHeadLength,
   connectionLineWidth,
   connectionPathData,
+  connectorArrowPoints,
 } from './path.js';
 import './CanvasConnectorPath.css';
 
@@ -21,8 +20,8 @@ interface CanvasConnectorPathProps {
 
 interface ConnectorHeadProps {
   readonly head: CanvasConnectorHead;
-  readonly tip: CanvasPoint;
-  readonly neighbor: CanvasPoint;
+  readonly points: readonly CanvasPoint[];
+  readonly atStart?: boolean;
   readonly strokeWidth: number;
 }
 
@@ -31,8 +30,9 @@ const overviewZoom = 0.5;
 const minimumOverviewStroke = 0.7;
 export const connectorLabelLift = 28;
 
-function ConnectorHead({ head, tip, neighbor, strokeWidth }: ConnectorHeadProps) {
-  if (head === 'none') {
+function ConnectorHead({ head, points, atStart = false, strokeWidth }: ConnectorHeadProps) {
+  const tip = atStart ? points[0] : points.at(-1);
+  if (!tip || head === 'none') {
     return null;
   }
 
@@ -49,24 +49,14 @@ function ConnectorHead({ head, tip, neighbor, strokeWidth }: ConnectorHeadProps)
     );
   }
 
-  const dx = neighbor.x - tip.x;
-  const dy = neighbor.y - tip.y;
-  const length = Math.hypot(dx, dy);
-  if (length === 0) {
+  const arrow = connectorArrowPoints(points, atStart, strokeWidth);
+  if (!arrow) {
     return null;
   }
 
-  const back = Math.min(length, connectionHeadLength * scale);
-  const spread = Math.min(back / 2, connectionHeadHalfWidth * scale);
-  const center = { x: tip.x + (dx / length) * back, y: tip.y + (dy / length) * back };
-  const wing = { x: (dy / length) * spread, y: (dx / length) * spread };
-  const points =
-    `${center.x - wing.x},${center.y + wing.y} ` +
-    `${tip.x},${tip.y} ${center.x + wing.x},${center.y - wing.y}`;
-
   return (
     <polyline
-      points={points}
+      points={arrow.map(({ x, y }) => `${x},${y}`).join(' ')}
       fill="none"
       stroke="currentColor"
       strokeWidth={strokeWidth}
@@ -135,14 +125,13 @@ export function CanvasConnectorPath({
         )}
         <ConnectorHead
           head={connection.startHead ?? 'none'}
-          tip={start}
-          neighbor={points[1] ?? start}
+          points={points}
+          atStart
           strokeWidth={strokeWidth}
         />
         <ConnectorHead
           head={connection.endHead ?? 'arrow'}
-          tip={end}
-          neighbor={points.at(-2) ?? end}
+          points={points}
           strokeWidth={strokeWidth}
         />
       </svg>

@@ -165,6 +165,11 @@ function ConfirmSharing({
         <Button
           label={sharing.pending ? '重试原操作' : current.label}
           variant="primary"
+          tone={
+            current.operation.kind === 'forgetMember' || current.operation.kind === 'removeMember'
+              ? 'danger'
+              : undefined
+          }
           disabled={sharing.busy}
           onActivate={() => {
             handleConfirm().catch(sharing.reportFailure);

@@ -6,6 +6,7 @@
   "description": "Luming Studio II cross-language protocol contracts",
   "license": "MIT",
   "exports": {
+    "./whiteboard/connector-route": "./whiteboard/connector-route.ts",
     "./whiteboard/stickers": "./whiteboard/stickers.ts",
     "./whiteboard/scene": {
       "types": "./dist/proto/luming/studio/v1/whiteboard_scene_pb.d.ts",

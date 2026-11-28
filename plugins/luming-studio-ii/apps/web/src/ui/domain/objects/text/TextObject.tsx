@@ -1,12 +1,8 @@
 import { useEffectEvent, useLayoutEffect, useRef, useState } from 'react';
 import type { FocusEvent, KeyboardEvent, MouseEvent } from 'react';
-import { Button, ToggleButton, Toolbar } from '../../../base/index.js';
+import { AnchoredPopover, type AnchoredPopoverCloseReason } from '../../../base/index.js';
 import { InlineTextEditor } from './InlineTextEditor.js';
-import type {
-  InlineTextEditorHandle,
-  InlineTextFormat,
-  InlineTextFormatState,
-} from './InlineTextEditor.js';
+import type { InlineTextEditorHandle, InlineTextFormat } from './InlineTextEditor.js';
 import { InlineTextLinkEditor } from './InlineTextLinkEditor.js';
 import { RichText } from './RichText.js';
 import './text.css';
@@ -43,19 +39,10 @@ interface TextObjectEditorProps {
   formatRequest?: InlineTextFormatRequest;
 }
 
-const formatOptions = [
-  { kind: 'bold', label: '粗体' },
-  { kind: 'italic', label: '斜体' },
-  { kind: 'bullets', label: '项目列表' },
-  { kind: 'numbered', label: '编号列表' },
-] as const;
-
-const unformatted: InlineTextFormatState = {
-  bold: false,
-  italic: false,
-  bullets: false,
-  numbered: false,
-};
+interface TextLinkDraft {
+  readonly anchor: HTMLElement;
+  readonly url: string;
+}
 
 function TextObjectEditor({
   text,
@@ -65,11 +52,12 @@ function TextObjectEditor({
   onCommit,
   formatRequest,
 }: TextObjectEditorProps) {
+  const root = useRef<HTMLDivElement>(null);
   const editor = useRef<InlineTextEditorHandle>(null);
+  const linkPanel = useRef<HTMLDivElement>(null);
   const formatSeen = useRef<number>(undefined);
   const opened = useRef(false);
-  const [format, setFormat] = useState(unformatted);
-  const [link, setLink] = useState<string>();
+  const [link, setLink] = useState<TextLinkDraft>();
 
   const applyFormatRequest = useEffectEvent(() => {
     const firstOpen = !opened.current;
@@ -91,24 +79,58 @@ function TextObjectEditor({
     applyFormatRequest();
   }, [formatRequest]);
 
+  function handleOpenLink(url: string) {
+    const element = root.current;
+    if (element) {
+      setLink({ anchor: element.closest<HTMLElement>('[data-canvas-object]') ?? element, url });
+    }
+  }
+
+  function focusLink() {
+    const field = linkPanel.current?.querySelector('input');
+    field?.focus({ preventScroll: true });
+    field?.select();
+  }
+
   function handleCloseLink() {
     editor.current?.focus();
     setLink(undefined);
   }
 
+  function handleDismissLink(reason: AnchoredPopoverCloseReason) {
+    if (reason === 'escape') {
+      handleCloseLink();
+    } else {
+      setLink(undefined);
+    }
+  }
+
   function handleBlur(event: FocusEvent<HTMLDivElement>) {
     const target = event.relatedTarget;
-    const canvasToolbar = target?.closest('[data-canvas-selection-actions]');
+    if (!target) {
+      return;
+    }
+
+    const canvasToolbar = target.closest('[data-canvas-selection-actions]');
     const canvas = event.currentTarget.closest('[data-canvas-root]');
     const inToolbar = canvasToolbar && canvas?.contains(canvasToolbar);
 
-    if (!event.currentTarget.contains(target) && !inToolbar) {
+    if (
+      !event.currentTarget.contains(target) &&
+      !linkPanel.current?.contains(target) &&
+      !inToolbar
+    ) {
       onCommit?.(false);
     }
   }
 
   return (
-    <div className="studio-ui-text-object-editor" data-canvas-native="" onBlur={handleBlur}>
+    <div
+      ref={root}
+      className="studio-ui-text-object-editor"
+      data-canvas-native=""
+      onBlur={handleBlur}
+    >
       <InlineTextEditor
         ref={editor}
         value={text}
@@ -117,26 +139,26 @@ function TextObjectEditor({
         onChange={onTextChange}
         onCommit={(adjacent) => onCommit?.(adjacent)}
         onBlur={(event) => event.preventDefault()}
-        onFormatStateChange={setFormat}
-        onRequestLink={setLink}
+        onRequestLink={handleOpenLink}
       />
-      <Toolbar label="文字格式">
-        {formatOptions.map(({ kind, label }) => (
-          <ToggleButton
-            key={kind}
-            label={label}
-            pressed={format[kind]}
-            onPressedChange={() => editor.current?.format(kind)}
-          />
-        ))}
-        <Button label="链接" onActivate={() => editor.current?.format('link')} />
-      </Toolbar>
-      {link !== undefined && (
-        <InlineTextLinkEditor
-          initialUrl={link}
-          onApply={(url) => editor.current?.format('link', url) ?? false}
-          onClose={handleCloseLink}
-        />
+      {link && (
+        <AnchoredPopover
+          open
+          anchor={link.anchor}
+          portalRoot={link.anchor.closest<HTMLElement>('[data-canvas-root]')}
+          label="文字链接"
+          initialFocus={focusLink}
+          onRequestClose={handleDismissLink}
+        >
+          <div ref={linkPanel} className="studio-ui-text-object-link" data-canvas-controls="">
+            <InlineTextLinkEditor
+              initialUrl={link.url}
+              autoFocus={false}
+              onApply={(url) => editor.current?.format('link', url) ?? false}
+              onClose={handleCloseLink}
+            />
+          </div>
+        </AnchoredPopover>
       )}
     </div>
   );

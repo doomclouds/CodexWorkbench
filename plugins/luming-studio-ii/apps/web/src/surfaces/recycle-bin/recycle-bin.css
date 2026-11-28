@@ -147,6 +147,11 @@
   background: var(--recycle-hover);
 }
 
+.studio-recycle-icon[data-tone='danger'],
+.studio-recycle-icon[data-tone='danger']:hover:not(:disabled) {
+  color: var(--studio-ui-danger);
+}
+
 .studio-recycle-icon:disabled {
   opacity: 0.48;
   cursor: default;
@@ -526,11 +531,6 @@
   padding: 7px 12px;
   font-weight: 500;
   white-space: nowrap;
-}
-
-.studio-recycle-destructive {
-  --studio-ui-border: color-mix(in srgb, var(--recycle-danger) 40%, var(--recycle-border));
-  --studio-ui-button-foreground: var(--recycle-danger);
 }
 
 .studio-recycle-spin {

@@ -30,8 +30,14 @@ const inkColors = [
   ['紫色', '#7C5CBF', '#CDB6EC'],
 ] as const;
 
+const palettes = {
+  fill: fillColors,
+  ink: inkColors,
+  text: [...inkColors, ['白色', '#FFFFFF', '#FFFFFF']],
+} as const;
+
 type Theme = 'light' | 'dark';
-type PaletteKind = 'fill' | 'ink';
+type PaletteKind = keyof typeof palettes;
 
 interface FormatPopoverProps {
   readonly label: string;
@@ -208,7 +214,7 @@ export function FormatPalette({
 }: FormatPaletteProps) {
   const [customOpen, setCustomOpen] = useState(false);
   const custom = useRef<HTMLButtonElement>(null);
-  const palette = kind === 'fill' ? fillColors : inkColors;
+  const palette = palettes[kind];
   const heading = kind === 'fill' ? '填充' : '墨色';
   const current = value?.toUpperCase();
 
@@ -239,7 +245,7 @@ export function FormatPalette({
           title={name}
           aria-pressed={current === light}
           disabled={disabled}
-          style={{ background: displayColor(light, dark, theme) }}
+          style={{ background: kind === 'text' ? light : displayColor(light, dark, theme) }}
           onClick={() => onSelect(light)}
         >
           {current === light && <Check size={13} />}

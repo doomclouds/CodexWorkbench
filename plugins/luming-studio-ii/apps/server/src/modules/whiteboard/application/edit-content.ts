@@ -195,7 +195,12 @@ function updatedPayload(
     case 'text':
       return editTextContent(operation.data, current.data);
     case 'table':
-      return editTableContent(object, current.data, operation);
+      return editTableContent(
+        object,
+        current.data,
+        operation,
+        contentGeometryLocked(writer, boardId, object),
+      );
     case 'embedSource':
       return editEmbedSource(current, operation);
     case 'embedState':
@@ -225,9 +230,10 @@ function contentVersionConflict(
   };
 }
 
-function withTableWidth(
+function withTableFrame(
   { writer, boardId, object }: ContentEditScope,
-  width: number,
+  width: number | undefined,
+  height: number | undefined,
   requiresUnlock: boolean,
 ): BoardObject | BoardEditRejected {
   if (requiresUnlock && contentGeometryLocked(writer, boardId, object)) {
@@ -237,7 +243,12 @@ function withTableWidth(
     return { kind: 'rejected', reason: 'versionUnavailable' };
   }
 
-  const geometry = { ...object.geometry, width };
+  const geometry = {
+    ...object.geometry,
+    width: width ?? object.geometry.width,
+    height: height ?? object.geometry.height,
+  };
+
   if (!geometryInWorld(geometry)) {
     return { kind: 'rejected', reason: 'invalidEdit' };
   }
@@ -309,9 +320,14 @@ export function planContentEdit(
   }
 
   const revised =
-    planned.geometryWidth === undefined
+    planned.geometryWidth === undefined && planned.geometryHeight === undefined
       ? object
-      : withTableWidth(scope, planned.geometryWidth, Boolean(planned.requiresGeometryUnlock));
+      : withTableFrame(
+          scope,
+          planned.geometryWidth,
+          planned.geometryHeight,
+          Boolean(planned.requiresGeometryUnlock),
+        );
 
   if ('reason' in revised) {
     return revised;

@@ -490,7 +490,7 @@ it('exports only confirmed content for a reader with a retained local draft', as
   );
 });
 
-it('downloads real Canvas HTML and block JSON with escaped script text', async () => {
+it('downloads real Canvas Markdown, HTML, and block JSON', async () => {
   const View = documentExtension.View;
   type ViewProps = Parameters<typeof View>[0];
   type Download = NonNullable<ViewProps['downloadFile']>;
@@ -506,6 +506,36 @@ it('downloads real Canvas HTML and block JSON with escaped script text', async (
       blocks: [
         { id: 'script', type: 'paragraph', props: {}, content: '<script>内容</script>' },
         { id: 'count', type: 'numberedListItem', props: { start: 3 }, content: '第三项' },
+        {
+          id: 'checked',
+          type: 'checkListItem',
+          props: { checked: true },
+          content: '主任务',
+          children: [{ id: 'nested', type: 'bulletListItem', props: {}, content: '子任务' }],
+        },
+        { id: 'heading', type: 'heading', props: { level: 2 }, content: '发版说明' },
+        {
+          id: 'link',
+          type: 'paragraph',
+          props: {},
+          content: [
+            { type: 'text', text: '入口 ', styles: { bold: true } },
+            { type: 'link', href: 'https://example.test/a', content: [{ text: '官网' }] },
+            { type: 'link', href: 'javascript:alert(1)', content: [{ text: '无效链接' }] },
+          ],
+        },
+        { id: 'code', type: 'codeBlock', props: { language: 'ts' }, content: '  const ok = true;' },
+        {
+          id: 'image',
+          type: 'image',
+          props: { url: '/studio-archive-assets/private-board/private-image', caption: '图片标题' },
+        },
+        {
+          id: 'grid',
+          type: 'table',
+          props: {},
+          content: { headerRows: 1, rows: [{ cells: ['姓名', '说明'] }, { cells: ['甲', 'A|B'] }] },
+        },
       ],
     },
   };
@@ -526,10 +556,12 @@ it('downloads real Canvas HTML and block JSON with escaped script text', async (
   await act(async () => button('全文 HTML').click());
   click('导出文档');
   await act(async () => button('块 JSON').click());
+  click('导出文档');
+  await act(async () => button('全文 Markdown').click());
 
-  const [html, json] = downloadFile.mock.calls.map(([file]) => file);
-  if (!html || !json) {
-    throw new Error('Expected the original document export options');
+  const [html, json, markdown] = downloadFile.mock.calls.map(([file]) => file);
+  if (!html || !json || !markdown) {
+    throw new Error('Expected the three document export options');
   }
 
   const output = new TextDecoder().decode(html.content);
@@ -542,6 +574,19 @@ it('downloads real Canvas HTML and block JSON with escaped script text', async (
     title,
     document: value.document,
   });
+  expect(markdown.filename).toBe('研讨--脚本-.md');
+  expect(markdown.mimeType).toBe('text/markdown;charset=utf-8');
+  const written = new TextDecoder().decode(markdown.content);
+  expect(written).toContain('\\<script\\>内容\\</script\\>');
+  expect(written).toContain('3. 第三项');
+  expect(written).toContain('- [x] 主任务\n\n  - 子任务');
+  expect(written).toContain('## 发版说明');
+  expect(written).toContain('**入口** [官网](https://example.test/a)无效链接');
+  expect(written).toContain('```ts\n  const ok = true;\n```');
+  expect(written).toContain('图片：图片标题');
+  expect(written).toContain('| 姓名 | 说明 |\n| --- | --- |\n| 甲 | A\\|B |');
+  expect(written).not.toContain('private-board');
+  expect(written).not.toContain('javascript:');
   expect(request).not.toHaveBeenCalled();
 });
 
@@ -1075,14 +1120,24 @@ it('opens the registered document through the whiteboard presentation action', a
 });
 
 it('uses one title and a keyboard-accessible outline in focused reading', () => {
-  render();
+  const value: DocumentValue = {
+    ...initial,
+    document: {
+      ...initial.document,
+      blocks: [
+        ...initial.document.blocks,
+        { id: 'omega', type: 'heading', props: { level: 2 }, content: '末章' },
+      ],
+    },
+  };
+  render({ value });
   const inline = readRegion(fixture.host);
   act(() => {
     inline.scrollTop = 135;
     inline.dispatchEvent(new Event('scroll'));
   });
 
-  render({ focusedReading: true });
+  render({ value, focusedReading: true });
 
   const focused = query('[data-document-focused-reading]', fixture.host);
   const reading = readRegion(focused);
@@ -1104,8 +1159,29 @@ it('uses one title and a keyboard-accessible outline in focused reading', () => 
   expect(toggle.getAttribute('aria-expanded')).toBe('false');
   click('切换文档目录');
   const heading = query<HTMLButtonElement>('nav[aria-label="文档目录"] button', focused);
+  const end = button('末章');
   expect(heading.textContent).toBe(first);
-  act(() => heading.click());
+  expect(heading.getAttribute('aria-current')).toBe('location');
+  click('末章');
+  expect(end.getAttribute('aria-current')).toBe('location');
+  expect(heading.hasAttribute('aria-current')).toBe(false);
+
+  vi.spyOn(reading, 'scrollHeight', 'get').mockReturnValue(1200);
+  vi.spyOn(reading, 'clientHeight', 'get').mockReturnValue(400);
+  const endPosition = vi
+    .spyOn(query('[data-document-read-block="omega"] h2', reading), 'getBoundingClientRect')
+    .mockReturnValue(new DOMRect(0, 120, 100, 24));
+  act(() => {
+    reading.scrollTop = 100;
+    reading.dispatchEvent(new Event('scroll'));
+  });
+  expect(heading.getAttribute('aria-current')).toBe('location');
+  endPosition.mockReturnValue(new DOMRect(0, -15, 100, 24));
+  act(() => {
+    reading.scrollTop = 300;
+    reading.dispatchEvent(new Event('scroll'));
+  });
+  expect(end.getAttribute('aria-current')).toBe('location');
 
   const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
   act(() => {

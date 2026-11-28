@@ -14,6 +14,7 @@ export type PayloadCache = ReadonlyMap<string, CachedPayload>;
 
 const batchLimit = 48;
 const cacheLimit = 256;
+const inlineTextKinds = new Set(['text', 'note', 'shape', 'section', 'connector']);
 
 export function missingPayloads(
   visible: readonly string[],
@@ -94,21 +95,29 @@ export function mergePayloadCache(
   return next;
 }
 
+function retainWhileRefreshing(object: WhiteboardObject, payload: WhiteboardPayload) {
+  const { kind } = payload.body;
+  if (kind === 'text') {
+    return inlineTextKinds.has(object.kind);
+  }
+
+  return (kind === 'document' || kind === 'table') && kind === object.kind;
+}
+
 export function visiblePayloads(
   cache: PayloadCache,
   objects: ReadonlyMap<string, WhiteboardObject>,
 ): ReadonlyMap<string, WhiteboardPayload> {
   const projected = new Map<string, WhiteboardPayload>();
-  for (const [id, entry] of cache) {
+  for (const [id, { payload, version: cachedVersion }] of cache) {
     const object = objects.get(id);
     const version = object?.payloadVersion;
-    const current = version !== undefined && entry.version >= version;
-    const keepBody = object?.kind === 'document' || object?.kind === 'table';
-    const awaitingBody =
-      version !== undefined && keepBody && entry.payload?.body.kind === object?.kind;
+    if (!payload || !object || version === undefined) {
+      continue;
+    }
 
-    if (entry.payload && (current || awaitingBody)) {
-      projected.set(id, entry.payload);
+    if (cachedVersion >= version || retainWhileRefreshing(object, payload)) {
+      projected.set(id, payload);
     }
   }
 

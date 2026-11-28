@@ -10,6 +10,7 @@ export interface ButtonProps {
   icon?: ReactNode;
   iconOnly?: boolean;
   variant?: 'primary' | 'secondary' | 'ghost';
+  tone?: 'danger';
   type?: 'button' | 'submit' | 'reset';
   disabled?: boolean;
   busy?: boolean;
@@ -22,6 +23,7 @@ export function Button({
   icon,
   iconOnly = false,
   variant = 'secondary',
+  tone,
   type = 'button',
   disabled = false,
   busy = false,
@@ -57,6 +59,7 @@ export function Button({
       type={type}
       className="studio-ui-button"
       data-variant={variant}
+      data-tone={tone}
       data-icon-only={iconOnly || undefined}
       aria-label={iconOnly ? label : undefined}
       aria-busy={busy || undefined}

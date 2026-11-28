@@ -210,6 +210,7 @@ describe('Workbench management through the public Surface', () => {
       });
 
       expect(document.activeElement).toBe(findButton(host, '回收站'));
+      expect(findButton(host, '回收站').dataset.tone).toBeUndefined();
       await click(host, '回收站');
       expect(fixture.navigation).toEqual(['trash']);
       expect(document.activeElement).toBe(findButton(host, '筛选作品'));
@@ -245,7 +246,9 @@ describe('Workbench management through the public Surface', () => {
       expect(host.querySelector('dialog[open]')).toBeNull();
       await chooseAction(host, '交付计划', '固定');
       await chooseAction(host, '交付计划', '取消固定');
-      await chooseAction(host, '交付计划', '移入回收站');
+      await click(host, '管理作品：交付计划');
+      expect(findButton(host, '移入回收站').dataset.tone).toBe('danger');
+      await click(host, '移入回收站');
       expect(fixture.commands.slice(1).map(({ operation }) => operation)).toEqual([
         { kind: 'pin', pinned: true },
         { kind: 'pin', pinned: false },

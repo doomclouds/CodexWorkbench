@@ -23,7 +23,7 @@ interface SelectedThread {
   readonly draftTarget?: FeedbackTarget;
 }
 
-type SurfaceStateOptions = Omit<WhiteboardFeedbackSurfaceProps, 'viewport' | 'selectedIds'>;
+type SurfaceStateOptions = Omit<WhiteboardFeedbackSurfaceProps, 'selectedIds'>;
 
 function useFeedbackSelection(panelOpen: boolean, annotating: boolean) {
   const [selection, setSelection] = useState<SelectedThread>();
@@ -83,6 +83,7 @@ export function useFeedbackSurface({
   canEdit,
   viewing,
   objects,
+  viewport,
   service,
   createCommandId,
   panelOpen,
@@ -248,14 +249,18 @@ export function useFeedbackSurface({
   function handleEscape() {
     if (draftOpen && annotating) {
       handleHideDraft();
-      return;
+
+      return true;
     }
     if (selection?.placement === 'pin' && !panelOpen) {
       handleCloseThread();
-      return;
+
+      return true;
     }
 
     stopPicking();
+
+    return annotating;
   }
 
   useFeedbackShortcut({
@@ -291,7 +296,13 @@ export function useFeedbackSurface({
 
   const requestDraft = useEffectEvent(
     ({ objectId, u, v }: NonNullable<WhiteboardFeedbackSurfaceProps['annotationRequest']>) => {
-      const target = selectionTarget([objectId], objectsById);
+      const target = selectionTarget(
+        objectId,
+        objectsById,
+        viewport,
+        stage.current?.getBoundingClientRect(),
+      );
+
       if (target?.kind === 'object') {
         startDraft({ ...target, u: u ?? target.u, v: v ?? target.v });
       }

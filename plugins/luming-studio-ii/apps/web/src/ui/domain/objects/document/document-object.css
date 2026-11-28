@@ -4,6 +4,32 @@
   min-block-size: 0;
 }
 
+.studio-document-placement-preview {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45em;
+  box-sizing: border-box;
+  block-size: 100%;
+  overflow: hidden;
+  padding: 14px;
+  border: 1px dashed var(--studio-ui-accent, #9777e8);
+  border-radius: 9px;
+  background: light-dark(#f8f8fa, #363b4d);
+  color: light-dark(#27324a, #eff1f8);
+  line-height: 1.4;
+}
+
+.studio-document-placement-preview svg {
+  flex: none;
+  inline-size: 1em;
+  block-size: 1em;
+}
+
+.studio-ui-canvas-object[data-canvas-draft]:has(.studio-document-placement-preview)
+  > .studio-ui-canvas-native-title {
+  display: none;
+}
+
 .studio-document-surface {
   --studio-document-text-gray: #55565a;
   --studio-document-save-ink: #4f5d75;
@@ -385,14 +411,21 @@
 }
 
 .studio-document-surface[data-document-focused-reading] {
-  --document-focus-rule: light-dark(#a8b0bd, #667285);
-  --document-focus-hover: light-dark(#e1e3e7, #242b38);
+  --document-focus-rule: #a8b0bd;
+  --document-focus-hover: #e1e3e7;
+  --document-focus-current: #d3dde9;
   --studio-ui-text: currentColor;
   overflow: hidden;
   font:
     14px/1.7 Arial,
     'Microsoft YaHei',
     sans-serif;
+}
+
+.studio-document-surface[data-document-focused-reading][data-paper-scheme='dark'] {
+  --document-focus-rule: #667285;
+  --document-focus-hover: #242b38;
+  --document-focus-current: #35415a;
 }
 
 .studio-document-focused-heading {
@@ -492,9 +525,14 @@ input.studio-document-title {
   cursor: pointer;
 }
 
-.studio-document-focused-toggle:is(:hover, [aria-expanded='true']),
+.studio-document-focused-toggle:hover,
 .studio-document-focused-outline button:hover {
   background: var(--document-focus-hover);
+}
+
+.studio-document-focused-toggle[aria-expanded='true'],
+.studio-document-focused-outline button[aria-current='location'] {
+  background: var(--document-focus-current);
 }
 
 .studio-document-focused-toggle svg {
@@ -621,4 +659,16 @@ input.studio-document-title {
 
 .studio-ui-dialog .studio-document-paper {
   padding: 1rem clamp(0.75rem, 4vw, 2.5rem);
+}
+
+.bn-ariakit[data-color-scheme='light'] {
+  --studio-document-danger: #a53131;
+}
+
+.bn-ariakit[data-color-scheme='dark'] {
+  --studio-document-danger: #ff9b9b;
+}
+
+.bn-ariakit .studio-document-delete {
+  color: var(--studio-document-danger, var(--studio-ui-danger, light-dark(#a53131, #ff9b9b)));
 }

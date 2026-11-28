@@ -74,16 +74,15 @@ function PurgeDialog({ scope, purging, onCancel, onConfirm, restoreFocus }: Purg
       {single && <p className="studio-recycle-purge-target">{single}</p>}
       <div className="studio-recycle-purge-actions">
         <Button label="取消" disabled={purging} onActivate={onCancel} />
-        <div className="studio-recycle-destructive">
-          <Button
-            label={purging ? '正在删除…' : confirmLabel}
-            icon={
-              purging ? <Loader2 size={15} className="studio-recycle-spin" /> : <Trash2 size={15} />
-            }
-            disabled={purging}
-            onActivate={onConfirm}
-          />
-        </div>
+        <Button
+          label={purging ? '正在删除…' : confirmLabel}
+          icon={
+            purging ? <Loader2 size={15} className="studio-recycle-spin" /> : <Trash2 size={15} />
+          }
+          tone="danger"
+          disabled={purging}
+          onActivate={onConfirm}
+        />
       </div>
     </Dialog>
   );

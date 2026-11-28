@@ -11,6 +11,7 @@ import type {
 } from '../../ui/domain/canvas/index.js';
 import { projectEditablePayload } from './canvas-projection.js';
 import { isWritableContentKind, readContentEdit } from './content-edit-command.js';
+import { record } from './content-edit-value.js';
 import {
   useLocalBoardDrafts,
   type BoardDraftAccess,
@@ -35,9 +36,10 @@ interface ContentEditOptions {
 
 interface PendingContentEdit {
   readonly service: ContentEditPort;
-  readonly command: EditObjectContentCommand;
   readonly signature: string;
   readonly draft?: CapturedDraft;
+  command: EditObjectContentCommand;
+  textBase?: string;
   controller?: AbortController;
 }
 
@@ -124,6 +126,32 @@ async function submitContent(
         kind: 'unknown',
         message: message + '查询正文回执失败。' + errorMessage(lookupError),
       };
+    }
+  }
+}
+
+function originalText(intent: CanvasObjectIntent): string | undefined {
+  const { value } = intent;
+  if (intent.name === 'text.commit' && record(value) && typeof value.baseText === 'string') {
+    return value.baseText;
+  }
+}
+
+function compatibleTextVersion(request: PendingContentEdit, attempt: ContentAttempt) {
+  const { command, textBase } = request;
+  if (textBase === undefined || command.edit.kind !== 'text' || command.edit.deleteEmpty) {
+    return undefined;
+  }
+  if (attempt.kind !== 'receipt' || attempt.receipt.kind !== 'conflict') {
+    return undefined;
+  }
+
+  for (const result of attempt.receipt.payloads) {
+    if (result.kind === 'loaded') {
+      const { id, version, body } = result.payload;
+      if (id === command.objectId && body.kind === 'text' && body.value.text === textBase) {
+        return version > command.expectedPayloadVersion ? version : undefined;
+      }
     }
   }
 }
@@ -272,7 +300,17 @@ export function useContentEdits({
     request.controller = controller;
 
     try {
-      const attempt = await submitContent(request, retry, controller.signal);
+      let attempt = await submitContent(request, retry, controller.signal);
+      const version = compatibleTextVersion(request, attempt);
+      if (version !== undefined && !controller.signal.aborted) {
+        request.command = {
+          ...request.command,
+          expectedPayloadVersion: version,
+          commandId: createCommandId(),
+        };
+        request.textBase = undefined;
+        attempt = await submitContent(request, false, controller.signal);
+      }
 
       return complete(request, attempt);
     } catch (error) {
@@ -330,6 +368,7 @@ export function useContentEdits({
       command,
       signature,
       draft: vault.remember(intent, localDraftId),
+      textBase: originalText(intent),
     };
     pending.current.set(objectId, request);
 

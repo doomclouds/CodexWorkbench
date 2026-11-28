@@ -3,7 +3,7 @@ import type { CanvasViewportSize } from './viewport/index.js';
 
 const elementSelector = '[data-canvas-object]';
 const labelSelector =
-  '[data-canvas-section-title], [data-canvas-connector-label], [data-canvas-external-title]';
+  '[data-canvas-section-title], [data-canvas-connector-label], [data-canvas-external-title], [data-canvas-drag-surface="title"]';
 const rootSelector = '[data-canvas-root]';
 const nativeSelector = '[data-canvas-native]';
 const handleSelector = '[data-canvas-handle], [data-canvas-port], [data-canvas-connector-handle]';

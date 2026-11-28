@@ -50,6 +50,45 @@ export async function readCanvas(page, studio) {
       });
     }
 
+    function difference(from, to) {
+      return { x: to.x - from.x, y: to.y - from.y };
+    }
+
+    function arrowVector(path, goal, matrix) {
+      for (const arrow of path.parentElement.querySelectorAll("polyline")) {
+        if (arrow.points.numberOfItems !== 3) {
+          continue;
+        }
+
+        const tip = arrow.points.getItem(1).matrixTransform(matrix);
+        if (Math.hypot(tip.x - goal.x, tip.y - goal.y) > 0.1) {
+          continue;
+        }
+
+        const first = arrow.points.getItem(0).matrixTransform(matrix);
+        const last = arrow.points.getItem(2).matrixTransform(matrix);
+        return difference({ x: (first.x + last.x) / 2, y: (first.y + last.y) / 2 }, tip);
+      }
+    }
+
+    function pathTangents(path) {
+      const matrix = path?.getScreenCTM();
+      if (!matrix) {
+        return;
+      }
+
+      const length = path.getTotalLength();
+      const probe = Math.min(length / 4, 2 / Math.hypot(matrix.a, matrix.b));
+      const point = (at) => path.getPointAtLength(at).matrixTransform(matrix);
+      const goal = point(length);
+
+      return {
+        start: difference(point(0), point(probe)),
+        end: difference(point(length - probe), goal),
+        arrow: arrowVector(path, goal, matrix),
+      };
+    }
+
     function connectorPaint(element) {
       const path = element.querySelector(
         legacy
@@ -81,7 +120,8 @@ export async function readCanvas(page, studio) {
         label: label?.trim() ?? "",
         box: box(displayed),
         titleBox: box(title),
-        pathPoints: kind === "connector" ? screenRoute(path) : undefined,
+        pathPoints: kind === "connector" || kind === "ink" ? screenRoute(path) : undefined,
+        pathTangents: kind === "connector" ? pathTangents(path) : undefined,
         pathPaint: kind === "connector" ? connectorPaint(element) : undefined,
         selected: legacy ? element.classList.contains("is-selected") : undefined,
       };

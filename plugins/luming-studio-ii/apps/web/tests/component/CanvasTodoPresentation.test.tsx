@@ -161,6 +161,66 @@ describe('Canvas Todo presentation', () => {
     expect(fixture.host.querySelector('dialog')).toBeNull();
   });
 
+  it('keeps the add editor mounted and focused while its confirmed payload is being fetched', async () => {
+    type Submit = NonNullable<CanvasProps['onObjectIntent']>;
+    type Receipt = Awaited<ReturnType<Submit>>;
+    let confirm!: (receipt: Receipt) => void;
+    const saved = new Promise<Receipt>((resolve) => {
+      confirm = resolve;
+    });
+    const onObjectIntent = vi.fn<Submit>(() => saved);
+    const viewing: Partial<CanvasProps> = {
+      canEdit: false,
+      canEditExpandedObject: true,
+      onOpenPresentation: vi.fn(),
+      onObjectIntent,
+      presentation: { objectIds: [id], expandedObjectId: id },
+    };
+    render(viewing);
+    const add = [...fixture.host.querySelectorAll('button')].find(
+      (button) => button.textContent?.trim() === '添加任务',
+    );
+    expect(add).toBeDefined();
+    await act(async () => add?.click());
+    const input = fixture.host.querySelector<HTMLInputElement>('[aria-label="新增任务"]');
+    if (!input) {
+      throw new Error('Expected an editable new task input.');
+    }
+
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(
+        input,
+        '补充事项',
+      );
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+    expect(onObjectIntent).toHaveBeenCalledOnce();
+    render({ ...viewing, payloadById: new Map() });
+    expect(fixture.host.querySelector('[aria-label="新增任务"]')).toBe(input);
+    expect(input.readOnly).toBe(true);
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+    expect(onObjectIntent).toHaveBeenCalledOnce();
+
+    const payload = {
+      version: 2,
+      value: {
+        id,
+        title,
+        revision: 2,
+        items: [{ id: 'created', text: '补充事项', checked: false }],
+      },
+    };
+    await act(async () => confirm({ ok: true, payload }));
+    render({ ...viewing, payloadById: new Map([[id, payload]]) });
+    expect(fixture.host.querySelector('[aria-label="新增任务"]')).toBe(input);
+    expect(document.activeElement).toBe(input);
+    expect(input.value).toBe('');
+    expect(input.readOnly).toBe(false);
+  });
+
   it('keeps an expanded dialog available when no shared viewer is configured', () => {
     render();
     expand();

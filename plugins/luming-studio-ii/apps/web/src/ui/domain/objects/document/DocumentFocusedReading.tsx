@@ -145,6 +145,7 @@ function DocumentFocusedReading({
               <button
                 key={block.id}
                 type="button"
+                aria-current={viewport.currentHeadingId === block.id ? 'location' : undefined}
                 style={{ paddingInlineStart: headingPadding(block) }}
                 onClick={() => viewport.reveal(block.id)}
               >

@@ -22,7 +22,7 @@ const unavailableImage = '图片尚未加载或已不可用';
 
 function readImageLabel(block: DocumentBlock) {
   const { caption, name } = block.props;
-  if (typeof caption === 'string') {
+  if (typeof caption === 'string' && caption.trim()) {
     return caption;
   }
 

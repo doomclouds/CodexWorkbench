@@ -18,6 +18,7 @@
   --studio-ui-control-radius: 8px;
   --studio-ui-button-background: var(--workbench-surface);
   --studio-ui-button-foreground: var(--workbench-text);
+  --studio-ui-danger: var(--workbench-danger);
   --studio-ui-focus-ring: var(--workbench-focus);
   position: relative;
   display: flex;
@@ -333,8 +334,8 @@
   background: var(--workbench-border);
 }
 
-.studio-workbench .studio-workbench-danger-text {
-  color: var(--workbench-danger);
+.studio-workbench-menu [data-tone='danger'] {
+  color: var(--studio-ui-danger);
 }
 
 .studio-workbench-create {

@@ -33,6 +33,10 @@ function tableScale(zoom: number) {
   return Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
 }
 
+function frameWidth(saved: number, draft: number, height: number | undefined, resizing: boolean) {
+  return height === undefined || resizing ? draft : saved;
+}
+
 function TableObjectSession(props: TableObjectProps) {
   const {
     value,
@@ -370,7 +374,7 @@ function TableObjectSession(props: TableObjectProps) {
   }
 
   const frameStyle = {
-    width: model.width,
+    width: frameWidth(value.width, model.width, frameHeight, resizing),
     height: frameHeight,
     fontSize,
     '--studio-object-table-outline-stroke': outlineBorder / scale + 'px',

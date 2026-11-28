@@ -177,10 +177,8 @@ function CanvasSession(props: CanvasProps) {
     fitScene: resolveSceneFit,
     props: { ...props, onObjectActivate: activateObject },
   });
-  const drafts = useCanvasDrafts(props.pendingEdits, canEdit ? frame.draft : undefined, {
-    index,
-    pending,
-  });
+  const localDraft = input.draftForFrame(frame);
+  const drafts = useCanvasDrafts(props.pendingEdits, localDraft, { index, pending });
   const selecting = input.toolKind === 'select';
   const controls = selectionControls(
     selecting && !input.temporaryPan ? selected : [],
@@ -358,6 +356,7 @@ function CanvasSession(props: CanvasProps) {
       className="studio-canvas"
       data-canvas-root={props.viewId}
       data-tool={input.toolKind}
+      data-canvas-annotating={props.annotationActive}
       data-canvas-presentation={presentation ? '' : undefined}
       onPointerDownCapture={input.handlePointerDownCapture}
       onPointerDown={input.handlePointerDown}
@@ -411,6 +410,7 @@ function CanvasSession(props: CanvasProps) {
           nativeSourceLabel={props.nativeSourceLabel}
           nativeSourceRequest={props.nativeSourceRequest}
           annotationActive={props.annotationActive}
+          hasContentEditPermission={props.hasContentEditPermission}
           onAnnotateContent={props.onAnnotateContent}
           contentTracking={props.contentTracking}
           isLocked={(id) => isObjectLocked(index, id)}

@@ -187,9 +187,10 @@ test('keeps authoritative conflict details until a complete scene reaches that r
   }
 });
 
-test.each(['document', 'table'] as const)(
+test.each(['document', 'table', 'shape', 'note'] as const)(
   'keeps confirmed %s content during the room refresh',
   async (kind) => {
+    const bodyKind = kind === 'shape' || kind === 'note' ? 'text' : kind;
     const unedited = { ...documentObject('原版正文', 0n, 0n), kind };
     const edited = { ...documentObject('远端改动', 0n, 1n), kind };
     let latest = unedited;
@@ -209,7 +210,7 @@ test.each(['document', 'table'] as const)(
               payload: {
                 id: objectId,
                 version: latest.payloadVersion,
-                body: { kind, value: { title: latest.label } },
+                body: { kind: bodyKind, value: { title: latest.label } },
               },
             },
           ];
@@ -237,7 +238,10 @@ test.each(['document', 'table'] as const)(
         kind: 'ready',
         scene: boardScene(1n, edited),
         payloads: new Map([
-          [objectId, { id: objectId, version: 0n, body: { kind, value: { title: '原版正文' } } }],
+          [
+            objectId,
+            { id: objectId, version: 0n, body: { kind: bodyKind, value: { title: '原版正文' } } },
+          ],
         ]),
       });
       const reflected = await nextSnapshot(session);

@@ -113,6 +113,7 @@ export function TableControls({
           <>
             <Button
               label="删除当前行"
+              tone="danger"
               iconOnly
               icon="删除行"
               disabled={saving || cannotRemove('row', model)}
@@ -120,6 +121,7 @@ export function TableControls({
             />
             <Button
               label="删除当前列"
+              tone="danger"
               iconOnly
               icon="删除列"
               disabled={saving || cannotRemove('column', model)}
@@ -153,9 +155,10 @@ export function TableCellMenu({
   onClose,
   onReturnFocus,
 }: TableMenuProps) {
-  const items = menuActions.map((action) => ({
+  const items = menuActions.map<ActionMenuItem>((action) => ({
     id: action.id,
     label: action.label,
+    tone: action.operation === 'remove' ? 'danger' : undefined,
     disabled: saving || (action.operation === 'remove' && cannotRemove(action.axis, model)),
   }));
 

@@ -1,4 +1,10 @@
-import type { DocumentBlock, DocumentDraft, DocumentPaper } from './contracts.js';
+import type {
+  DocumentBlock,
+  DocumentDraft,
+  DocumentExportFormat,
+  DocumentPaper,
+} from './contracts.js';
+import { documentMarkdown } from './document-markdown.js';
 import {
   blockText,
   documentCellSpan,
@@ -353,27 +359,50 @@ interface ExportDocumentOptions {
   readonly signal: AbortSignal;
 }
 
-export async function exportDocumentFile(
-  format: 'html' | 'json',
+async function documentOutput(
+  format: DocumentExportFormat,
   draft: DocumentDraft,
-  { paper, readAsset, signal }: ExportDocumentOptions,
+  options: ExportDocumentOptions,
 ) {
-  const { title, document } = draft;
+  switch (format) {
+    case 'md':
+      return {
+        mimeType: 'text/markdown;charset=utf-8',
+        text: documentMarkdown(draft, tableMarkup),
+      };
+    case 'html': {
+      const { paper, readAsset, signal } = options;
+      const images = await loadImages(draft, signal, readAsset);
+
+      return { mimeType: 'text/html', text: htmlDocument(draft, paper, images) };
+    }
+    case 'json':
+      return {
+        mimeType: 'application/json',
+        text: JSON.stringify({ title: draft.title, document: draft.document }, null, 2),
+      };
+  }
+}
+
+export async function exportDocumentFile(
+  format: DocumentExportFormat,
+  draft: DocumentDraft,
+  options: ExportDocumentOptions,
+) {
+  const { title } = draft;
+  const { signal } = options;
   const basename =
     title
       .replace(filenameSpecial, '-')
       .replace(/\p{Cc}/gu, '')
       .trim() || '文档';
-  const html = format === 'html';
   signal.throwIfAborted();
-  const output = html
-    ? htmlDocument(draft, paper, await loadImages(draft, signal, readAsset))
-    : JSON.stringify({ title, document }, null, 2);
+  const { mimeType, text } = await documentOutput(format, draft, options);
   signal.throwIfAborted();
 
   return {
     filename: basename + '.' + format,
-    mimeType: html ? 'text/html' : 'application/json',
-    content: new TextEncoder().encode(output),
+    mimeType,
+    content: new TextEncoder().encode(text),
   };
 }

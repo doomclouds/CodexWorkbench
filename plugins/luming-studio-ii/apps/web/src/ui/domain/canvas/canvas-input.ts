@@ -169,6 +169,7 @@ export function useCanvasInput({
     onEditIntent,
     viewId,
   } = props;
+  const canDraw = props.canDraw ?? canEdit;
   const { read, update, draw } = frame;
   const key = typeof tool === 'string' ? tool : 'place:' + tool.requestId;
   const [activation, setActivation] = useState({ key, completed: false });
@@ -184,7 +185,8 @@ export function useCanvasInput({
     setActivation({ key, completed: false });
   }
 
-  const toolAvailable = tool === 'pan' || (canEdit && !activation.completed);
+  const editableTool = tool === 'pen' ? canDraw : canEdit;
+  const toolAvailable = tool === 'pan' || (editableTool && !activation.completed);
   const displayedTool = toolAvailable ? tool : 'select';
   const toolKind = typeof displayedTool === 'string' ? displayedTool : displayedTool.kind;
 
@@ -311,7 +313,7 @@ export function useCanvasInput({
         })
       );
     }
-    if (!canEdit) {
+    if (!(action.kind === 'ink' ? canDraw : canEdit)) {
       return false;
     }
     if (action.kind === 'edit-connection') {
@@ -342,7 +344,7 @@ export function useCanvasInput({
   });
   useLayoutEffect(() => {
     cancelStaleSession();
-  }, [canEdit, index, pending, key, props.pendingResizeObjectId]);
+  }, [canDraw, canEdit, index, pending, key, props.pendingResizeObjectId]);
 
   function transformTargets(
     kind: TransformGesture['kind'],
@@ -681,7 +683,7 @@ export function useCanvasInput({
     }
 
     const intent = next.preview ?? next.draft;
-    if (intent?.kind === 'create') {
+    if (intent?.kind === 'create' && session.action.kind !== 'ink') {
       exitDrawingTool();
     }
     if (intent) {
@@ -719,7 +721,7 @@ export function useCanvasInput({
 
   function handlePointerMove(event: ReactPointerEvent<HTMLDivElement>) {
     if (!ownsEvent(event.target, event.currentTarget)) {
-      props.onWorldPointerChange?.(undefined);
+      handlePointerLeave();
       return;
     }
 
@@ -730,10 +732,7 @@ export function useCanvasInput({
 
     const session = active.current;
     if (!session) {
-      if (currentTool() === 'connector') {
-        hoverPorts(event);
-      }
-
+      hoverTool(event);
       return;
     }
     if (session.pointerId !== event.pointerId) {
@@ -746,6 +745,47 @@ export function useCanvasInput({
     }
 
     sampleGesture(session, event, false);
+  }
+
+  function availablePlacement(tool: CanvasTool) {
+    const blocked = props.annotationActive || props.presentation;
+    if (!blocked && typeof tool === 'object' && registry.get(tool.object.kind)) {
+      return tool;
+    }
+  }
+
+  function hoverTool(event: ReactPointerEvent<HTMLDivElement>) {
+    if (currentTool() === 'connector') {
+      hoverPorts(event);
+      return;
+    }
+
+    const placement = availablePlacement(currentTool());
+    if (placement && !spaceHeld.current && event.pointerType !== 'touch') {
+      const point = relativePoint(event, containerOrigin(event.currentTarget));
+      draw(() => ({
+        viewport: read().viewport,
+        placementHover: { requestId: placement.requestId, point },
+      }));
+    }
+  }
+
+  function draftForFrame({ viewport, draft, placementHover }: CanvasFrame): CanvasFrame['draft'] {
+    if (draft) {
+      return editableTool ? draft : undefined;
+    }
+
+    const placement = availablePlacement(displayedTool);
+    const busy = pointerAction || spaceActive || objectNavigation.panning;
+    if (!placement || placementHover?.requestId !== placement.requestId || busy) {
+      return;
+    }
+
+    return {
+      kind: 'create',
+      interactionId: 'placement-hover',
+      object: placementDraft(placement.object, screenToBoard(placementHover.point, viewport)),
+    };
   }
 
   function hoverPorts(event: ReactPointerEvent<HTMLDivElement>) {
@@ -765,7 +805,8 @@ export function useCanvasInput({
 
   function handlePointerLeave() {
     props.onWorldPointerChange?.(undefined);
-    if (!active.current && currentTool() === 'connector') {
+    const tool = currentTool();
+    if (!active.current && (tool === 'connector' || typeof tool === 'object')) {
       cancel();
     }
   }
@@ -1010,6 +1051,11 @@ export function useCanvasInput({
     return true;
   }
 
+  function spacePanKey(event: ReactKeyboardEvent<HTMLDivElement>) {
+    const space = event.code === 'Space' || event.key === ' ';
+    return space && !isCanvasActivationControl(event.target, event.currentTarget);
+  }
+
   function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
     if (event.defaultPrevented || event.nativeEvent.isComposing || event.key === 'Process') {
       return;
@@ -1022,7 +1068,13 @@ export function useCanvasInput({
 
     const native = canvasNativeId(target, currentTarget);
     if (native) {
-      escapeNativeDocument(event, native);
+      const modified = event.altKey || event.ctrlKey || event.metaKey;
+      if (!props.presentation && !modified && spacePanKey(event)) {
+        event.preventDefault();
+        updateSpace(true);
+      } else {
+        escapeNativeDocument(event, native);
+      }
       return;
     }
 
@@ -1034,10 +1086,7 @@ export function useCanvasInput({
       escapeCanvas(event);
     } else if (event.key === 'Enter' || event.key === 'F2') {
       editSelected(event);
-    } else if (
-      (event.code === 'Space' || event.key === ' ') &&
-      !isCanvasActivationControl(target, currentTarget)
-    ) {
+    } else if (spacePanKey(event)) {
       event.preventDefault();
       updateSpace(true);
     }
@@ -1067,20 +1116,20 @@ export function useCanvasInput({
       return;
     }
 
-    const { viewport } = read();
+    const { viewport, placementHover } = read();
     if (zoom) {
       const point = relativePoint(event, containerOrigin(element));
       const factor = wheelZoomFactor(event.deltaY, event.deltaMode);
       if (factor !== 1) {
         props.onViewportNavigation?.('zoom');
       }
-      update({ viewport: zoomViewport(viewport, point, factor) });
+      update({ viewport: zoomViewport(viewport, point, factor), placementHover });
     } else {
       const delta = wheelDelta(event, size);
       if (delta.x !== 0 || delta.y !== 0) {
         props.onViewportNavigation?.('pan');
       }
-      update({ viewport: panViewport(viewport, { x: -delta.x, y: -delta.y }) });
+      update({ viewport: panViewport(viewport, { x: -delta.x, y: -delta.y }), placementHover });
     }
   });
 
@@ -1128,6 +1177,7 @@ export function useCanvasInput({
 
   return {
     toolKind,
+    draftForFrame,
     pointerActive: pointerAction !== undefined,
     temporaryPan: spaceActive || pointerAction === 'pan' || objectNavigation.panning,
     cancel,

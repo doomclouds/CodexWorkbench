@@ -1,0 +1,21 @@
+[data-document-editor] {
+  container-type: inline-size;
+}
+
+[data-document-editor] .bn-ak-toolbar.bn-formatting-toolbar {
+  box-sizing: border-box;
+  inline-size: max-content;
+  max-inline-size: min(calc(100cqi - 0.5rem), calc(100vw - 1rem));
+  flex-wrap: wrap;
+  gap: 0.125rem;
+  overflow: visible;
+}
+
+[data-document-editor] .bn-formatting-toolbar > .bn-ak-button {
+  flex: 0 0 auto;
+  block-size: 2rem;
+  min-inline-size: 2rem;
+  padding-inline: 0.5rem;
+  gap: 0.25rem;
+  font-size: 0.875rem;
+}
